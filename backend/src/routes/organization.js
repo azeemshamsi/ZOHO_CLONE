@@ -35,6 +35,7 @@ router.put(
         salesOrderPrefix: Joi.string().allow("").max(10),
         creditNotePrefix: Joi.string().allow("").max(10),
         vendorPaymentPrefix: Joi.string().allow("").max(10),
+        journalPrefix: Joi.string().allow("").max(10),
         defaultPaymentTerms: Joi.number().min(0).max(365),
         defaultNotes: Joi.string().allow(""),
         defaultTerms: Joi.string().allow(""),

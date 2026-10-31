@@ -379,6 +379,35 @@ address { font-style: normal; line-height: 1.6; }
 .receipt-amount { background: var(--green); color: #fff; border-radius: 8px; padding: 22px; text-align: center; display: flex; flex-direction: column; gap: 6px; }
 .receipt-amount strong { font-size: 22px; }
 
+/* ---------- Accountant & reports ---------- */
+.tag { display: inline-block; margin-left: 8px; font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: var(--line-2); color: var(--muted); vertical-align: 1px; }
+.row-muted td { color: var(--muted); background: #fafbfd; }
+.row-total td { font-weight: 700; background: #fafbfd; border-top: 1px solid var(--line); }
+.journal-table td:first-child { display: table-cell; }
+.journal-table input.right { text-align: right; }
+.period { display: flex; align-items: center; gap: 8px; }
+.period input[type="date"] { width: 150px; }
+.report-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+.report-group { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 8px; }
+.report-links { list-style: none; margin: 0; padding: 0; }
+.report-links li { display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-bottom: 1px solid var(--line-2); }
+.report-links li:last-child { border-bottom: 0; }
+.report-links a { font-weight: 600; }
+.report-paper { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 32px; max-width: 1100px; margin: 0 auto; overflow-x: auto; }
+.report-head { text-align: center; margin-bottom: 22px; }
+.report-head h2 { font-size: 20px; margin: 4px 0; }
+.report-sub { font-size: 14px; margin: 26px 0 8px; }
+.report-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.report-table th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); padding: 9px 10px; border-bottom: 2px solid var(--line); white-space: nowrap; }
+.report-table th.num { text-align: right; }
+.report-table td { padding: 8px 10px; border-bottom: 1px solid var(--line-2); }
+.report-table .indent { padding-left: 28px; }
+.report-table .row-head td { font-weight: 700; font-size: 15px; padding-top: 18px; color: var(--brand-600); }
+.report-table .row-section td { font-weight: 600; padding-top: 14px; }
+.report-table .row-subtotal td { font-weight: 600; border-top: 1px solid var(--line); }
+.report-table .row-total td { font-weight: 700; background: #f5f6fa; }
+.report-table .row-grand td { font-weight: 700; font-size: 15px; background: var(--brand-50); border-top: 2px solid var(--brand-100); }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 1100px) {
   .recv-grid { grid-template-columns: repeat(3, 1fr); }
@@ -411,6 +440,7 @@ address { font-style: normal; line-height: 1.6; }
   @page { margin: 12mm; }
   body { background: #fff; }
   .sidebar, .topbar, .page-header, .no-print, .toaster, .tabs { display: none !important; }
+  .report-paper { border: 0; box-shadow: none; padding: 0; max-width: none; }
   .content { padding: 0; max-width: none; }
   .invoice-doc { box-shadow: none; border: 0; padding: 0; max-width: none; }
   .doc-items th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

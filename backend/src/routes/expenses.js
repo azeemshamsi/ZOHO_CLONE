@@ -1,11 +1,16 @@
 const router = require("express").Router();
 const Joi = require("joi");
 const Expense = require("../models/Expense");
-const { EXPENSE_CATEGORIES } = require("../models/Expense");
 const Vendor = require("../models/Vendor");
 const Organization = require("../models/Organization");
 const { ah, validate, HttpError, round2 } = require("../utils/http");
 const { escapeRx } = require("../utils/salesDoc");
+const { chartOfAccounts, expCode } = require("../utils/ledger");
+
+// Expense-type accounts (built-in categories + ones the user created).
+async function expenseAccounts(org) {
+  return (await chartOfAccounts(org)).filter((a) => a.type === "expense" && a.active !== false && a.code !== "adjustments");
+}
 
 const schema = Joi.object({
   date: Joi.date().required().label("Date"),
@@ -34,8 +39,10 @@ async function build(req, data) {
   const base = data.taxInclusive ? round2(data.amount / (1 + rate / 100)) : round2(data.amount);
   const tax = data.taxInclusive ? round2(data.amount - base) : round2((base * rate) / 100);
   const { taxInclusive, ...rest } = data;
+  const acc = (await expenseAccounts(req.org)).find((a) => a.name === data.category);
   return {
     ...rest,
+    account: acc ? acc.code : expCode("Other Expenses"),
     vendor: vendor ? vendor._id : undefined,
     vendorName: vendor ? vendor.displayName : "",
     placeOfSupply,
@@ -48,7 +55,10 @@ async function build(req, data) {
   };
 }
 
-router.get("/categories", (req, res) => res.send(EXPENSE_CATEGORIES));
+router.get(
+  "/categories",
+  ah(async (req, res) => res.send((await expenseAccounts(req.org)).map((a) => a.name)))
+);
 
 router.get(
   "/",

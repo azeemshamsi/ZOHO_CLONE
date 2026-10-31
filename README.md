@@ -21,13 +21,16 @@ Built with MongoDB, Express, React (Vite) and Node.js. One Node server runs the 
 | **Payments Made** | Pay one or many bills, advance to vendor kept as unused amount, printable voucher |
 | **Expenses** | Expense accounts (rent, courier, ads, fuel…), GST inclusive or exclusive, paid through cash/UPI/bank/card, optional vendor |
 | **Payments Received** | Cash, UPI, bank, cheque, card; apply to one or many invoices (or auto-apply oldest first); excess kept as customer credit; printable receipt; deleting a payment re-opens the invoices |
+| **Chart of Accounts** | Built-in accounts (cash, bank, receivables, payables, input/output CGST-SGST-IGST, sales, COGS, expense accounts, equity) plus your own; balances and every transaction with a running balance |
+| **Manual Journals** | Multi-line debit/credit entries that must balance — capital, drawings, opening balances, depreciation, corrections |
+| **Reports** | Profit and Loss, Balance Sheet, Trial Balance, Receivables and Payables Ageing, Sales by Customer, Sales by Item, Expenses by Category, GSTR-1 Summary (B2B, B2CL, B2CS, CDNR, CDNUR, HSN), GSTR-3B Summary (outward tax, ITC, net payable). Period presets, print/PDF and CSV export |
 | **Settings** | Organization name, GSTIN, state, address, contact details, number prefixes, default terms and notes |
 
 ## Roadmap
 
 - **Phase 2 – Sales:** ✅ Quotes, Sales Orders, Credit Notes. Still to come: Delivery Challans, recurring invoices, emailing invoices to customers
 - **Phase 3 – Purchases:** ✅ Vendors, Bills, Expenses, Payments Made. Still to come: Purchase Orders, Vendor Credits
-- **Phase 4 – Accountant & Reports:** Chart of accounts, manual journals, banking, P&L, Balance Sheet, GSTR-1/GSTR-3B summaries, aging reports
+- **Phase 4 – Accountant & Reports:** ✅ Chart of accounts, manual journals, P&L, Balance Sheet, Trial Balance, ageing, sales and expense reports, GSTR-1/GSTR-3B summaries. Still to come: Banking (bank statement import and reconciliation)
 - **Later:** Inventory tracking, multiple users & roles, Shopify sync
 
 These modules already appear in the sidebar marked **Soon**.
@@ -89,6 +92,10 @@ frontend/  React app built with Vite
 render.yaml  Render deployment blueprint
 Dockerfile   Container build for any other host
 ```
+
+## How the books work
+
+Every invoice, payment, credit note, bill, payment made, expense and manual journal is turned into balanced double-entry postings when a report is opened (`backend/src/utils/ledger.js`). Nothing is stored twice, so reports always match the documents. Drafts and void documents never post.
 
 ## Tests
 

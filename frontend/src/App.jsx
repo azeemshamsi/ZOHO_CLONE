@@ -15,6 +15,9 @@ import { VendorList, VendorForm, VendorDetail } from "./pages/Vendors";
 import { BillList, BillForm, BillView } from "./pages/Bills";
 import { VendorPaymentList, VendorPaymentForm, VendorPaymentView } from "./pages/VendorPayments";
 import { ExpenseList, ExpenseForm } from "./pages/Expenses";
+import { AccountList, AccountDetail } from "./pages/Accounts";
+import { JournalList, JournalForm, JournalView } from "./pages/Journals";
+import { ReportsHome, ReportPage } from "./pages/Reports";
 import Settings from "./pages/Settings";
 import ComingSoon from "./pages/ComingSoon";
 
@@ -30,7 +33,7 @@ function PublicOnly({ children }) {
   return user ? <Navigate to="/" replace /> : children;
 }
 
-const SOON = ["/purchase-orders", "/vendor-credits", "/banking", "/journals", "/chart-of-accounts", "/reports"];
+const SOON = ["/purchase-orders", "/vendor-credits", "/banking"];
 
 export default function App() {
   return (
@@ -81,6 +84,14 @@ export default function App() {
           <Route path="expenses" element={<ExpenseList />} />
           <Route path="expenses/new" element={<ExpenseForm />} />
           <Route path="expenses/:id/edit" element={<ExpenseForm />} />
+          <Route path="chart-of-accounts" element={<AccountList />} />
+          <Route path="chart-of-accounts/:code" element={<AccountDetail />} />
+          <Route path="journals" element={<JournalList />} />
+          <Route path="journals/new" element={<JournalForm />} />
+          <Route path="journals/:id" element={<JournalView />} />
+          <Route path="journals/:id/edit" element={<JournalForm />} />
+          <Route path="reports" element={<ReportsHome />} />
+          <Route path="reports/:key" element={<ReportPage />} />
           <Route path="payments" element={<PaymentList />} />
           <Route path="payments/new" element={<PaymentForm />} />
           <Route path="payments/:id" element={<PaymentView />} />

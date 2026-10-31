@@ -36,11 +36,11 @@ const NAV = [
     label: "Accountant",
     icon: "book",
     children: [
-      { to: "/journals", label: "Manual Journals", soon: true },
-      { to: "/chart-of-accounts", label: "Chart of Accounts", soon: true },
+      { to: "/journals", label: "Manual Journals" },
+      { to: "/chart-of-accounts", label: "Chart of Accounts" },
     ],
   },
-  { to: "/reports", label: "Reports", icon: "chart", soon: true },
+  { to: "/reports", label: "Reports", icon: "chart" },
 ];
 
 function Soon() {

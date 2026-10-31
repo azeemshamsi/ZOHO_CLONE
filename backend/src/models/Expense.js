@@ -24,7 +24,8 @@ const expenseSchema = new mongoose.Schema(
   {
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true },
     date: { type: Date, required: true },
-    category: { type: String, required: true },
+    category: { type: String, required: true }, // account name shown to the user
+    account: { type: String, default: "" }, // account code it posts to
     amount: { type: Number, required: true }, // before GST
     taxRate: { type: Number, default: 0 },
     placeOfSupply: { type: String, default: "" }, // where the supply came from
