@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
-import { money, date } from "../lib/format";
+import { money, date, isoDate } from "../lib/format";
 import { parseBankDate, parseAmount, guessColumns, findHeaderRow } from "../lib/csv";
 import { readStatementFile, ACCEPT } from "../lib/statement";
 import { PageHeader, Spinner, Empty, Field, toast, Modal, Status, Confirm } from "../components/ui";
@@ -96,10 +96,17 @@ export function BankingHome() {
                 <span className="muted small">Balance in MGI</span>
                 <strong className={a.balance < 0 ? "text-overdue" : ""}>{money(a.balance)}</strong>
               </div>
-              <div>
-                <span className="muted small">Statement lines</span>
-                <strong>{a.statement.lines}</strong>
-              </div>
+              {a.statement.lastBalance !== null ? (
+                <div>
+                  <span className="muted small">Bank balance · {date(a.statement.lastBalanceDate)}</span>
+                  <strong>{money(a.statement.lastBalance)}</strong>
+                </div>
+              ) : (
+                <div>
+                  <span className="muted small">Statement lines</span>
+                  <strong>{a.statement.lines}</strong>
+                </div>
+              )}
             </div>
             {a.statement.unmatched > 0 ? (
               <span className="pill pill-amber">{a.statement.unmatched} to match or categorise</span>
@@ -189,12 +196,14 @@ function ImportModal({ open, account, onClose, onDone }) {
         deposit = Math.abs(parseAmount(r[map.deposit]));
         withdrawal = Math.abs(parseAmount(r[map.withdrawal]));
       }
+      const balRaw = map.balance >= 0 ? String(r[map.balance] ?? "").trim() : "";
       return {
         date: dateStr,
         description: map.description >= 0 ? r[map.description] || "" : "",
         reference: map.reference >= 0 ? r[map.reference] || "" : "",
         deposit,
         withdrawal,
+        balance: balRaw && balRaw !== "-" ? parseAmount(balRaw) : null,
       };
     });
   }, [rows, map, headerIdx, useAmount]);
@@ -317,6 +326,7 @@ function ImportModal({ open, account, onClose, onDone }) {
                   <ColSelect k="withdrawal" label="Withdrawals / Debit column" optional />
                 </>
               )}
+              <ColSelect k="balance" label="Balance column" optional />
             </div>
             <table className="table">
               <thead>
@@ -325,6 +335,7 @@ function ImportModal({ open, account, onClose, onDone }) {
                   <th>Description</th>
                   <th className="num">Deposit</th>
                   <th className="num">Withdrawal</th>
+                  <th className="num">Balance</th>
                 </tr>
               </thead>
               <tbody>
@@ -334,6 +345,7 @@ function ImportModal({ open, account, onClose, onDone }) {
                     <td className="clamp">{r.description}</td>
                     <td className="num">{r.deposit ? money(r.deposit) : ""}</td>
                     <td className="num">{r.withdrawal ? money(r.withdrawal) : ""}</td>
+                    <td className="num muted">{r.balance !== null ? money(r.balance) : ""}</td>
                   </tr>
                 ))}
               </tbody>
@@ -474,6 +486,232 @@ function MatchModal({ line, accounts, bankCode, onClose, onDone }) {
   );
 }
 
+/* ===================== Reconciliation ===================== */
+function BrsSection({ title, items, renderLabel }) {
+  if (!items.length) return null;
+  const total = items.reduce((t, i) => t + i.show, 0);
+  return (
+    <>
+      <tr className="row-section">
+        <td colSpan={2}>{title}</td>
+      </tr>
+      {items.map((it, i) => (
+        <tr key={it._id || `${it.type}-${it.id}-${i}`}>
+          <td className="indent">{renderLabel(it)}</td>
+          <td className="num">{money(it.show)}</td>
+        </tr>
+      ))}
+      <tr className="row-subtotal">
+        <td>Total</td>
+        <td className="num">{money(total)}</td>
+      </tr>
+    </>
+  );
+}
+
+function StatementItem({ l, openLine }) {
+  return (
+    <>
+      {date(l.date)} · {l.description}
+      {l.excluded ? (
+        <span className="muted"> (excluded)</span>
+      ) : (
+        <>
+          {" "}
+          <button className="link-btn" onClick={() => openLine({ ...l, deposit: l.amount > 0 ? l.amount : 0, withdrawal: l.amount < 0 ? -l.amount : 0 })}>
+            Match / Categorise
+          </button>
+        </>
+      )}
+    </>
+  );
+}
+function Reconcile({ code, acc, onChanged, openLine, version }) {
+  const [asOf, setAsOf] = useState(() => (acc.statement.lastDate ? isoDate(acc.statement.lastDate) : isoDate()));
+  const [override, setOverride] = useState("");
+  const [r, setR] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const enc = encodeURIComponent(code);
+
+  const load = () => {
+    setR(null);
+    api.get(`/banking/${enc}/reconcile`, { params: { asOf, statementBalance: override === "" ? undefined : override } }).then((x) => setR(x.data));
+    api.get(`/banking/${enc}/reconciliations`).then((x) => setHistory(x.data));
+  };
+  useEffect(() => {
+    load();
+  }, [asOf, override, code, version]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/banking/${enc}/reconciliations`, { asOf, statementBalance: r.statementBalance, notes });
+      toast(r.reconciled ? "Reconciliation saved" : "Saved with a difference — check it later");
+      setNotes("");
+      load();
+      onChanged();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="stack">
+      <div className="card form-grid recon-controls">
+        <div className="row-3">
+          <Field label="Reconcile as of" hint="Usually the last date on your bank statement">
+            <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+          </Field>
+          <Field
+            label="Balance as per bank"
+            hint={r?.autoBalance !== null && r?.autoBalance !== undefined ? `From the imported file: ${money(r.autoBalance)}` : "Enter the closing balance shown on your statement"}
+          >
+            <input
+              type="number"
+              step="0.01"
+              placeholder={r?.autoBalance !== null && r?.autoBalance !== undefined ? String(r.autoBalance) : "0.00"}
+              value={override}
+              onChange={(e) => setOverride(e.target.value)}
+            />
+          </Field>
+        </div>
+      </div>
+
+      {!r ? (
+        <Spinner />
+      ) : (
+        <>
+          {r.balanceBreaks.length > 0 && (
+            <div className="alert alert-error">
+              The bank's running balance breaks on {r.balanceBreaks.map((b) => date(b.date)).join(", ")} — a transaction is probably missing from the imported
+              statement just before {r.balanceBreaks.length > 1 ? "those dates" : "that date"}.
+            </div>
+          )}
+          {r.openingDifference ? (
+            <div className="alert alert-error">
+              Opening balance mismatch: the statement starts at {money(r.statementOpening)} on {date(r.statementStart)}, but MGI shows {money(r.bookOpening)} the
+              day before. Record the opening balance with a manual journal (against Opening Balance Equity) or check earlier entries.
+            </div>
+          ) : null}
+
+          <div className="report-paper">
+            <div className="report-head">
+              <div className="muted">{acc.name}</div>
+              <h2>Bank Reconciliation Statement</h2>
+              <div className="muted small">As of {date(asOf)}</div>
+            </div>
+            <table className="report-table">
+              <tbody>
+                <tr className="row-total">
+                  <td>Balance as per MGI books</td>
+                  <td className="num">{money(r.bookBalance)}</td>
+                </tr>
+                <BrsSection
+                  title="Add: cheques issued / payments recorded in MGI but not yet cleared by the bank"
+                  items={r.uncleared.filter((u) => u.amount < 0).map((u) => ({ ...u, show: -u.amount }))}
+                  renderLabel={(u) => (
+                    <>
+                      {date(u.date)} · <Link to={docLink(u.type, u.id)}>{u.type} {u.number}</Link> {u.party && <span className="muted">· {u.party}</span>}
+                    </>
+                  )}
+                />
+                <BrsSection
+                  title="Less: deposits recorded in MGI but not yet credited by the bank"
+                  items={r.uncleared.filter((u) => u.amount > 0).map((u) => ({ ...u, show: u.amount }))}
+                  renderLabel={(u) => (
+                    <>
+                      {date(u.date)} · <Link to={docLink(u.type, u.id)}>{u.type} {u.number}</Link> {u.party && <span className="muted">· {u.party}</span>}
+                    </>
+                  )}
+                />
+                <BrsSection
+                  title="Add: money received in the bank but not yet recorded in MGI"
+                  items={[...r.notInBooks, ...r.excluded.map((x) => ({ ...x, excluded: true }))].filter((l) => l.amount > 0).map((l) => ({ ...l, show: l.amount }))}
+                  renderLabel={(l) => <StatementItem l={l} openLine={openLine} />}
+                />
+                <BrsSection
+                  title="Less: money paid from the bank but not yet recorded in MGI"
+                  items={[...r.notInBooks, ...r.excluded.map((x) => ({ ...x, excluded: true }))].filter((l) => l.amount < 0).map((l) => ({ ...l, show: -l.amount }))}
+                  renderLabel={(l) => <StatementItem l={l} openLine={openLine} />}
+                />
+                <tr className="row-total">
+                  <td>Adjusted balance (what the bank should show)</td>
+                  <td className="num">{money(r.adjusted)}</td>
+                </tr>
+                <tr className="row-total">
+                  <td>Balance as per bank statement</td>
+                  <td className="num">{r.statementBalance === null ? <span className="muted">enter above</span> : money(r.statementBalance)}</td>
+                </tr>
+                <tr className="row-grand">
+                  <td>{r.reconciled ? "Reconciled — no difference" : "Unexplained difference"}</td>
+                  <td className={`num ${r.reconciled ? "text-paid" : "text-overdue"}`}>{r.difference === null ? "—" : money(r.difference)}</td>
+                </tr>
+              </tbody>
+            </table>
+            {r.statementBalance !== null && (
+              <div className="recon-save no-print">
+                <input placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} />
+                <button className="btn" onClick={() => window.print()}>
+                  <Icon name="print" size={16} /> Print / PDF
+                </button>
+                <button className="btn btn-primary" disabled={busy} onClick={save}>
+                  {r.reconciled ? "Save Reconciliation" : "Save with Difference"}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {history.length > 0 && (
+            <div className="card flush no-print">
+              <h3 className="card-title">Past reconciliations</h3>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>As of</th>
+                    <th className="num">Bank</th>
+                    <th className="num">Books</th>
+                    <th className="num">Difference</th>
+                    <th>Notes</th>
+                    <th>Saved</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((h) => (
+                    <tr key={h._id}>
+                      <td>{date(h.asOf)}</td>
+                      <td className="num">{money(h.statementBalance)}</td>
+                      <td className="num">{money(h.bookBalance)}</td>
+                      <td className={`num ${h.difference ? "text-overdue" : "text-paid"}`}>{h.difference ? money(h.difference) : "✓ 0.00"}</td>
+                      <td>{h.notes}</td>
+                      <td className="muted small">{date(h.createdAt)}</td>
+                      <td>
+                        <button
+                          className="link-btn"
+                          onClick={async () => {
+                            await api.delete(`/banking/reconciliations/${h._id}`);
+                            load();
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ===================== Account statement page ===================== */
 const STATUS_TABS = [
   ["unmatched", "To Do"],
@@ -481,6 +719,7 @@ const STATUS_TABS = [
   ["categorized", "Categorised"],
   ["excluded", "Excluded"],
   ["all", "All"],
+  ["reconcile", "Reconcile"],
 ];
 
 export function BankAccountPage() {
@@ -494,10 +733,13 @@ export function BankAccountPage() {
   const [confirm, setConfirm] = useState(null);
 
   const loadAcc = () => api.get("/banking/accounts").then((r) => setAcc(r.data.find((a) => a.code === code) || null));
-  const loadLines = () => api.get(`/banking/${encodeURIComponent(code)}/lines`, { params: { status: tab } }).then((r) => setLines(r.data));
+  const loadLines = () =>
+    tab === "reconcile" ? Promise.resolve() : api.get(`/banking/${encodeURIComponent(code)}/lines`, { params: { status: tab } }).then((r) => setLines(r.data));
+  const [version, setVersion] = useState(0);
   const reload = () => {
     loadAcc();
     loadLines();
+    setVersion((v) => v + 1);
   };
   useEffect(() => {
     loadAcc();
@@ -538,8 +780,10 @@ export function BankAccountPage() {
           <strong className="big">{money(acc.balance)}</strong>
         </div>
         <div>
-          <span className="muted small">Net of imported statement lines</span>
-          <strong className="big">{money(acc.statement.net)}</strong>
+          <span className="muted small">
+            {acc.statement.lastBalance !== null ? `Balance as per bank · ${date(acc.statement.lastBalanceDate)}` : "Net of imported statement lines"}
+          </span>
+          <strong className="big">{money(acc.statement.lastBalance !== null ? acc.statement.lastBalance : acc.statement.net)}</strong>
         </div>
         <div>
           <span className="muted small">Still to match or categorise</span>
@@ -555,7 +799,9 @@ export function BankAccountPage() {
         ))}
       </div>
 
-      {!lines ? (
+      {tab === "reconcile" ? (
+        <Reconcile code={code} acc={acc} onChanged={() => loadAcc()} openLine={setMatchLine} version={version} />
+      ) : !lines ? (
         <Spinner />
       ) : !lines.length ? (
         <Empty
@@ -576,6 +822,12 @@ export function BankAccountPage() {
         />
       ) : (
         <div className="card flush">
+          {lines.some((l) => l.balanceMismatch) && (
+            <div className="alert alert-error" style={{ margin: 12 }}>
+              {lines.filter((l) => l.balanceMismatch).length} line(s) marked ⚠ don't follow from the previous balance. A transaction is probably missing from
+              the imported file between those dates — import that period again.
+            </div>
+          )}
           <table className="table">
             <thead>
               <tr>
@@ -584,6 +836,7 @@ export function BankAccountPage() {
                 <th>Reference</th>
                 <th className="num">Deposits</th>
                 <th className="num">Withdrawals</th>
+                <th className="num">Balance</th>
                 <th>Status</th>
                 <th />
               </tr>
@@ -596,6 +849,16 @@ export function BankAccountPage() {
                   <td className="mono small">{l.reference}</td>
                   <td className="num text-paid">{l.deposit ? money(l.deposit) : ""}</td>
                   <td className="num">{l.withdrawal ? money(l.withdrawal) : ""}</td>
+                  <td className={`num ${l.balanceMismatch ? "text-overdue" : "muted"}`} title={l.balanceMismatch ? `Expected ${money(l.expectedBalance)} from the previous line` : ""}>
+                    {l.balance !== null && l.balance !== undefined ? (
+                      <>
+                        {l.balanceMismatch && "⚠ "}
+                        {money(l.balance)}
+                      </>
+                    ) : (
+                      ""
+                    )}
+                  </td>
                   <td>
                     {l.status === "unmatched" ? (
                       <Status value="unmatched" />

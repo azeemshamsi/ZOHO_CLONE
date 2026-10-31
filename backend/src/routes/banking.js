@@ -1,6 +1,7 @@
 const router = require("express").Router();
 const Joi = require("joi");
 const BankStatementLine = require("../models/BankStatementLine");
+const BankReconciliation = require("../models/BankReconciliation");
 const Account = require("../models/Account");
 const Expense = require("../models/Expense");
 const Journal = require("../models/Journal");
@@ -30,24 +31,36 @@ router.get(
     const [accounts, entries, stats] = await Promise.all([
       bankAccounts(req.org),
       buildEntries(req.org),
-      BankStatementLine.find({ organization: req.org }, { account: 1, status: 1, deposit: 1, withdrawal: 1, date: 1 }).lean(),
+      BankStatementLine.find({ organization: req.org }, { account: 1, status: 1, deposit: 1, withdrawal: 1, date: 1, balance: 1, createdAt: 1, seq: 1 }).lean(),
     ]);
     const mv = movements(entries);
     const by = {};
+    stats.sort((a, b) => new Date(a.date) - new Date(b.date) || new Date(a.createdAt) - new Date(b.createdAt) || (a.seq || 0) - (b.seq || 0));
     for (const l of stats) {
       const b = (by[l.account] = by[l.account] || { lines: 0, unmatched: 0, net: 0, lastDate: null });
       b.lines += 1;
       if (l.status === "unmatched") b.unmatched += 1;
       b.net += l.deposit - l.withdrawal;
       if (!b.lastDate || l.date > b.lastDate) b.lastDate = l.date;
+      if (l.balance !== null && l.balance !== undefined) {
+        b.lastBalance = l.balance;
+        b.lastBalanceDate = l.date;
+      }
     }
     res.send(
       accounts.map((a) => ({
         ...a,
         balance: naturalBalance(a, mv[a.code]),
         statement: by[a.code]
-          ? { lines: by[a.code].lines, unmatched: by[a.code].unmatched, net: round2(by[a.code].net), lastDate: by[a.code].lastDate }
-          : { lines: 0, unmatched: 0, net: 0, lastDate: null },
+          ? {
+              lines: by[a.code].lines,
+              unmatched: by[a.code].unmatched,
+              net: round2(by[a.code].net),
+              lastDate: by[a.code].lastDate,
+              lastBalance: by[a.code].lastBalance ?? null,
+              lastBalanceDate: by[a.code].lastBalanceDate ?? null,
+            }
+          : { lines: 0, unmatched: 0, net: 0, lastDate: null, lastBalance: null, lastBalanceDate: null },
       }))
     );
   })
@@ -71,13 +84,35 @@ router.post(
   })
 );
 
+// All lines of an account in statement order (date, then import, then position in the file).
+async function orderedLines(org, code) {
+  const lines = await BankStatementLine.find({ organization: org, account: code }).lean();
+  return lines.sort((a, b) => new Date(a.date) - new Date(b.date) || new Date(a.createdAt) - new Date(b.createdAt) || (a.seq || 0) - (b.seq || 0));
+}
+
+// Check each line's balance against the one before it: balance = previous + deposit − withdrawal.
+function checkRunningBalance(lines) {
+  let prev = null;
+  for (const l of lines) {
+    if (l.balance !== null && l.balance !== undefined) {
+      if (prev !== null) {
+        const expected = round2(prev + l.deposit - l.withdrawal);
+        l.expectedBalance = expected;
+        l.balanceMismatch = Math.abs(expected - l.balance) > 0.005;
+      }
+      prev = l.balance;
+    }
+  }
+  return lines;
+}
+
 router.get(
   "/:code/lines",
   ah(async (req, res) => {
     await findBankAccount(req, req.params.code);
-    const filter = { organization: req.org, account: req.params.code };
-    if (req.query.status && req.query.status !== "all") filter.status = req.query.status;
-    res.send(await BankStatementLine.find(filter).sort({ date: -1, createdAt: -1 }));
+    let lines = checkRunningBalance(await orderedLines(req.org, req.params.code));
+    if (req.query.status && req.query.status !== "all") lines = lines.filter((l) => l.status === req.query.status);
+    res.send(lines);
   })
 );
 
@@ -96,6 +131,7 @@ router.post(
               reference: Joi.string().allow("").max(200),
               deposit: Joi.number().min(0).default(0),
               withdrawal: Joi.number().min(0).default(0),
+              balance: Joi.number().allow(null).default(null),
             })
           )
           .min(1)
@@ -110,7 +146,7 @@ router.post(
     const batch = `b${Date.now()}`;
     const docs = [];
     let skipped = 0;
-    for (const r of rows) {
+    for (const [i, r] of rows.entries()) {
       const deposit = round2(r.deposit);
       const withdrawal = round2(r.withdrawal);
       if (!deposit && !withdrawal) {
@@ -123,10 +159,142 @@ router.post(
         continue;
       }
       seen.add(k);
-      docs.push({ organization: req.org, account: req.params.code, date: r.date, description: r.description || "", reference: r.reference || "", deposit, withdrawal, batch });
+      docs.push({
+        organization: req.org,
+        account: req.params.code,
+        date: r.date,
+        description: r.description || "",
+        reference: r.reference || "",
+        deposit,
+        withdrawal,
+        balance: r.balance === null || r.balance === undefined ? null : round2(r.balance),
+        seq: i,
+        batch,
+      });
     }
     if (docs.length) await BankStatementLine.insertMany(docs);
     res.status(201).send({ imported: docs.length, skipped });
+  })
+);
+
+/**
+ * Bank reconciliation as of a date.
+ *   Balance as per bank = Balance as per books
+ *                         − book entries the bank hasn't processed yet (deposits in transit, uncleared cheques)
+ *                         + statement lines not yet recorded in the books
+ *                         + excluded statement lines
+ * Anything left over is an unexplained difference.
+ */
+async function reconcile(req, code, asOfStr, override) {
+  const acc = await findBankAccount(req, code);
+  const asOf = new Date(`${asOfStr}T23:59:59.999Z`);
+  if (isNaN(asOf)) throw new HttpError(400, "Invalid date");
+  const lines = checkRunningBalance(await orderedLines(req.org, code));
+  const upTo = lines.filter((l) => new Date(l.date) <= asOf);
+  const withBal = upTo.filter((l) => l.balance !== null && l.balance !== undefined);
+  const autoBalance = withBal.length ? withBal[withBal.length - 1].balance : null;
+  const statementBalance = override !== undefined && override !== null && override !== "" ? round2(Number(override)) : autoBalance;
+
+  const start = lines.length ? new Date(lines[0].date) : null;
+  const first = lines[0];
+  const statementOpening =
+    first && first.balance !== null && first.balance !== undefined ? round2(first.balance - first.deposit + first.withdrawal) : null;
+
+  const entries = await buildEntries(req.org, { to: asOf });
+  const bookBalance = naturalBalance(acc, movements(entries)[code]);
+  const bookOpening = start ? naturalBalance(acc, movements(entries, { to: new Date(start.getTime() - 1) })[code]) : null;
+
+  const matchedKeys = new Set(lines.map((l) => l.match && l.match.key).filter(Boolean));
+  const uncleared = [];
+  for (const e of entries) {
+    if (start && new Date(e.date) < start) continue;
+    for (const l of e.lines) {
+      if (l.account !== code) continue;
+      if (matchedKeys.has(entryKey(e, l))) continue;
+      uncleared.push({ date: e.date, type: e.type, id: e.id, number: e.number, party: e.party, amount: round2(l.debit - l.credit) });
+    }
+  }
+  const pick = (l) => ({ _id: l._id, date: l.date, description: l.description, reference: l.reference, amount: round2(l.deposit - l.withdrawal) });
+  const notInBooks = upTo.filter((l) => l.status === "unmatched").map(pick);
+  const excluded = upTo.filter((l) => l.status === "excluded").map(pick);
+  const net = (xs) => round2(xs.reduce((s, x) => s + x.amount, 0));
+  const unclearedNet = net(uncleared);
+  const notInBooksNet = net(notInBooks);
+  const excludedNet = net(excluded);
+  const adjusted = round2(bookBalance - unclearedNet + notInBooksNet + excludedNet);
+  const difference = statementBalance === null ? null : round2(statementBalance - adjusted);
+  return {
+    account: acc,
+    asOf,
+    statementBalance,
+    autoBalance,
+    statementStart: start,
+    statementOpening,
+    bookOpening,
+    openingDifference: statementOpening === null || bookOpening === null ? null : round2(statementOpening - bookOpening),
+    bookBalance,
+    uncleared,
+    unclearedNet,
+    notInBooks,
+    notInBooksNet,
+    excluded,
+    excludedNet,
+    adjusted,
+    difference,
+    reconciled: difference === 0,
+    balanceBreaks: upTo.filter((l) => l.balanceMismatch).map((l) => ({ _id: l._id, date: l.date, description: l.description, balance: l.balance, expected: l.expectedBalance })),
+  };
+}
+
+router.get(
+  "/:code/reconcile",
+  ah(async (req, res) => {
+    const asOf = req.query.asOf || new Date().toISOString().slice(0, 10);
+    res.send(await reconcile(req, req.params.code, asOf, req.query.statementBalance));
+  })
+);
+
+router.get(
+  "/:code/reconciliations",
+  ah(async (req, res) => {
+    await findBankAccount(req, req.params.code);
+    res.send(await BankReconciliation.find({ organization: req.org, account: req.params.code }).sort({ asOf: -1, createdAt: -1 }));
+  })
+);
+
+router.post(
+  "/:code/reconciliations",
+  ah(async (req, res) => {
+    const data = validate(
+      Joi.object({
+        asOf: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required().label("Date"),
+        statementBalance: Joi.number().required().label("Balance as per bank"),
+        notes: Joi.string().allow(""),
+      }),
+      req.body
+    );
+    const r = await reconcile(req, req.params.code, data.asOf, data.statementBalance);
+    const rec = await BankReconciliation.create({
+      organization: req.org,
+      account: req.params.code,
+      asOf: new Date(`${data.asOf}T00:00:00.000Z`),
+      statementBalance: r.statementBalance,
+      bookBalance: r.bookBalance,
+      unclearedInBooks: r.unclearedNet,
+      notInBooks: round2(r.notInBooksNet + r.excludedNet),
+      difference: r.difference,
+      notes: data.notes || "",
+    });
+    res.status(201).send(rec);
+  })
+);
+
+router.delete(
+  "/reconciliations/:id",
+  ah(async (req, res) => {
+    const r = await BankReconciliation.deleteOne({ _id: req.params.id, organization: req.org });
+    if (!r.deletedCount) throw new HttpError(404, "Reconciliation not found");
+    res.send({ message: "Reconciliation deleted" });
   })
 );
 

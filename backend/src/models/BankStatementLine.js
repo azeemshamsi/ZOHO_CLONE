@@ -10,6 +10,8 @@ const bankStatementLineSchema = new mongoose.Schema(
     reference: { type: String, default: "" },
     deposit: { type: Number, default: 0 },
     withdrawal: { type: Number, default: 0 },
+    balance: { type: Number, default: null }, // running balance from the bank file, if it had one
+    seq: { type: Number, default: 0 }, // position in the imported file (keeps same-day order)
     status: { type: String, enum: ["unmatched", "matched", "categorized", "excluded"], default: "unmatched" },
     // The MGI transaction this line was matched to (or created from it).
     match: {

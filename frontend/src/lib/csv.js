@@ -90,6 +90,7 @@ export function guessColumns(header) {
     withdrawal,
     amount,
     drcr,
+    balance: find(/balance|\bbal\b|closing/, /opening/),
   };
 }
 
