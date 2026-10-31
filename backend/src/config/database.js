@@ -1,18 +1,11 @@
 const mongoose = require("mongoose");
+const env = require("./env");
 
-module.exports = () => {
-  const connectionParams = {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  };
-  try {
-    if (!process.env.DB) {
-      throw new Error('DB environment variable is not set');
-    }
-    mongoose.connect(process.env.DB, connectionParams);
-    console.log("Connected to database successfully");
-  } catch (error) {
-    console.log(error);
-    console.log("Could not connect database!");
+module.exports = async function connectDatabase() {
+  if (!env.MONGODB_URI) {
+    throw new Error("MONGODB_URI environment variable is not set");
   }
+  mongoose.set("strictQuery", true);
+  await mongoose.connect(env.MONGODB_URI);
+  console.log("Connected to MongoDB");
 };

@@ -1,37 +1,31 @@
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
-const Joi = require("joi");
-const passwordComplexity = require("joi-password-complexity");
+const env = require("../config/env");
 
-const userSchema = new mongoose.Schema({
-    firstName: { type: String, required: true },
-    email: { type: String, required: true },
+const userSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     password: { type: String, required: true },
-    mobile: { type: String, required: true, match: /^\d{10}$/ },
-    dept: { type: String, required: true },
-    gender: { type: String, required: true },
+    organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true },
+    role: { type: String, enum: ["admin", "staff"], default: "admin" },
     verified: { type: Boolean, default: false },
-});
+  },
+  { timestamps: true }
+);
 
 userSchema.methods.generateAuthToken = function () {
-    const token = jwt.sign({ _id: this._id }, process.env.JWTPRIVATEKEY, {
-        expiresIn: "7d",
-    });
-    return token;
+  return jwt.sign({ _id: this._id }, env.JWT_SECRET, { expiresIn: "7d" });
 };
 
-const User = mongoose.model("user", userSchema);
-
-const validate = (data) => {
-    const schema = Joi.object({
-        firstName: Joi.string().required().label("First Name"),
-        email: Joi.string().email().required().label("Email"),
-        password: passwordComplexity().required().label("Password"),
-        mobile: Joi.string().pattern(/^\d{10}$/).required().label("Mobile Number"),
-        dept: Joi.string().required().label("Department"),
-        gender: Joi.string().required().label("Gender"),
-    });
-    return schema.validate(data);
+userSchema.methods.toPublic = function () {
+  return {
+    _id: this._id,
+    name: this.name,
+    email: this.email,
+    role: this.role,
+    organization: this.organization,
+  };
 };
 
-module.exports = { User, validate };
+module.exports = mongoose.model("User", userSchema);

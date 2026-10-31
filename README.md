@@ -1,119 +1,90 @@
+# MGI — GST-ready accounting
 
-# Zoho Books Clone Project Wiki
+MGI is a web accounting app for Indian businesses, modelled on the feature set of full accounting suites like Zoho Books, with its own name, design and logo.
 
-## Table of Contents
-1. [Project Overview](#project-overview)
-2. [Getting Started](#getting-started)
-3. [Architecture](#architecture)
-4. [Development Workflow](#development-workflow)
-5. [API Documentation](#api-documentation)
-6. [Database Schema](#database-schema)
-7. [Deployment](#deployment)
-8. [Testing](#testing)
-9. [Troubleshooting](#troubleshooting)
-10. [Contributing](#contributing)
+Built with MongoDB, Express, React (Vite) and Node.js. One Node server runs the API and serves the web app.
 
-## Project Overview
-The Zoho Books Clone is a web application that replicates key features of Zoho Books, focusing on sales order management with a 5-stage workflow. It's built using the MERN stack (MongoDB, Express.js, React, Node.js).
+## What's in it today (Phase 1)
 
-### Key Features
-- User authentication and authorization
-- Dashboard with key metrics
-- Sales order management with 5-stage workflow
-- Integration with Zoho Books API for data synchronization
+| Module | Features |
+| --- | --- |
+| **Accounts** | Sign up (creates your organization), sign in, forgot/reset password, optional email verification |
+| **Home** | Total receivables with current/overdue ageing (1–15, 16–30, 31–45, 45+ days), 12-month sales vs receipts chart, financial-year totals, top customers by dues, recent invoices |
+| **Customers** | Business/individual, GST treatment, GSTIN (auto-sets place of supply), billing & shipping address, payment terms, receivables, transaction history |
+| **Items** | Goods/services, HSN/SAC, unit, selling & cost price, GST rate (0–28%) |
+| **Invoices** | Auto numbering, payment terms → due date, line items with discount, **CGST + SGST for intra-state or IGST for inter-state** worked out automatically, shipping & adjustment, draft/sent, unpaid/partially paid/paid/overdue/void, printable tax invoice with amount in words (Print → Save as PDF) |
+| **Payments Received** | Cash, UPI, bank, cheque, card; apply to one or many invoices (or auto-apply oldest first); excess kept as customer credit; printable receipt; deleting a payment re-opens the invoices |
+| **Settings** | Organization name, GSTIN, state, address, contact details, number prefixes, default terms and notes |
 
-## Getting Started
-### Prerequisites
-- Node.js (v14 or later)
-- MongoDB
-- Git
+## Roadmap
 
-### Installation
-1. Clone the repository:
-   ```
-   git clone https://github.com/your-username/zoho-books-clone.git
-   cd zoho-books-clone
-   ```
-2. Install dependencies:
-   ```
-   npm install
-   cd frontend && npm install
-   cd backend && npm install
-   ```
-3. Set up environment variables (see `.env` files in frontend and backend directories)
-4. Start the development servers:
-   ```
-   npm run dev
-   ```
+- **Phase 2 – Sales:** Quotes → Sales Orders → Invoices, Credit Notes, Delivery Challans, recurring invoices, email invoices to customers
+- **Phase 3 – Purchases:** Vendors, Bills, Expenses, Payments Made, Purchase Orders
+- **Phase 4 – Accountant & Reports:** Chart of accounts, manual journals, banking, P&L, Balance Sheet, GSTR-1/GSTR-3B summaries, aging reports
+- **Later:** Inventory tracking, multiple users & roles, Shopify sync
 
-## Architecture
-The application follows a client-server architecture:
-- Frontend: React.js with Redux for state management
-- Backend: Node.js with Express.js
-- Database: MongoDB
-- API: RESTful API
+These modules already appear in the sidebar marked **Soon**.
 
-## Development Workflow
-1. Create a new branch for each feature/bugfix
-2. Write tests for new features
-3. Implement the feature/fix
-4. Run tests and ensure all pass
-5. Create a pull request for code review
-6. Merge to main branch after approval
+## Deploy on Render (free)
 
-## API Documentation
-[\[Link to detailed API documentation\]](https://www.zoho.com/books/api/v3/introduction/#organization-id)
+### 1. Create a free MongoDB database (MongoDB Atlas)
+1. Sign up at <https://www.mongodb.com/cloud/atlas/register> and create a **free M0 cluster** (choose the Mumbai region).
+2. **Database Access** → add a database user with a password.
+3. **Network Access** → *Add IP Address* → **Allow access from anywhere** (`0.0.0.0/0`). Render's free servers don't have fixed IPs.
+4. **Connect** → *Drivers* → copy the connection string. Put your password in it and add the database name `mgi` before the `?`:
+   `mongodb+srv://myuser:mypassword@cluster0.abcde.mongodb.net/mgi?retryWrites=true&w=majority`
 
-### Sample Endpoints
-- POST /api/auth/login
-- GET /api/sales-orders
-- POST /api/sales-orders
-- PUT /api/sales-orders/:id/stage
+### 2. Deploy the app
+1. Sign in at <https://render.com> with GitHub.
+2. **New → Blueprint**, pick this repository. Render reads `render.yaml`.
+3. When asked, paste the **MONGODB_URI** from step 1. Leave the email fields blank for now. `JWT_SECRET` is generated for you.
+4. Click **Apply**. The first build takes 3–5 minutes. Your app will be at `https://mgi-xxxx.onrender.com`.
+5. Open the service → **Environment** → set **APP_URL** to that address (used in password-reset emails) and save.
 
-## Database Schema
-### User
-- id: ObjectId
-- username: String
-- email: String
-- password: String (hashed)
-- role: String
+Every push to `main` redeploys automatically.
 
-### SalesOrder
-- id: ObjectId
-- orderNumber: String
-- customer: String
-- items: Array
-- total: Number
-- stage: Number
-- createdAt: Date
-- updatedAt: Date
+> Free Render services sleep after 15 minutes without visitors, so the first page load after a break takes about 30–50 seconds. The $7/month Starter plan keeps it awake.
 
-## Testing
-- Backend: Jest
-- Frontend: React Testing Library
+### Optional: password-reset emails (Gmail)
+1. Turn on 2-Step Verification for your Google account, then create an **App Password** at <https://myaccount.google.com/apppasswords>.
+2. In Render → Environment, set `SMTP_USER` to your Gmail address and `SMTP_PASS` to the 16-character app password.
+3. To make new users verify their email before logging in, also set `REQUIRE_EMAIL_VERIFICATION=true`.
 
-To run tests:
-```
-npm test
+## Run on your computer
+
+Needs Node.js 20+ and a MongoDB connection string (Atlas works).
+
+```bash
+cp backend/.env.example backend/.env   # then fill in MONGODB_URI
+npm install --prefix backend
+npm install --prefix frontend
+npm run dev:backend    # API on http://localhost:8080
+npm run dev:frontend   # app on http://localhost:5173
 ```
 
-## Troubleshooting
-[Common issues and their solutions]
+Or with Docker: `docker compose up`, then open <http://localhost:8080>.
 
-## Contributing
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a new Pull Request
+## Environment variables
 
-For major changes, please open an issue first to discuss what you would like to change.
+| Name | Required | Purpose |
+| --- | --- | --- |
+| `MONGODB_URI` | Yes | MongoDB connection string |
+| `JWT_SECRET` | Yes (production) | Long random string that signs login sessions |
+| `APP_URL` | Recommended | Public address of the app, used in email links |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | No | Outgoing email for password resets |
+| `REQUIRE_EMAIL_VERIFICATION` | No | `true` to make new users verify their email |
+
+## Project layout
 
 ```
+backend/   Express API (src/routes, src/models), serves frontend/dist in production
+frontend/  React app built with Vite
+render.yaml  Render deployment blueprint
+Dockerfile   Container build for any other host
+```
 
-This wiki provides a solid foundation for your project documentation. You should expand each section with more detailed information as your project progresses. For example:
+## Tests
 
-- In the API Documentation section, you'll want to provide detailed information about each endpoint, including required parameters, response formats, and example requests and responses.
-- The Database Schema section should be expanded to include all fields for each model, along with any relationships between models.
-- The Deployment section should include detailed steps for your specific deployment process, including any necessary configuration steps.
-- The Troubleshooting section should be regularly updated with common issues that team members encounter and their solutions.
+```bash
+npm test   # GST calculation tests
+```
