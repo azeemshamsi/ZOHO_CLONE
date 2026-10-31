@@ -222,7 +222,7 @@ function naturalBalance(acc, mv) {
 }
 
 // Indian financial year (1 April – 31 March) containing date d.
-function fiscalYear(d = new Date()) {
+function fiscalYear(d = require("./time").istToday()) {
   const y = d.getUTCMonth() >= 3 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
   return { from: new Date(Date.UTC(y, 3, 1)), to: new Date(Date.UTC(y + 1, 2, 31, 23, 59, 59, 999)) };
 }
@@ -231,7 +231,7 @@ function fiscalYear(d = new Date()) {
 function parseRange(q, { defaultFy = true } = {}) {
   const fy = fiscalYear();
   const from = q.from ? new Date(`${q.from}T00:00:00.000Z`) : defaultFy ? fy.from : null;
-  const to = q.to ? new Date(`${q.to}T23:59:59.999Z`) : defaultFy ? fy.to : new Date();
+  const to = q.to ? new Date(`${q.to}T23:59:59.999Z`) : defaultFy ? fy.to : require("./time").istEndOfToday();
   if ((from && isNaN(from)) || isNaN(to)) {
     const { HttpError } = require("./http");
     throw new HttpError(400, "Invalid date");

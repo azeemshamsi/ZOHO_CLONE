@@ -113,10 +113,9 @@ async function createInvoiceFrom(req, src, links, orderNumber) {
     Customer.findOne({ _id: src.customer, organization: req.org }),
   ]);
   const terms = customer ? customer.paymentTerms : org.defaultPaymentTerms;
-  const date = new Date();
-  date.setHours(0, 0, 0, 0);
+  const date = require("./time").istToday();
   const dueDate = new Date(date);
-  dueDate.setDate(dueDate.getDate() + Number(terms || 0));
+  dueDate.setUTCDate(dueDate.getUTCDate() + Number(terms || 0));
   const invoice = new Invoice({
     ...copyContent(src),
     ...links,

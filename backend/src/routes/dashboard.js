@@ -19,8 +19,7 @@ router.get(
   "/",
   ah(async (req, res) => {
     const org = req.org;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = require("../utils/time").istToday();
     const fyStart = fiscalYearStart(today);
     const monthsBack = new Date(today.getFullYear(), today.getMonth() - 11, 1);
 

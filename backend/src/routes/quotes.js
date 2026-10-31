@@ -113,8 +113,7 @@ router.post(
     const quote = await findQuote(req);
     if (quote.status === "invoiced") throw new HttpError(400, `Already converted to ${quote.convertedTo?.number || "another document"}`);
     const org = await Organization.findById(req.org);
-    const date = new Date();
-    date.setHours(0, 0, 0, 0);
+    const date = require("../utils/time").istToday();
     const so = await SalesOrder.create({
       ...copyContent(quote),
       number: await nextNumber(req.org, "salesOrder", org.salesOrderPrefix || "SO-"),

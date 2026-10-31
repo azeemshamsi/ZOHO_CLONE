@@ -44,10 +44,7 @@ const salesDocFields = (party = "customer") => ({
   terms: { type: String, default: "" },
 });
 
-const startOfToday = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
+// Today's date in India (see utils/time.js).
+const startOfToday = () => require("../utils/time").istToday();
 
 module.exports = { lineItemSchema, salesDocFields, startOfToday };

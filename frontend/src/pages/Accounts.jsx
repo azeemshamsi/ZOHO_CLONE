@@ -91,7 +91,7 @@ export function AccountList() {
 
   return (
     <>
-      <PageHeader title="Chart of Accounts" subtitle="Balances as of today. Click an account to see its transactions.">
+      <PageHeader title="Chart of Accounts" subtitle="Balances include every recorded transaction. Click an account to see them.">
         <select className="select-inline" value={type} onChange={(e) => setType(e.target.value)}>
           <option value="">All Accounts</option>
           {Object.entries(TYPE_LABEL).map(([k, l]) => (

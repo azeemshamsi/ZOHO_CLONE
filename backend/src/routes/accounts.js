@@ -18,11 +18,11 @@ const schema = Joi.object({
 
 router.get("/types", (req, res) => res.send(Object.keys(ACCOUNT_TYPES)));
 
-// All accounts with their balance as of today (or ?to=YYYY-MM-DD).
+// All accounts with their balance across every recorded transaction (or as of ?to=YYYY-MM-DD).
 router.get(
   "/",
   ah(async (req, res) => {
-    const to = req.query.to ? new Date(`${req.query.to}T23:59:59.999Z`) : new Date();
+    const to = req.query.to ? new Date(`${req.query.to}T23:59:59.999Z`) : undefined;
     const [accounts, entries] = await Promise.all([chartOfAccounts(req.org), buildEntries(req.org, { to })]);
     const mv = movements(entries);
     let list = accounts.map((a) => ({ ...a, balance: naturalBalance(a, mv[a.code]) }));

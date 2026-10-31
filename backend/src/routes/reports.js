@@ -5,6 +5,7 @@ const Bill = require("../models/Bill");
 const Expense = require("../models/Expense");
 const Organization = require("../models/Organization");
 const { ah, round2 } = require("../utils/http");
+const { istToday, istEndOfToday } = require("../utils/time");
 const { chartOfAccounts, buildEntries, movements, naturalBalance, fiscalYear, parseRange } = require("../utils/ledger");
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -44,7 +45,7 @@ router.get(
 router.get(
   "/balance-sheet",
   ah(async (req, res) => {
-    const to = req.query.to ? new Date(`${req.query.to}T23:59:59.999Z`) : new Date();
+    const to = req.query.to ? new Date(`${req.query.to}T23:59:59.999Z`) : istEndOfToday();
     const fy = fiscalYear(to);
     const [accounts, entries] = await Promise.all([chartOfAccounts(req.org), buildEntries(req.org, { to })]);
     const mvAll = movements(entries, { to });
@@ -80,7 +81,7 @@ router.get(
 router.get(
   "/trial-balance",
   ah(async (req, res) => {
-    const to = req.query.to ? new Date(`${req.query.to}T23:59:59.999Z`) : new Date();
+    const to = req.query.to ? new Date(`${req.query.to}T23:59:59.999Z`) : istEndOfToday();
     const [accounts, entries] = await Promise.all([chartOfAccounts(req.org), buildEntries(req.org, { to })]);
     const mv = movements(entries);
     const rows = accounts
@@ -96,8 +97,7 @@ router.get(
 
 // Ageing of what customers owe (AR) or what you owe vendors (AP), as of today.
 function aging(docs, partyKey, nameKey) {
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
+  const today = istToday();
   const buckets = ["current", "d1_15", "d16_30", "d31_45", "d45plus"];
   const map = {};
   for (const d of docs) {
