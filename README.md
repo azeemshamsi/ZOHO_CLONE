@@ -4,7 +4,7 @@ MGI is a web accounting app for Indian businesses, modelled on the feature set o
 
 Built with MongoDB, Express, React (Vite) and Node.js. One Node server runs the API and serves the web app.
 
-## What's in it today (Phase 1)
+## What's in it today
 
 | Module | Features |
 | --- | --- |
@@ -13,12 +13,15 @@ Built with MongoDB, Express, React (Vite) and Node.js. One Node server runs the 
 | **Customers** | Business/individual, GST treatment, GSTIN (auto-sets place of supply), billing & shipping address, payment terms, receivables, transaction history |
 | **Items** | Goods/services, HSN/SAC, unit, selling & cost price, GST rate (0–28%) |
 | **Invoices** | Auto numbering, payment terms → due date, line items with discount, **CGST + SGST for intra-state or IGST for inter-state** worked out automatically, shipping & adjustment, draft/sent, unpaid/partially paid/paid/overdue/void, printable tax invoice with amount in words (Print → Save as PDF) |
+| **Quotes** | Draft → sent → accepted/declined, expiry date (shows Expired), one-click convert to Sales Order or Invoice |
+| **Sales Orders** | Draft → confirmed → invoiced, expected shipment date, cancel/reopen, one-click convert to Invoice |
+| **Credit Notes** | From scratch or from an invoice, GST reasons, apply credit to one or many invoices, refund, remove an application, void |
 | **Payments Received** | Cash, UPI, bank, cheque, card; apply to one or many invoices (or auto-apply oldest first); excess kept as customer credit; printable receipt; deleting a payment re-opens the invoices |
 | **Settings** | Organization name, GSTIN, state, address, contact details, number prefixes, default terms and notes |
 
 ## Roadmap
 
-- **Phase 2 – Sales:** Quotes → Sales Orders → Invoices, Credit Notes, Delivery Challans, recurring invoices, email invoices to customers
+- **Phase 2 – Sales:** ✅ Quotes, Sales Orders, Credit Notes. Still to come: Delivery Challans, recurring invoices, emailing invoices to customers
 - **Phase 3 – Purchases:** Vendors, Bills, Expenses, Payments Made, Purchase Orders
 - **Phase 4 – Accountant & Reports:** Chart of accounts, manual journals, banking, P&L, Balance Sheet, GSTR-1/GSTR-3B summaries, aging reports
 - **Later:** Inventory tracking, multiple users & roles, Shopify sync

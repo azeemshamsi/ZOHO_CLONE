@@ -22,7 +22,7 @@ export default function ComingSoon() {
     <Empty
       icon="chart"
       title={`${name} is coming soon`}
-      text="It's part of the next phases of MGI. Invoices, customers, items and payments are ready to use today."
+      text="It's part of the next phases of MGI. Sales — quotes, sales orders, invoices, payments and credit notes — is ready to use today."
       action={
         <Link to="/invoices" className="btn btn-primary">
           Go to Invoices

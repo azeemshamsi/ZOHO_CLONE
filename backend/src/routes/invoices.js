@@ -1,80 +1,28 @@
 const router = require("express").Router();
 const Joi = require("joi");
 const Invoice = require("../models/Invoice");
-const Customer = require("../models/Customer");
 const Organization = require("../models/Organization");
 const Payment = require("../models/Payment");
-const { nextNumber } = require("../models/Counter");
-const { computeTotals } = require("../utils/gst");
-const { ah, validate, HttpError, round2 } = require("../utils/http");
-
-const lineItem = Joi.object({
-  item: Joi.string().allow(null, ""),
-  name: Joi.string().trim().min(1).required().label("Item name"),
-  description: Joi.string().allow(""),
-  hsnSac: Joi.string().allow(""),
-  unit: Joi.string().allow(""),
-  quantity: Joi.number().greater(0).required().label("Quantity"),
-  rate: Joi.number().min(0).required().label("Rate"),
-  discount: Joi.number().min(0).max(100),
-  taxRate: Joi.number().min(0).max(100),
-});
+const CreditNote = require("../models/CreditNote");
+const { ah, validate, HttpError } = require("../utils/http");
+const { baseDocJoi, prepareDoc, peekNumber, settleInvoice, escapeRx, nextNumber } = require("../utils/salesDoc");
 
 const schema = Joi.object({
-  customer: Joi.string().required().label("Customer"),
+  ...baseDocJoi,
+  date: Joi.date().required().label("Invoice date"),
   invoiceNumber: Joi.string().trim().allow(""),
   orderNumber: Joi.string().allow(""),
-  date: Joi.date().required().label("Invoice date"),
   paymentTerms: Joi.number().min(0).max(365),
   dueDate: Joi.date().required().label("Due date"),
-  placeOfSupply: Joi.string().allow(""),
-  lineItems: Joi.array().items(lineItem).min(1).required().label("Items"),
-  shippingCharge: Joi.number().min(0),
-  adjustment: Joi.number(),
-  customerNotes: Joi.string().allow(""),
-  terms: Joi.string().allow(""),
   status: Joi.string().valid("draft", "sent"),
 });
 
-// Bring status and balance in line with amounts.
-function settle(inv) {
-  inv.amountPaid = round2(inv.amountPaid || 0);
-  inv.balance = round2(Math.max(inv.total - inv.amountPaid, 0));
-  if (inv.status === "void") return inv;
-  if (inv.amountPaid > 0 && inv.balance === 0) inv.status = "paid";
-  else if (inv.amountPaid > 0) inv.status = "partially_paid";
-  else if (inv.status !== "draft") inv.status = "sent";
-  return inv;
-}
-
-async function buildInvoice(req, data) {
-  const [customer, org] = await Promise.all([
-    Customer.findOne({ _id: data.customer, organization: req.org }),
-    Organization.findById(req.org),
-  ]);
-  if (!customer) throw new HttpError(400, "Choose a valid customer");
-  const placeOfSupply = data.placeOfSupply || customer.placeOfSupply || org.state;
-  const totals = computeTotals({
-    lineItems: data.lineItems.map((l) => ({ ...l, item: l.item || undefined })),
-    orgState: org.state,
-    placeOfSupply,
-    shippingCharge: data.shippingCharge,
-    adjustment: data.adjustment,
-  });
+async function build(req, data) {
+  const out = await prepareDoc(req, data);
   if (new Date(data.dueDate) < new Date(new Date(data.date).toDateString())) {
     throw new HttpError(400, "Due date can't be before the invoice date");
   }
-  return {
-    org,
-    fields: {
-      ...data,
-      ...totals,
-      placeOfSupply,
-      customerName: customer.displayName,
-      customerGstin: customer.gstin,
-      billingAddress: customer.billingAddress,
-    },
-  };
+  return out;
 }
 
 router.get(
@@ -84,13 +32,15 @@ router.get(
     if (req.query.customer) filter.customer = req.query.customer;
     if (req.query.open === "1") filter.status = { $in: ["draft", "sent", "partially_paid"] };
     if (req.query.q) {
-      const rx = new RegExp(req.query.q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      const rx = escapeRx(req.query.q);
       filter.$or = [{ invoiceNumber: rx }, { customerName: rx }, { orderNumber: rx }];
     }
     let invoices = await Invoice.find(filter, { lineItems: 0 }).sort({ date: -1, createdAt: -1 });
     const s = req.query.status;
     if (s && s !== "all") {
-      invoices = invoices.filter((i) => (s === "unpaid" ? i.balance > 0 && i.status !== "void" && i.status !== "draft" : i.displayStatus === s));
+      invoices = invoices.filter((i) =>
+        s === "unpaid" ? i.balance > 0 && !["void", "draft"].includes(i.status) : i.displayStatus === s
+      );
     }
     res.send(invoices);
   })
@@ -100,9 +50,7 @@ router.get(
   "/next-number",
   ah(async (req, res) => {
     const org = await Organization.findById(req.org);
-    const { Counter } = require("../models/Counter");
-    const c = await Counter.findOne({ organization: req.org, key: "invoice" });
-    res.send({ invoiceNumber: `${org.invoicePrefix}${String((c ? c.seq : 0) + 1).padStart(6, "0")}` });
+    res.send({ number: await peekNumber(req.org, "invoice", org.invoicePrefix || "INV-") });
   })
 );
 
@@ -110,10 +58,10 @@ router.post(
   "/",
   ah(async (req, res) => {
     const data = validate(schema, req.body);
-    const { org, fields } = await buildInvoice(req, data);
-    if (!fields.invoiceNumber) fields.invoiceNumber = await nextNumber(req.org, "invoice", org.invoicePrefix);
+    const { org, fields } = await build(req, data);
+    if (!fields.invoiceNumber) fields.invoiceNumber = await nextNumber(req.org, "invoice", org.invoicePrefix || "INV-");
     const invoice = new Invoice({ ...fields, organization: req.org, status: data.status || "draft" });
-    settle(invoice);
+    settleInvoice(invoice);
     await invoice.save();
     res.status(201).send(invoice);
   })
@@ -124,19 +72,23 @@ router.get(
   ah(async (req, res) => {
     const invoice = await Invoice.findOne({ _id: req.params.id, organization: req.org });
     if (!invoice) throw new HttpError(404, "Invoice not found");
-    const payments = await Payment.find(
-      { organization: req.org, "allocations.invoice": invoice._id },
-      { paymentNumber: 1, date: 1, mode: 1, reference: 1, allocations: 1 }
-    ).lean();
-    const paymentHistory = payments.map((p) => ({
-      _id: p._id,
-      paymentNumber: p.paymentNumber,
-      date: p.date,
-      mode: p.mode,
-      reference: p.reference,
-      amount: p.allocations.filter((a) => String(a.invoice) === String(invoice._id)).reduce((s, a) => s + a.amount, 0),
-    }));
-    res.send({ ...invoice.toJSON(), payments: paymentHistory });
+    const [payments, credits] = await Promise.all([
+      Payment.find({ organization: req.org, "allocations.invoice": invoice._id }).lean(),
+      CreditNote.find({ organization: req.org, "applications.invoice": invoice._id }).lean(),
+    ]);
+    const mine = (list) => list.filter((a) => String(a.invoice) === String(invoice._id)).reduce((s, a) => s + a.amount, 0);
+    res.send({
+      ...invoice.toJSON(),
+      payments: payments.map((p) => ({
+        _id: p._id,
+        paymentNumber: p.paymentNumber,
+        date: p.date,
+        mode: p.mode,
+        reference: p.reference,
+        amount: mine(p.allocations),
+      })),
+      credits: credits.map((c) => ({ _id: c._id, number: c.number, date: c.date, amount: mine(c.applications) })),
+    });
   })
 );
 
@@ -147,14 +99,14 @@ router.put(
     if (!invoice) throw new HttpError(404, "Invoice not found");
     if (invoice.status === "void") throw new HttpError(400, "A void invoice can't be edited");
     const data = validate(schema, req.body);
-    const { fields } = await buildInvoice(req, data);
+    const { fields } = await build(req, data);
     if (!fields.invoiceNumber) fields.invoiceNumber = invoice.invoiceNumber;
-    if (fields.total < invoice.amountPaid) {
-      throw new HttpError(400, "The new total is less than the amount already paid on this invoice");
+    if (fields.total < invoice.amountPaid + invoice.creditsApplied) {
+      throw new HttpError(400, "The new total is less than the payments and credits already applied to this invoice");
     }
     const status = invoice.status === "draft" ? data.status || "draft" : invoice.status;
     invoice.set({ ...fields, status });
-    settle(invoice);
+    settleInvoice(invoice);
     await invoice.save();
     res.send(invoice);
   })
@@ -167,19 +119,24 @@ router.post(
     if (!invoice) throw new HttpError(404, "Invoice not found");
     if (invoice.status === "draft") {
       invoice.status = "sent";
-      settle(invoice);
+      settleInvoice(invoice);
       await invoice.save();
     }
     res.send(invoice);
   })
 );
 
+const blockIfMoneyApplied = (invoice, action) => {
+  if (invoice.amountPaid > 0) throw new HttpError(400, `Delete the payments on this invoice before ${action} it`);
+  if (invoice.creditsApplied > 0) throw new HttpError(400, `Remove the credits applied to this invoice before ${action} it`);
+};
+
 router.post(
   "/:id/void",
   ah(async (req, res) => {
     const invoice = await Invoice.findOne({ _id: req.params.id, organization: req.org });
     if (!invoice) throw new HttpError(404, "Invoice not found");
-    if (invoice.amountPaid > 0) throw new HttpError(400, "Delete the payments on this invoice before voiding it");
+    blockIfMoneyApplied(invoice, "voiding");
     invoice.status = "void";
     invoice.balance = 0;
     await invoice.save();
@@ -192,11 +149,24 @@ router.delete(
   ah(async (req, res) => {
     const invoice = await Invoice.findOne({ _id: req.params.id, organization: req.org });
     if (!invoice) throw new HttpError(404, "Invoice not found");
-    if (invoice.amountPaid > 0) throw new HttpError(400, "Delete the payments on this invoice before deleting it");
+    blockIfMoneyApplied(invoice, "deleting");
+    // Free up the quote / sales order it came from.
+    const Quote = require("../models/Quote");
+    const SalesOrder = require("../models/SalesOrder");
+    await Promise.all([
+      Quote.updateMany(
+        { organization: req.org, "convertedTo.id": invoice._id },
+        { $set: { status: "accepted" }, $unset: { convertedTo: 1 } }
+      ),
+      SalesOrder.updateMany(
+        { organization: req.org, invoice: invoice._id },
+        { $set: { status: "confirmed", invoiceNumber: "" }, $unset: { invoice: 1 } }
+      ),
+    ]);
     await invoice.deleteOne();
     res.send({ message: "Invoice deleted" });
   })
 );
 
 module.exports = router;
-module.exports.settle = settle;
+module.exports.settle = settleInvoice;

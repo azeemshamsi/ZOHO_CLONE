@@ -4,7 +4,7 @@ import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { PAYMENT_MODES, modeName } from "../lib/constants";
 import { money, amount, date, isoDate, round2, inWords } from "../lib/format";
-import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Confirm, Status } from "../components/ui";
+import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Confirm, Status, invoiceStatus } from "../components/ui";
 import Icon from "../components/Icon";
 
 export function PaymentList() {
@@ -221,7 +221,7 @@ export function PaymentForm() {
                         <td>{date(i.date)}</td>
                         <td>{i.invoiceNumber}</td>
                         <td>
-                          <Status value={i.displayStatus} />
+                          <Status value={invoiceStatus(i.displayStatus)} />
                         </td>
                         <td>{date(i.dueDate)}</td>
                         <td className="num">{amount(i.total)}</td>

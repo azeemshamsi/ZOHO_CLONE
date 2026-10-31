@@ -4,7 +4,7 @@ import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { STATES, GST_TREATMENTS, PAYMENT_TERMS, stateName, modeName } from "../lib/constants";
 import { money, date } from "../lib/format";
-import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Status, Confirm } from "../components/ui";
+import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Status, invoiceStatus, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
 
 export function CustomerList() {
@@ -346,6 +346,9 @@ export function CustomerDetail() {
         <Link to={`/customers/${id}/edit`} className="btn">
           <Icon name="edit" size={16} /> Edit
         </Link>
+        <Link to={`/quotes/new?customer=${id}`} className="btn">
+          New Quote
+        </Link>
         <Link to={`/invoices/new?customer=${id}`} className="btn btn-primary">
           New Invoice
         </Link>
@@ -440,7 +443,7 @@ export function CustomerDetail() {
                     <td>{date(i.date)}</td>
                     <td className="link">{i.invoiceNumber}</td>
                     <td>
-                      <Status value={i.displayStatus} />
+                      <Status value={invoiceStatus(i.displayStatus)} />
                     </td>
                     <td className="num">{money(i.total)}</td>
                     <td className="num">{money(i.balance)}</td>
@@ -456,6 +459,35 @@ export function CustomerDetail() {
               </tbody>
             </table>
           </div>
+          {c.creditNotes?.length > 0 && (
+            <div className="card flush">
+              <h3 className="card-title">Credit Notes</h3>
+              <table className="table table-click">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Credit Note#</th>
+                    <th>Status</th>
+                    <th className="num">Amount</th>
+                    <th className="num">Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {c.creditNotes.map((n) => (
+                    <tr key={n._id} onClick={() => navigate(`/credit-notes/${n._id}`)}>
+                      <td>{date(n.date)}</td>
+                      <td className="link">{n.number}</td>
+                      <td>
+                        <Status value={n.status} />
+                      </td>
+                      <td className="num">{money(n.total)}</td>
+                      <td className="num">{money(n.balance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           <div className="card flush">
             <h3 className="card-title">Payments Received</h3>
             <table className="table table-click">

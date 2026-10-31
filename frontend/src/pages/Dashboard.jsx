@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import api from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { money, date } from "../lib/format";
-import { Spinner, Status } from "../components/ui";
+import { Spinner, Status, invoiceStatus } from "../components/ui";
 import Icon from "../components/Icon";
 
 function compact(n) {
@@ -199,7 +199,7 @@ export default function Dashboard() {
                   </td>
                   <td>{i.customerName}</td>
                   <td>
-                    <Status value={i.displayStatus} />
+                    <Status value={invoiceStatus(i.displayStatus)} />
                   </td>
                   <td className="num">{money(i.total)}</td>
                   <td className="num">{money(i.balance)}</td>

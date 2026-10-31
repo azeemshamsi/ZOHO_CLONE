@@ -69,7 +69,17 @@ export function Empty({ icon = "doc", title, text, action }) {
 
 const STATUS_LABEL = {
   draft: "Draft",
-  sent: "Unpaid",
+  sent: "Sent",
+  unpaid: "Unpaid",
+  accepted: "Accepted",
+  declined: "Declined",
+  invoiced: "Invoiced",
+  converted: "Converted",
+  expired: "Expired",
+  confirmed: "Confirmed",
+  cancelled: "Cancelled",
+  open: "Open",
+  closed: "Closed",
   partially_paid: "Partially Paid",
   paid: "Paid",
   overdue: "Overdue",
@@ -77,6 +87,9 @@ const STATUS_LABEL = {
   active: "Active",
   inactive: "Inactive",
 };
+// Invoices that are sent but not paid read as "Unpaid".
+export const invoiceStatus = (s) => (s === "sent" ? "unpaid" : s);
+
 export function Status({ value }) {
   return <span className={`status status-${value}`}>{STATUS_LABEL[value] || value}</span>;
 }
@@ -114,6 +127,24 @@ export function useDebounced(value, ms = 250) {
   return v;
 }
 
+export function Modal({ open, title, children, footer, onClose, wide }) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className={`modal ${wide ? "modal-wide" : ""}`} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h3>{title}</h3>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <Icon name="x" size={16} />
+          </button>
+        </div>
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-actions">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
 export function Confirm({ open, title, text, confirmLabel = "Delete", onConfirm, onCancel, danger = true }) {
   if (!open) return null;
   return (
@@ -130,6 +161,36 @@ export function Confirm({ open, title, text, confirmLabel = "Delete", onConfirm,
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* "More" button with a small dropdown of actions: items = [{ label, onClick, danger }] */
+export function MoreMenu({ items }) {
+  const [open, setOpen] = useState(false);
+  const shown = items.filter(Boolean);
+  if (!shown.length) return null;
+  return (
+    <div className="menu-wrap" onMouseLeave={() => setOpen(false)}>
+      <button className="btn" onClick={() => setOpen(!open)}>
+        More <Icon name="down" size={14} />
+      </button>
+      {open && (
+        <div className="dropdown">
+          {shown.map((it) => (
+            <button
+              key={it.label}
+              className={it.danger ? "danger" : ""}
+              onClick={() => {
+                setOpen(false);
+                it.onClick();
+              }}
+            >
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

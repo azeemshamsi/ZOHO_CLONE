@@ -68,8 +68,13 @@ router.put(
 router.delete(
   "/:id",
   ah(async (req, res) => {
-    const used = await Invoice.exists({ organization: req.org, "lineItems.item": req.params.id });
-    if (used) throw new HttpError(400, "This item is used on invoices. Mark it inactive instead of deleting.");
+    const q = { organization: req.org, "lineItems.item": req.params.id };
+    const used =
+      (await Invoice.exists(q)) ||
+      (await require("../models/Quote").exists(q)) ||
+      (await require("../models/SalesOrder").exists(q)) ||
+      (await require("../models/CreditNote").exists(q));
+    if (used) throw new HttpError(400, "This item is used in transactions. Mark it inactive instead of deleting.");
     const r = await Item.deleteOne({ _id: req.params.id, organization: req.org });
     if (!r.deletedCount) throw new HttpError(404, "Item not found");
     res.send({ message: "Item deleted" });

@@ -8,6 +8,9 @@ import { CustomerList, CustomerForm, CustomerDetail } from "./pages/Customers";
 import { ItemList, ItemForm } from "./pages/Items";
 import { InvoiceList, InvoiceForm, InvoiceView } from "./pages/Invoices";
 import { PaymentList, PaymentForm, PaymentView } from "./pages/Payments";
+import { QuoteList, QuoteForm, QuoteView } from "./pages/Quotes";
+import { SalesOrderList, SalesOrderForm, SalesOrderView } from "./pages/SalesOrders";
+import { CreditNoteList, CreditNoteForm, CreditNoteView } from "./pages/CreditNotes";
 import Settings from "./pages/Settings";
 import ComingSoon from "./pages/ComingSoon";
 
@@ -23,7 +26,7 @@ function PublicOnly({ children }) {
   return user ? <Navigate to="/" replace /> : children;
 }
 
-const SOON = ["/quotes", "/sales-orders", "/credit-notes", "/vendors", "/expenses", "/bills", "/payments-made", "/banking", "/journals", "/chart-of-accounts", "/reports"];
+const SOON = ["/vendors", "/expenses", "/bills", "/payments-made", "/banking", "/journals", "/chart-of-accounts", "/reports"];
 
 export default function App() {
   return (
@@ -48,6 +51,18 @@ export default function App() {
           <Route path="invoices/new" element={<InvoiceForm />} />
           <Route path="invoices/:id" element={<InvoiceView />} />
           <Route path="invoices/:id/edit" element={<InvoiceForm />} />
+          <Route path="quotes" element={<QuoteList />} />
+          <Route path="quotes/new" element={<QuoteForm />} />
+          <Route path="quotes/:id" element={<QuoteView />} />
+          <Route path="quotes/:id/edit" element={<QuoteForm />} />
+          <Route path="sales-orders" element={<SalesOrderList />} />
+          <Route path="sales-orders/new" element={<SalesOrderForm />} />
+          <Route path="sales-orders/:id" element={<SalesOrderView />} />
+          <Route path="sales-orders/:id/edit" element={<SalesOrderForm />} />
+          <Route path="credit-notes" element={<CreditNoteList />} />
+          <Route path="credit-notes/new" element={<CreditNoteForm />} />
+          <Route path="credit-notes/:id" element={<CreditNoteView />} />
+          <Route path="credit-notes/:id/edit" element={<CreditNoteForm />} />
           <Route path="payments" element={<PaymentList />} />
           <Route path="payments/new" element={<PaymentForm />} />
           <Route path="payments/:id" element={<PaymentView />} />

@@ -5,7 +5,7 @@ const Invoice = require("../models/Invoice");
 const Customer = require("../models/Customer");
 const Organization = require("../models/Organization");
 const { nextNumber } = require("../models/Counter");
-const { settle } = require("./invoices");
+const { settleInvoice: settle } = require("../utils/salesDoc");
 const { ah, validate, HttpError, round2 } = require("../utils/http");
 
 const schema = Joi.object({

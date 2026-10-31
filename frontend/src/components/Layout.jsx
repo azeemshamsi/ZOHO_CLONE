@@ -12,11 +12,11 @@ const NAV = [
     icon: "sales",
     children: [
       { to: "/customers", label: "Customers" },
-      { to: "/quotes", label: "Quotes", soon: true },
-      { to: "/sales-orders", label: "Sales Orders", soon: true },
+      { to: "/quotes", label: "Quotes" },
+      { to: "/sales-orders", label: "Sales Orders" },
       { to: "/invoices", label: "Invoices" },
       { to: "/payments", label: "Payments Received" },
-      { to: "/credit-notes", label: "Credit Notes", soon: true },
+      { to: "/credit-notes", label: "Credit Notes" },
     ],
   },
   {

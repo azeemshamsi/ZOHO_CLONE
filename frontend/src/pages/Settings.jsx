@@ -18,6 +18,9 @@ export default function Settings() {
           website: organization.website || "",
           invoicePrefix: organization.invoicePrefix || "INV-",
           paymentPrefix: organization.paymentPrefix || "PAY-",
+          quotePrefix: organization.quotePrefix || "QT-",
+          salesOrderPrefix: organization.salesOrderPrefix || "SO-",
+          creditNotePrefix: organization.creditNotePrefix || "CN-",
           defaultPaymentTerms: organization.defaultPaymentTerms ?? 15,
           defaultNotes: organization.defaultNotes || "",
           defaultTerms: organization.defaultTerms || "",
@@ -96,7 +99,7 @@ export default function Settings() {
           </div>
         </div>
 
-        <h4 className="section-title">Invoice Preferences</h4>
+        <h4 className="section-title">Numbering & Defaults</h4>
         <div className="form-grid">
           <div className="row-3">
             <Field label="Invoice Number Prefix">
@@ -104,6 +107,17 @@ export default function Settings() {
             </Field>
             <Field label="Payment Number Prefix">
               <input value={form.paymentPrefix} onChange={set("paymentPrefix")} />
+            </Field>
+            <Field label="Quote Number Prefix">
+              <input value={form.quotePrefix} onChange={set("quotePrefix")} />
+            </Field>
+          </div>
+          <div className="row-3">
+            <Field label="Sales Order Number Prefix">
+              <input value={form.salesOrderPrefix} onChange={set("salesOrderPrefix")} />
+            </Field>
+            <Field label="Credit Note Number Prefix">
+              <input value={form.creditNotePrefix} onChange={set("creditNotePrefix")} />
             </Field>
             <Field label="Default Payment Terms">
               <select value={form.defaultPaymentTerms} onChange={set("defaultPaymentTerms")}>
