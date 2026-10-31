@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { STATES, GST_RATES, PAYMENT_TERMS, stateName } from "../lib/constants";
-import { CREDIT_REASONS } from "../lib/docKinds";
+import { CREDIT_REASONS, VENDOR_CREDIT_REASONS } from "../lib/docKinds";
 import { money, amount, date, isoDate, addDays, round2, inWords } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Status } from "./ui";
 import Icon from "./Icon";
@@ -132,11 +132,15 @@ export function DocForm({ kind }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [autoNumber, setAutoNumber] = useState("");
-  const isCN = kind.key === "creditNote";
+  // Credit notes (customers) and vendor credits (vendors) can point at an invoice / bill.
+  const isCN = kind.key === "creditNote" || kind.key === "vendorCredit";
   const second = kind.second;
   const party = kind.party || "customer";
   const isVendor = party === "vendor";
   const partyApi = isVendor ? "/vendors" : "/customers";
+  const linkKey = isVendor ? "bill" : "invoice";
+  const linkApi = isVendor ? "/bills" : "/invoices";
+  const linkNumber = isVendor ? "billNumber" : "invoiceNumber";
 
   useEffect(() => {
     api.get(partyApi, { params: { status: "active" } }).then((r) => setCustomers(r.data));
@@ -160,7 +164,7 @@ export function DocForm({ kind }) {
           customerNotes: data.customerNotes,
           terms: data.terms,
           status: data.status,
-          invoice: data.invoice || "",
+          invoice: data.invoice || data.bill || "",
           reason: data.reason || "",
         };
         setForm(f);
@@ -185,21 +189,36 @@ export function DocForm({ kind }) {
       terms: isCN || isVendor ? "" : organization?.defaultTerms || "",
       status: "draft",
       invoice: "",
-      reason: isCN ? "Sales Return" : "",
+      reason: isCN ? (isVendor ? "Purchase Return" : "Sales Return") : "",
+      purchaseOrder: "",
     };
-    const fromInvoice = isCN && params.get("invoice");
+    const fromInvoice = isCN && params.get(linkKey);
+    const fromPO = kind.key === "bill" && params.get("po");
     if (fromInvoice) {
-      api.get(`/invoices/${fromInvoice}`).then(({ data }) =>
+      api.get(`${linkApi}/${fromInvoice}`).then(({ data }) =>
         setForm({
           ...base,
-          customer: data.customer,
+          customer: data[party],
           invoice: data._id,
           placeOfSupply: data.placeOfSupply,
           lineItems: data.lineItems.map(cleanLine),
         })
       );
+    } else if (fromPO) {
+      api.get(`/purchase-orders/${fromPO}`).then(({ data }) =>
+        setForm({
+          ...base,
+          customer: data.vendor,
+          ref: data.number,
+          purchaseOrder: data._id,
+          placeOfSupply: data.placeOfSupply,
+          lineItems: data.lineItems.map(cleanLine),
+          shippingCharge: data.shippingCharge,
+          adjustment: data.adjustment,
+        })
+      );
     } else setForm(base);
-  }, [id, kind, organization, params, second, isCN, party, isVendor]);
+  }, [id, kind, organization, params, second, isCN, party, isVendor, linkKey, linkApi]);
 
   // Customer picked from the URL: apply their defaults once customers load.
   useEffect(() => {
@@ -215,11 +234,11 @@ export function DocForm({ kind }) {
     }
   }, [customers, form, id, organization, second]);
 
-  // Credit notes: load the customer's invoices to reference.
+  // Credit notes / vendor credits: load the party's invoices or bills to reference.
   useEffect(() => {
     if (!isCN || !form?.customer) return setCustInvoices([]);
-    api.get("/invoices", { params: { customer: form.customer } }).then((r) => setCustInvoices(r.data.filter((i) => i.status !== "draft")));
-  }, [isCN, form?.customer]);
+    api.get(linkApi, { params: { [party]: form.customer } }).then((r) => setCustInvoices(r.data.filter((i) => i.status !== "draft")));
+  }, [isCN, form?.customer, linkApi, party]);
 
   const totals = useMemo(
     () => (form ? calc(form.lineItems, organization?.state, form.placeOfSupply || organization?.state, form.shippingCharge, form.adjustment) : null),
@@ -281,9 +300,10 @@ export function DocForm({ kind }) {
       if (second) body[second.field] = form.second || null;
       if (second?.terms) body.paymentTerms = Number(form.paymentTerms);
       if (isCN) {
-        body.invoice = form.invoice || null;
+        body[linkKey] = form.invoice || null;
         body.reason = form.reason;
       }
+      if (form.purchaseOrder) body.purchaseOrder = form.purchaseOrder;
       const { data } = id ? await api.put(`${kind.api}/${id}`, body) : await api.post(kind.api, body);
       toast(`${kind.label} ${id ? "updated" : "created"}`);
       navigate(`${kind.route}/${data._id}`);
@@ -340,19 +360,19 @@ export function DocForm({ kind }) {
           </Field>
           {isCN && (
             <div className="row-2">
-              <Field label="Invoice#" hint="The invoice this credit is for (optional)">
+              <Field label={isVendor ? "Bill#" : "Invoice#"} hint={`The ${linkKey} this credit is for (optional)`}>
                 <select value={form.invoice} onChange={set("invoice")}>
                   <option value="">None</option>
                   {custInvoices.map((i) => (
                     <option key={i._id} value={i._id}>
-                      {i.invoiceNumber} — {money(i.total)}
+                      {i[linkNumber]} — {money(i.total)}
                     </option>
                   ))}
                 </select>
               </Field>
               <Field label="Reason">
                 <select value={form.reason} onChange={set("reason")}>
-                  {CREDIT_REASONS.map((r) => (
+                  {(isVendor ? VENDOR_CREDIT_REASONS : CREDIT_REASONS).map((r) => (
                     <option key={r}>{r}</option>
                   ))}
                 </select>

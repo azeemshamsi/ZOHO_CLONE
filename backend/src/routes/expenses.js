@@ -22,10 +22,12 @@ const schema = Joi.object({
   vendor: Joi.string().allow(null, ""),
   paidThrough: Joi.string().valid("cash", "bank_transfer", "upi", "cheque", "card", "other"),
   reference: Joi.string().allow(""),
+  bankAccount: Joi.string().allow(""),
   notes: Joi.string().allow(""),
 });
 
 async function build(req, data) {
+  if (!(await require("../utils/ledger").isBankAccount(req.org, data.bankAccount))) throw new HttpError(400, "Pick a cash or bank account");
   const org = await Organization.findById(req.org);
   let vendor = null;
   if (data.vendor) {

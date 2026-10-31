@@ -6,6 +6,8 @@ import { PAYMENT_MODES, modeName } from "../lib/constants";
 import { money, amount, date, isoDate, round2, inWords } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Confirm, Status, invoiceStatus } from "../components/ui";
 import Icon from "../components/Icon";
+import BankAccountSelect from "../components/BankAccountSelect";
+
 
 export function PaymentList() {
   const [rows, setRows] = useState(null);
@@ -84,6 +86,7 @@ export function PaymentForm() {
     date: isoDate(),
     amount: "",
     mode: "bank_transfer",
+    bankAccount: "",
     reference: "",
     notes: "",
   });
@@ -186,6 +189,9 @@ export function PaymentForm() {
             <Field label="Reference#" hint="UTR, cheque number, etc.">
               <input value={form.reference} onChange={set("reference")} />
             </Field>
+          </div>
+          <div className="row-2">
+            <BankAccountSelect label="Deposit To" value={form.bankAccount} mode={form.mode} onChange={(v) => setForm({ ...form, bankAccount: v })} />
           </div>
         </div>
 

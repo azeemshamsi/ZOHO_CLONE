@@ -28,6 +28,8 @@ const organizationSchema = new mongoose.Schema(
     creditNotePrefix: { type: String, default: "CN-" },
     vendorPaymentPrefix: { type: String, default: "PM-" },
     journalPrefix: { type: String, default: "MJ-" },
+    purchaseOrderPrefix: { type: String, default: "PO-" },
+    vendorCreditPrefix: { type: String, default: "DN-" },
     defaultPaymentTerms: { type: Number, default: 15 },
     defaultNotes: { type: String, default: "Thanks for your business." },
     defaultTerms: { type: String, default: "" },

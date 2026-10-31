@@ -25,13 +25,13 @@ const NAV = [
     children: [
       { to: "/vendors", label: "Vendors" },
       { to: "/expenses", label: "Expenses" },
-      { to: "/purchase-orders", label: "Purchase Orders", soon: true },
+      { to: "/purchase-orders", label: "Purchase Orders" },
       { to: "/bills", label: "Bills" },
       { to: "/payments-made", label: "Payments Made" },
-      { to: "/vendor-credits", label: "Vendor Credits", soon: true },
+      { to: "/vendor-credits", label: "Vendor Credits" },
     ],
   },
-  { to: "/banking", label: "Banking", icon: "bank", soon: true },
+  { to: "/banking", label: "Banking", icon: "bank" },
   {
     label: "Accountant",
     icon: "book",

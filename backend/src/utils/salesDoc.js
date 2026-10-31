@@ -134,13 +134,15 @@ async function createInvoiceFrom(req, src, links, orderNumber) {
 // Same as settleInvoice, for bills (unpaid bills are "open").
 function settleBill(bill) {
   bill.amountPaid = round2(bill.amountPaid || 0);
-  bill.balance = round2(Math.max(bill.total - bill.amountPaid, 0));
+  bill.creditsApplied = round2(bill.creditsApplied || 0);
+  const settled = round2(bill.amountPaid + bill.creditsApplied);
+  bill.balance = round2(Math.max(bill.total - settled, 0));
   if (bill.status === "void") {
     bill.balance = 0;
     return bill;
   }
-  if (bill.amountPaid > 0 && bill.balance === 0) bill.status = "paid";
-  else if (bill.amountPaid > 0) bill.status = "partially_paid";
+  if (settled > 0 && bill.balance === 0) bill.status = "paid";
+  else if (settled > 0) bill.status = "partially_paid";
   else if (bill.status !== "draft") bill.status = "open";
   return bill;
 }

@@ -59,7 +59,14 @@ async function chartOfAccounts(org) {
   ];
 }
 
-const modeAccount = (mode) => (mode === "cash" ? "cash" : "bank");
+// The cash/bank account money went through: the one picked, else by payment mode.
+const modeAccount = (mode, bankAccount) => bankAccount || (mode === "cash" ? "cash" : "bank");
+
+// Is `code` a Cash or Bank account of this organization?
+async function isBankAccount(org, code) {
+  if (!code) return true;
+  return (await chartOfAccounts(org)).some((a) => a.code === code && ["Cash", "Bank"].includes(a.group));
+}
 
 // Build a list of balanced entries for everything up to `to`.
 async function buildEntries(org, { to } = {}) {
@@ -70,10 +77,11 @@ async function buildEntries(org, { to } = {}) {
   const VendorPayment = require("../models/VendorPayment");
   const Expense = require("../models/Expense");
   const Journal = require("../models/Journal");
+  const VendorCredit = require("../models/VendorCredit");
 
   const live = { organization: org, status: { $nin: ["draft", "void"] } };
   const all = { organization: org };
-  const [invoices, payments, cns, bills, vps, expenses, journals] = await Promise.all([
+  const [invoices, payments, cns, bills, vps, expenses, journals, vcs] = await Promise.all([
     Invoice.find(live).lean(),
     Payment.find(all).lean(),
     CreditNote.find(live).lean(),
@@ -81,6 +89,7 @@ async function buildEntries(org, { to } = {}) {
     VendorPayment.find(all).lean(),
     Expense.find(all).lean(),
     Journal.find(all).lean(),
+    VendorCredit.find(live).lean(),
   ]);
 
   const entries = [];
@@ -114,7 +123,7 @@ async function buildEntries(org, { to } = {}) {
     add({
       date: p.date, type: "Customer Payment", id: p._id, number: p.paymentNumber, party: p.customerName,
       build: (dr, cr) => {
-        dr(modeAccount(p.mode), p.amount);
+        dr(modeAccount(p.mode, p.bankAccount), p.amount);
         cr("ar", p.amount);
       },
     });
@@ -137,7 +146,7 @@ async function buildEntries(org, { to } = {}) {
         date: r.date, type: "Credit Note Refund", id: c._id, number: c.number, party: c.customerName,
         build: (dr, cr) => {
           dr("ar", r.amount);
-          cr(modeAccount(r.mode), r.amount);
+          cr(modeAccount(r.mode, r.bankAccount), r.amount);
         },
       });
     }
@@ -160,7 +169,7 @@ async function buildEntries(org, { to } = {}) {
       date: v.date, type: "Vendor Payment", id: v._id, number: v.paymentNumber, party: v.vendorName,
       build: (dr, cr) => {
         dr("ap", v.amount);
-        cr(modeAccount(v.mode), v.amount);
+        cr(modeAccount(v.mode, v.bankAccount), v.amount);
       },
     });
   }
@@ -172,9 +181,31 @@ async function buildEntries(org, { to } = {}) {
         dr("input_cgst", e.cgst);
         dr("input_sgst", e.sgst);
         dr("input_igst", e.igst);
-        cr(modeAccount(e.paidThrough), e.total);
+        cr(modeAccount(e.paidThrough, e.bankAccount), e.total);
       },
     });
+  }
+  for (const c of vcs) {
+    add({
+      date: c.date, type: "Vendor Credit", id: c._id, number: c.number, party: c.vendorName,
+      build: (dr, cr) => {
+        dr("ap", c.total);
+        cr("cogs", c.subTotal + (c.shippingCharge || 0));
+        cr("input_cgst", c.cgst);
+        cr("input_sgst", c.sgst);
+        cr("input_igst", c.igst);
+        cr("adjustments", c.adjustment || 0);
+      },
+    });
+    for (const r of c.refunds || []) {
+      add({
+        date: r.date, type: "Vendor Credit Refund", id: c._id, number: c.number, party: c.vendorName,
+        build: (dr, cr) => {
+          dr(modeAccount(r.mode, r.bankAccount), r.amount);
+          cr("ap", r.amount);
+        },
+      });
+    }
   }
   for (const j of journals) {
     add({
@@ -251,4 +282,6 @@ module.exports = {
   parseRange,
   expCode,
   GROUP_TYPE,
+  isBankAccount,
+  modeAccount,
 };

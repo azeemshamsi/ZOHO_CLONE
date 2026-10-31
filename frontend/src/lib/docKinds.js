@@ -96,6 +96,48 @@ KINDS.bill = {
   ],
 };
 
+KINDS.purchaseOrder = {
+  key: "purchaseOrder",
+  party: "vendor",
+  label: "Purchase Order",
+  plural: "Purchase Orders",
+  api: "/purchase-orders",
+  route: "/purchase-orders",
+  numberField: "number",
+  numberLabel: "Purchase Order#",
+  dateLabel: "Purchase Order Date",
+  refField: "reference",
+  refLabel: "Reference#",
+  second: { field: "deliveryDate", label: "Expected Delivery Date" },
+  docTitle: "PURCHASE ORDER",
+  saveButtons: [
+    { status: "draft", label: "Save as Draft" },
+    { status: "issued", label: "Save and Issue", primary: true },
+  ],
+};
+
+KINDS.vendorCredit = {
+  key: "vendorCredit",
+  party: "vendor",
+  label: "Vendor Credit",
+  plural: "Vendor Credits",
+  api: "/vendor-credits",
+  route: "/vendor-credits",
+  numberField: "number",
+  numberLabel: "Vendor Credit#",
+  dateLabel: "Vendor Credit Date",
+  refField: "reference",
+  refLabel: "Reference#",
+  second: null,
+  docTitle: "VENDOR CREDIT",
+  saveButtons: [
+    { status: "draft", label: "Save as Draft" },
+    { status: "open", label: "Save as Open", primary: true },
+  ],
+};
+
+export const VENDOR_CREDIT_REASONS = ["Purchase Return", "Post Purchase Discount", "Deficiency in services", "Correction in bill", "Change in POS", "Others"];
+
 export const CREDIT_REASONS = [
   "Sales Return",
   "Post Sale Discount",

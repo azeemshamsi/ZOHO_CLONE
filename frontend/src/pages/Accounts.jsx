@@ -151,6 +151,8 @@ const DOC_LINK = {
   "Vendor Payment": (id) => `/payments-made/${id}`,
   Expense: (id) => `/expenses/${id}/edit`,
   Journal: (id) => `/journals/${id}`,
+  "Vendor Credit": (id) => `/vendor-credits/${id}`,
+  "Vendor Credit Refund": (id) => `/vendor-credits/${id}`,
 };
 export const docLink = (type, id) => (DOC_LINK[type] ? DOC_LINK[type](id) : "#");
 

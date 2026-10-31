@@ -285,6 +285,9 @@ export function VendorDetail() {
         <Link to={`/vendors/${id}/edit`} className="btn">
           <Icon name="edit" size={16} /> Edit
         </Link>
+        <Link to={`/purchase-orders/new?vendor=${id}`} className="btn">
+          New PO
+        </Link>
         <Link to={`/bills/new?vendor=${id}`} className="btn btn-primary">
           New Bill
         </Link>
@@ -335,7 +338,7 @@ export function VendorDetail() {
               <strong className="big">{money(v.payables)}</strong>
             </div>
             <div>
-              <span className="muted small">Advance Paid (unused)</span>
+              <span className="muted small">Advances & Vendor Credits</span>
               <strong className="big">{money(v.unusedCredits)}</strong>
             </div>
           </div>
@@ -353,6 +356,18 @@ export function VendorDetail() {
                 ["Status", (b) => <Status value={b.displayStatus} />],
                 ["Amount", (b) => money(b.total), "num"],
                 ["Balance Due", (b) => money(b.balance), "num"],
+              ],
+            },
+            {
+              title: "Vendor Credits",
+              rows: v.vendorCredits || [],
+              to: (c) => `/vendor-credits/${c._id}`,
+              cols: [
+                ["Date", (c) => date(c.date)],
+                ["Vendor Credit#", (c) => c.number, "link"],
+                ["Status", (c) => <Status value={c.status} />],
+                ["Amount", (c) => money(c.total), "num"],
+                ["Balance", (c) => money(c.balance), "num"],
               ],
             },
             {

@@ -18,6 +18,9 @@ import { ExpenseList, ExpenseForm } from "./pages/Expenses";
 import { AccountList, AccountDetail } from "./pages/Accounts";
 import { JournalList, JournalForm, JournalView } from "./pages/Journals";
 import { ReportsHome, ReportPage } from "./pages/Reports";
+import { PurchaseOrderList, PurchaseOrderForm, PurchaseOrderView } from "./pages/PurchaseOrders";
+import { VendorCreditList, VendorCreditForm, VendorCreditView } from "./pages/VendorCredits";
+import { BankingHome, BankAccountPage } from "./pages/Banking";
 import Settings from "./pages/Settings";
 import ComingSoon from "./pages/ComingSoon";
 
@@ -33,7 +36,7 @@ function PublicOnly({ children }) {
   return user ? <Navigate to="/" replace /> : children;
 }
 
-const SOON = ["/purchase-orders", "/vendor-credits", "/banking"];
+const SOON = [];
 
 export default function App() {
   return (
@@ -92,6 +95,16 @@ export default function App() {
           <Route path="journals/:id/edit" element={<JournalForm />} />
           <Route path="reports" element={<ReportsHome />} />
           <Route path="reports/:key" element={<ReportPage />} />
+          <Route path="purchase-orders" element={<PurchaseOrderList />} />
+          <Route path="purchase-orders/new" element={<PurchaseOrderForm />} />
+          <Route path="purchase-orders/:id" element={<PurchaseOrderView />} />
+          <Route path="purchase-orders/:id/edit" element={<PurchaseOrderForm />} />
+          <Route path="vendor-credits" element={<VendorCreditList />} />
+          <Route path="vendor-credits/new" element={<VendorCreditForm />} />
+          <Route path="vendor-credits/:id" element={<VendorCreditView />} />
+          <Route path="vendor-credits/:id/edit" element={<VendorCreditForm />} />
+          <Route path="banking" element={<BankingHome />} />
+          <Route path="banking/:code" element={<BankAccountPage />} />
           <Route path="payments" element={<PaymentList />} />
           <Route path="payments/new" element={<PaymentForm />} />
           <Route path="payments/:id" element={<PaymentView />} />

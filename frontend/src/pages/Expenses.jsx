@@ -6,6 +6,8 @@ import { STATES, GST_RATES, PAYMENT_MODES, modeName } from "../lib/constants";
 import { money, date, isoDate, round2 } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
+import BankAccountSelect from "../components/BankAccountSelect";
+
 
 export function ExpenseList() {
   const [rows, setRows] = useState(null);
@@ -122,6 +124,7 @@ export function ExpenseForm() {
           placeOfSupply: data.placeOfSupply,
           vendor: data.vendor || "",
           paidThrough: data.paidThrough,
+          bankAccount: data.bankAccount || "",
           reference: data.reference,
           notes: data.notes,
         })
@@ -136,6 +139,7 @@ export function ExpenseForm() {
         placeOfSupply: organization?.state || "",
         vendor: params.get("vendor") || "",
         paidThrough: "upi",
+        bankAccount: "",
         reference: "",
         notes: "",
       });
@@ -250,6 +254,9 @@ export function ExpenseForm() {
                 ))}
               </select>
             </Field>
+            <BankAccountSelect label="Paid From" value={form.bankAccount} mode={form.paidThrough} onChange={(v) => setForm({ ...form, bankAccount: v })} />
+          </div>
+          <div className="row-2">
             <Field label="Vendor" hint="Optional">
               <select value={form.vendor} onChange={pickVendor}>
                 <option value="">None</option>

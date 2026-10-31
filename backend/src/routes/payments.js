@@ -14,6 +14,7 @@ const schema = Joi.object({
   amount: Joi.number().greater(0).required().label("Amount received"),
   mode: Joi.string().valid("cash", "bank_transfer", "upi", "cheque", "card", "other"),
   reference: Joi.string().allow(""),
+  bankAccount: Joi.string().allow(""),
   notes: Joi.string().allow(""),
   allocations: Joi.array()
     .items(Joi.object({ invoice: Joi.string().required(), amount: Joi.number().min(0).required() }))
@@ -37,6 +38,7 @@ router.post(
   "/",
   ah(async (req, res) => {
     const data = validate(schema, req.body);
+    if (!(await require("../utils/ledger").isBankAccount(req.org, data.bankAccount))) throw new HttpError(400, "Pick a cash or bank account");
     const customer = await Customer.findOne({ _id: data.customer, organization: req.org });
     if (!customer) throw new HttpError(400, "Choose a valid customer");
 

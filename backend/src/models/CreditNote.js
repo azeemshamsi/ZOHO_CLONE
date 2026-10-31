@@ -16,6 +16,7 @@ const refundSchema = new mongoose.Schema(
     date: { type: Date, required: true },
     amount: { type: Number, required: true },
     mode: { type: String, default: "bank_transfer" },
+    bankAccount: { type: String, default: "" },
     reference: { type: String, default: "" },
   },
   { _id: true }

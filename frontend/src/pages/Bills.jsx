@@ -4,8 +4,8 @@ import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { KINDS } from "../lib/docKinds";
 import { PAYMENT_TERMS, modeName } from "../lib/constants";
-import { money, amount, date } from "../lib/format";
-import { PageHeader, Spinner, toast, Status, Confirm, MoreMenu } from "../components/ui";
+import { money, amount, date, round2 } from "../lib/format";
+import { PageHeader, Spinner, toast, Status, Confirm, MoreMenu, Modal } from "../components/ui";
 import { DocList, DocForm, DocPaper, MiniTable } from "../components/SalesDoc";
 import Icon from "../components/Icon";
 
@@ -50,14 +50,107 @@ export function BillList() {
 
 export const BillForm = () => <DocForm kind={K} />;
 
+// Apply a vendor's open credits to this bill.
+function ApplyVendorCredits({ bill, open, onClose, onDone }) {
+  const [notes, setNotes] = useState(null);
+  const [alloc, setAlloc] = useState({});
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    api.get("/vendor-credits", { params: { vendor: bill.vendor, status: "open" } }).then((r) => {
+      setNotes(r.data);
+      let left = bill.balance;
+      const pre = {};
+      r.data.forEach((c) => {
+        const x = round2(Math.min(left, c.balance));
+        if (x > 0) pre[c._id] = x;
+        left = round2(left - x);
+      });
+      setAlloc(pre);
+    });
+  }, [open, bill]);
+  const applied = round2(Object.values(alloc).reduce((s, v) => s + (Number(v) || 0), 0));
+  const save = async () => {
+    if (applied > bill.balance) return toast("That's more than the bill balance", "error");
+    setBusy(true);
+    try {
+      for (const [cid, v] of Object.entries(alloc)) {
+        if (Number(v) > 0) await api.post(`/vendor-credits/${cid}/apply`, { allocations: [{ bill: bill._id, amount: Number(v) }] });
+      }
+      toast("Credits applied");
+      onDone();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      wide
+      title={`Apply vendor credits to bill ${bill.billNumber}`}
+      footer={
+        <>
+          <span className="muted small" style={{ marginRight: "auto" }}>
+            Bill balance {money(bill.balance)} · Applying {money(applied)}
+          </span>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" disabled={busy || !applied} onClick={save}>
+            Apply Credits
+          </button>
+        </>
+      }
+    >
+      {!notes ? (
+        <Spinner />
+      ) : !notes.length ? (
+        <p className="muted">This vendor has no open credits.</p>
+      ) : (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Vendor Credit#</th>
+              <th>Date</th>
+              <th className="num">Credits Available</th>
+              <th className="num">Amount to Apply</th>
+            </tr>
+          </thead>
+          <tbody>
+            {notes.map((c) => (
+              <tr key={c._id}>
+                <td>{c.number}</td>
+                <td>{date(c.date)}</td>
+                <td className="num">{amount(c.balance)}</td>
+                <td className="num">
+                  <input className="pay-input" type="number" min="0" step="0.01" max={c.balance} value={alloc[c._id] ?? ""} onChange={(e) => setAlloc({ ...alloc, [c._id]: e.target.value })} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Modal>
+  );
+}
+
 export function BillView() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { organization } = useAuth();
   const [bill, setBill] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [credits, setCredits] = useState(0);
+  const [applyOpen, setApplyOpen] = useState(false);
 
-  const load = () => api.get(`/bills/${id}`).then((r) => setBill(r.data));
+  const load = () =>
+    api.get(`/bills/${id}`).then((r) => {
+      setBill(r.data);
+      api.get("/vendor-credits", { params: { vendor: r.data.vendor, status: "open" } }).then((c) => setCredits(round2(c.data.reduce((s, x) => s + x.balance, 0))));
+    });
   useEffect(() => {
     load();
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -76,6 +169,7 @@ export function BillView() {
     }
   };
   const canPay = bill.balance > 0 && !["void", "draft"].includes(bill.status);
+  const noMoney = bill.amountPaid === 0 && !bill.creditsApplied;
   const status = bill.displayStatus;
 
   return (
@@ -101,11 +195,40 @@ export function BillView() {
         )}
         <MoreMenu
           items={[
-            bill.amountPaid === 0 && bill.status !== "void" && { label: "Void", onClick: () => setConfirm("void") },
-            bill.amountPaid === 0 && { label: "Delete", danger: true, onClick: () => setConfirm("delete") },
+            canPay && credits > 0 && { label: `Apply Credits (${money(credits)})`, onClick: () => setApplyOpen(true) },
+            !["draft", "void"].includes(bill.status) && { label: "Create Vendor Credit", onClick: () => navigate(`/vendor-credits/new?bill=${id}`) },
+            noMoney && bill.status !== "void" && { label: "Void", onClick: () => setConfirm("void") },
+            noMoney && { label: "Delete", danger: true, onClick: () => setConfirm("delete") },
           ]}
         />
       </PageHeader>
+
+      {canPay && credits > 0 && (
+        <div className="banner no-print">
+          <span>
+            This vendor has given you <strong>{money(credits)}</strong> in credits you can use on this bill.
+          </span>
+          <button className="btn btn-sm btn-primary" onClick={() => setApplyOpen(true)}>
+            Apply Credits
+          </button>
+        </div>
+      )}
+      {bill.purchaseOrder && (
+        <p className="muted small no-print">
+          Created from <Link to={`/purchase-orders/${bill.purchaseOrder}`}>purchase order {bill.orderNumber}</Link>
+        </p>
+      )}
+      {bill.credits?.length > 0 && (
+        <MiniTable
+          title="Vendor Credits Applied"
+          rows={bill.credits}
+          columns={[
+            { label: "Date", render: (c) => date(c.date) },
+            { label: "Vendor Credit#", render: (c) => <Link to={`/vendor-credits/${c._id}`}>{c.number}</Link> },
+            { label: "Amount", num: true, render: (c) => money(c.amount) },
+          ]}
+        />
+      )}
 
       {bill.payments?.length > 0 && (
         <MiniTable
@@ -138,11 +261,13 @@ export function BillView() {
           ]}
           extraTotals={[
             bill.amountPaid > 0 && ["Payments Made", <span className="text-paid">(-) {amount(bill.amountPaid)}</span>],
+            bill.creditsApplied > 0 && ["Vendor Credits", <span className="text-paid">(-) {amount(bill.creditsApplied)}</span>],
             ["Balance Due", money(bill.balance), "doc-grand"],
           ].filter(Boolean)}
         />
       </div>
 
+      <ApplyVendorCredits bill={bill} open={applyOpen} onClose={() => setApplyOpen(false)} onDone={() => (setApplyOpen(false), load())} />
       <Confirm
         open={confirm === "void"}
         title="Void this bill?"

@@ -4,6 +4,8 @@ const Vendor = require("../models/Vendor");
 const Bill = require("../models/Bill");
 const VendorPayment = require("../models/VendorPayment");
 const Expense = require("../models/Expense");
+const VendorCredit = require("../models/VendorCredit");
+const PurchaseOrder = require("../models/PurchaseOrder");
 const { ah, validate, HttpError, round2 } = require("../utils/http");
 const { escapeRx } = require("../utils/salesDoc");
 
@@ -75,14 +77,18 @@ router.get(
   ah(async (req, res) => {
     const vendor = await Vendor.findOne({ _id: req.params.id, organization: req.org }).lean();
     if (!vendor) throw new HttpError(404, "Vendor not found");
-    const [bills, payments, expenses] = await Promise.all([
+    const [bills, payments, expenses, vendorCredits] = await Promise.all([
       Bill.find({ organization: req.org, vendor: vendor._id }, { lineItems: 0 }).sort({ date: -1 }),
       VendorPayment.find({ organization: req.org, vendor: vendor._id }).sort({ date: -1 }).lean(),
       Expense.find({ organization: req.org, vendor: vendor._id }).sort({ date: -1 }).lean(),
+      VendorCredit.find({ organization: req.org, vendor: vendor._id }, { lineItems: 0 }).sort({ date: -1 }).lean(),
     ]);
     const payables = round2(bills.filter((b) => ["open", "partially_paid"].includes(b.status)).reduce((s, b) => s + b.balance, 0));
-    const unusedCredits = round2(payments.reduce((s, p) => s + (p.unusedAmount || 0), 0));
-    res.send({ ...vendor, payables, unusedCredits, bills, payments, expenses });
+    const unusedCredits = round2(
+      payments.reduce((s, p) => s + (p.unusedAmount || 0), 0) +
+        vendorCredits.filter((c) => c.status === "open").reduce((s, c) => s + c.balance, 0)
+    );
+    res.send({ ...vendor, payables, unusedCredits, bills, payments, expenses, vendorCredits });
   })
 );
 
@@ -100,7 +106,12 @@ router.delete(
   "/:id",
   ah(async (req, res) => {
     const q = { organization: req.org, vendor: req.params.id };
-    const used = (await Bill.exists(q)) || (await VendorPayment.exists(q)) || (await Expense.exists(q));
+    const used =
+      (await Bill.exists(q)) ||
+      (await VendorPayment.exists(q)) ||
+      (await Expense.exists(q)) ||
+      (await VendorCredit.exists(q)) ||
+      (await PurchaseOrder.exists(q));
     if (used) throw new HttpError(400, "This vendor has transactions. Mark them inactive instead of deleting.");
     const r = await Vendor.deleteOne({ _id: req.params.id, organization: req.org });
     if (!r.deletedCount) throw new HttpError(404, "Vendor not found");

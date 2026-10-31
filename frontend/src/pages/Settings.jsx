@@ -23,6 +23,8 @@ export default function Settings() {
           creditNotePrefix: organization.creditNotePrefix || "CN-",
           vendorPaymentPrefix: organization.vendorPaymentPrefix || "PM-",
           journalPrefix: organization.journalPrefix || "MJ-",
+          purchaseOrderPrefix: organization.purchaseOrderPrefix || "PO-",
+          vendorCreditPrefix: organization.vendorCreditPrefix || "DN-",
           defaultPaymentTerms: organization.defaultPaymentTerms ?? 15,
           defaultNotes: organization.defaultNotes || "",
           defaultTerms: organization.defaultTerms || "",
@@ -128,6 +130,12 @@ export default function Settings() {
           <div className="row-3">
             <Field label="Journal Number Prefix">
               <input value={form.journalPrefix} onChange={set("journalPrefix")} />
+            </Field>
+            <Field label="Purchase Order Number Prefix">
+              <input value={form.purchaseOrderPrefix} onChange={set("purchaseOrderPrefix")} />
+            </Field>
+            <Field label="Vendor Credit Number Prefix">
+              <input value={form.vendorCreditPrefix} onChange={set("vendorCreditPrefix")} />
             </Field>
             <Field label="Default Payment Terms">
               <select value={form.defaultPaymentTerms} onChange={set("defaultPaymentTerms")}>

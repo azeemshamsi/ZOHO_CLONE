@@ -24,6 +24,7 @@ const vendorPaymentSchema = new mongoose.Schema(
       default: "bank_transfer",
     },
     reference: { type: String, default: "" },
+    bankAccount: { type: String, default: "" }, // cash/bank account code; blank = by payment mode
     notes: { type: String, default: "" },
     allocations: { type: [allocationSchema], default: [] },
     unusedAmount: { type: Number, default: 0 },

@@ -9,12 +9,14 @@ const billSchema = new mongoose.Schema(
     dueDate: { type: Date, required: true },
     paymentTerms: { type: Number, default: 0 },
     amountPaid: { type: Number, default: 0 },
+    creditsApplied: { type: Number, default: 0 },
     balance: { type: Number, default: 0 },
     status: {
       type: String,
       enum: ["draft", "open", "partially_paid", "paid", "void"],
       default: "draft",
     },
+    purchaseOrder: { type: mongoose.Schema.Types.ObjectId, ref: "PurchaseOrder" },
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );

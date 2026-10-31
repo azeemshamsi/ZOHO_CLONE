@@ -188,12 +188,14 @@ router.post(
         amount: Joi.number().greater(0).required().label("Amount"),
         mode: Joi.string().valid("cash", "bank_transfer", "upi", "cheque", "card", "other"),
         reference: Joi.string().allow(""),
+        bankAccount: Joi.string().allow(""),
       }),
       req.body
     );
     const cn = await findCN(req);
     if (cn.status !== "open") throw new HttpError(400, "This credit note has no credit left to refund");
     if (round2(data.amount) > cn.balance) throw new HttpError(400, "The refund is more than the credit available");
+    if (!(await require("../utils/ledger").isBankAccount(req.org, data.bankAccount))) throw new HttpError(400, "Pick a cash or bank account");
     cn.refunds.push({ ...data, amount: round2(data.amount) });
     refreshStatus(cn);
     await cn.save();

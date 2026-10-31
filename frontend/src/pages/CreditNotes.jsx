@@ -8,6 +8,8 @@ import { money, amount, date, isoDate, round2 } from "../lib/format";
 import { PageHeader, Spinner, toast, Status, Confirm, Modal, MoreMenu, Field, invoiceStatus } from "../components/ui";
 import { DocList, DocForm, DocPaper, MiniTable } from "../components/SalesDoc";
 import Icon from "../components/Icon";
+import BankAccountSelect from "../components/BankAccountSelect";
+
 
 const K = KINDS.creditNote;
 
@@ -144,7 +146,7 @@ function ApplyToInvoices({ cn, open, onClose, onDone }) {
 }
 
 function RefundModal({ cn, open, onClose, onDone }) {
-  const [f, setF] = useState({ date: isoDate(), amount: "", mode: "bank_transfer", reference: "" });
+  const [f, setF] = useState({ date: isoDate(), amount: "", mode: "bank_transfer", bankAccount: "", reference: "" });
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (open) setF((x) => ({ ...x, amount: cn.balance }));
@@ -182,9 +184,12 @@ function RefundModal({ cn, open, onClose, onDone }) {
             </select>
           </Field>
         </div>
-        <Field label="Reference#">
-          <input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} />
-        </Field>
+        <div className="row-2">
+          <BankAccountSelect label="Paid From" value={f.bankAccount} mode={f.mode} onChange={(v) => setF({ ...f, bankAccount: v })} />
+          <Field label="Reference#">
+            <input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} />
+          </Field>
+        </div>
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>
             Cancel

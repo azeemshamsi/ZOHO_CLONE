@@ -3,6 +3,7 @@ const Invoice = require("../models/Invoice");
 const CreditNote = require("../models/CreditNote");
 const Bill = require("../models/Bill");
 const Expense = require("../models/Expense");
+const VendorCredit = require("../models/VendorCredit");
 const Organization = require("../models/Organization");
 const { ah, round2 } = require("../utils/http");
 const { istToday, istEndOfToday } = require("../utils/time");
@@ -270,11 +271,12 @@ router.get(
   "/gstr3b",
   ah(async (req, res) => {
     const { from, to } = parseRange(req.query);
-    const [invoices, credits, bills, expenses] = await Promise.all([
+    const [invoices, credits, bills, expenses, vendorCredits] = await Promise.all([
       liveInvoices(req.org, from, to),
       liveCredits(req.org, from, to),
       Bill.find({ organization: req.org, status: { $nin: ["draft", "void"] }, date: { $gte: from, $lte: to } }).lean(),
       Expense.find({ organization: req.org, date: { $gte: from, $lte: to } }).lean(),
+      VendorCredit.find({ organization: req.org, status: { $nin: ["draft", "void"] }, date: { $gte: from, $lte: to } }).lean(),
     ]);
     const lines = (docs, taxed) => docs.flatMap((d) => d.lineItems).filter((l) => (taxed ? l.taxRate > 0 : !l.taxRate));
     const minus = (a, b) => ({
@@ -287,13 +289,14 @@ router.get(
     const nilExempt = minus(taxSplit(lines(invoices, false)), taxSplit(lines(credits, false)));
     const itcBills = { igst: sum(bills, (b) => b.igst), cgst: sum(bills, (b) => b.cgst), sgst: sum(bills, (b) => b.sgst) };
     const itcExpenses = { igst: sum(expenses, (e) => e.igst), cgst: sum(expenses, (e) => e.cgst), sgst: sum(expenses, (e) => e.sgst) };
+    const itcReversed = { igst: sum(vendorCredits, (c) => c.igst), cgst: sum(vendorCredits, (c) => c.cgst), sgst: sum(vendorCredits, (c) => c.sgst) };
     const itc = {
-      igst: round2(itcBills.igst + itcExpenses.igst),
-      cgst: round2(itcBills.cgst + itcExpenses.cgst),
-      sgst: round2(itcBills.sgst + itcExpenses.sgst),
+      igst: round2(itcBills.igst + itcExpenses.igst - itcReversed.igst),
+      cgst: round2(itcBills.cgst + itcExpenses.cgst - itcReversed.cgst),
+      sgst: round2(itcBills.sgst + itcExpenses.sgst - itcReversed.sgst),
     };
     const net = Object.fromEntries(["igst", "cgst", "sgst"].map((k) => [k, round2(outward[k] - itc[k])]));
-    res.send({ from, to, outward, nilExempt, itcBills, itcExpenses, itc, net });
+    res.send({ from, to, outward, nilExempt, itcBills, itcExpenses, itcReversed, itc, net });
   })
 );
 
