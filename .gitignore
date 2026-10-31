@@ -1,23 +1,12 @@
-# Dependencies
 node_modules/
-
-# Environment variables
-.env
-
-# Build files
-build/
 dist/
-
-# Logs
+build/
+coverage/
+.env
+.env.*
+!.env.example
 *.log
-
-# OS generated files
 .DS_Store
 Thumbs.db
-
-# IDE files
 .vscode/
 .idea/
-
-# Test coverage
-coverage/
