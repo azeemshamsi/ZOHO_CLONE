@@ -26,6 +26,7 @@ const organizationSchema = new mongoose.Schema(
     quotePrefix: { type: String, default: "QT-" },
     salesOrderPrefix: { type: String, default: "SO-" },
     creditNotePrefix: { type: String, default: "CN-" },
+    vendorPaymentPrefix: { type: String, default: "PM-" },
     defaultPaymentTerms: { type: Number, default: 15 },
     defaultNotes: { type: String, default: "Thanks for your business." },
     defaultTerms: { type: String, default: "" },

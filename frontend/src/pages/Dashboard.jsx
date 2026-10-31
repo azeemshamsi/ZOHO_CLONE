@@ -14,7 +14,7 @@ function compact(n) {
 }
 
 function SalesChart({ months }) {
-  const max = Math.max(1, ...months.map((m) => Math.max(m.sales, m.receipts)));
+  const max = Math.max(1000, ...months.map((m) => Math.max(m.sales, m.receipts)));
   const W = 640;
   const H = 220;
   const pad = { l: 48, r: 8, t: 10, b: 28 };
@@ -121,6 +121,57 @@ export default function Dashboard() {
               <strong className={v ? "text-overdue" : ""}>{money(v)}</strong>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="grid-2">
+        <div className="card">
+          <div className="card-head">
+            <h3>Total Payables</h3>
+            <Link to="/bills/new" className="link-btn">
+              <Icon name="plus" size={14} /> New Bill
+            </Link>
+          </div>
+          <p className="muted small">Total unpaid bills {money(d.payables.total)}</p>
+          <div className="meter">
+            <div className="meter-current" style={{ width: `${d.payables.total ? 100 - (d.payables.overdue / d.payables.total) * 100 : 100}%` }} />
+            <div className="meter-overdue" style={{ width: `${d.payables.total ? (d.payables.overdue / d.payables.total) * 100 : 0}%` }} />
+          </div>
+          <div className="kpis no-border">
+            <div>
+              <span className="label label-current">Current</span>
+              <strong>{money(d.payables.current)}</strong>
+            </div>
+            <div>
+              <span className="label label-overdue">Overdue</span>
+              <strong>{money(d.payables.overdue)}</strong>
+            </div>
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-head">
+            <h3>Top Expenses</h3>
+            <span className="muted small">This financial year · {money(d.expensesThisFy)}</span>
+          </div>
+          {d.topExpenses.length === 0 ? (
+            <p className="muted">
+              No expenses yet. <Link to="/expenses/new">Record one</Link>
+            </p>
+          ) : (
+            <ul className="rank">
+              {d.topExpenses.map((t) => (
+                <li key={t.category}>
+                  <span>
+                    <span className="bar-track">
+                      <span className="bar-fill" style={{ width: `${(t.total / d.topExpenses[0].total) * 100}%` }} />
+                    </span>
+                    {t.category}
+                  </span>
+                  <strong>{money(t.total)}</strong>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
 

@@ -3,6 +3,8 @@ const Invoice = require("../models/Invoice");
 const Payment = require("../models/Payment");
 const Customer = require("../models/Customer");
 const Item = require("../models/Item");
+const Bill = require("../models/Bill");
+const Expense = require("../models/Expense");
 const { ah, round2 } = require("../utils/http");
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -21,6 +23,29 @@ router.get(
     today.setHours(0, 0, 0, 0);
     const fyStart = fiscalYearStart(today);
     const monthsBack = new Date(today.getFullYear(), today.getMonth() - 11, 1);
+
+    const [bills, expenses] = await Promise.all([
+      Bill.find({ organization: org, status: { $in: ["open", "partially_paid"] } }, { balance: 1, dueDate: 1 }).lean(),
+      Expense.find({ organization: org, date: { $gte: monthsBack < fyStart ? monthsBack : fyStart } }, { total: 1, date: 1, category: 1 }).lean(),
+    ]);
+    const pay = { total: 0, current: 0, overdue: 0 };
+    for (const b of bills) {
+      pay.total += b.balance;
+      if (new Date(b.dueDate) < today) pay.overdue += b.balance;
+      else pay.current += b.balance;
+    }
+    Object.keys(pay).forEach((k) => (pay[k] = round2(pay[k])));
+    const byCategory = {};
+    let expensesThisFy = 0;
+    for (const e of expenses) {
+      if (new Date(e.date) < fyStart) continue;
+      expensesThisFy += e.total;
+      byCategory[e.category] = round2((byCategory[e.category] || 0) + e.total);
+    }
+    const topExpenses = Object.entries(byCategory)
+      .map(([category, total]) => ({ category, total }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
 
     const [invoices, payments, customerCount, itemCount] = await Promise.all([
       Invoice.find(
@@ -89,6 +114,9 @@ router.get(
       .limit(6);
 
     res.send({
+      payables: pay,
+      expensesThisFy: round2(expensesThisFy),
+      topExpenses,
       receivables: recv,
       salesThisFy: round2(salesThisFy),
       fiscalYearStart: fyStart,

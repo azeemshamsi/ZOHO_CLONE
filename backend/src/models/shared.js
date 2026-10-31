@@ -21,12 +21,12 @@ const lineItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
-// Fields every sales document shares.
-const salesDocFields = () => ({
+// Fields every sales (party = "customer") or purchase (party = "vendor") document shares.
+const salesDocFields = (party = "customer") => ({
   organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true },
-  customer: { type: mongoose.Schema.Types.ObjectId, ref: "Customer", required: true, index: true },
-  customerName: { type: String, required: true },
-  customerGstin: { type: String, default: "" },
+  [party]: { type: mongoose.Schema.Types.ObjectId, ref: party === "vendor" ? "Vendor" : "Customer", required: true, index: true },
+  [`${party}Name`]: { type: String, required: true },
+  [`${party}Gstin`]: { type: String, default: "" },
   billingAddress: { type: addressSchema, default: () => ({}) },
   date: { type: Date, required: true },
   placeOfSupply: { type: String, default: "" },

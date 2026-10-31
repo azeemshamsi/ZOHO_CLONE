@@ -74,6 +74,28 @@ export const KINDS = {
   },
 };
 
+// Purchase documents (party = vendor)
+KINDS.bill = {
+  key: "bill",
+  party: "vendor",
+  label: "Bill",
+  plural: "Bills",
+  api: "/bills",
+  route: "/bills",
+  numberField: "billNumber",
+  numberLabel: "Bill#",
+  numberAuto: false,
+  dateLabel: "Bill Date",
+  refField: "orderNumber",
+  refLabel: "Order Number",
+  second: { field: "dueDate", label: "Due Date", required: true, terms: true },
+  docTitle: "BILL",
+  saveButtons: [
+    { status: "draft", label: "Save as Draft" },
+    { status: "open", label: "Save as Open", primary: true },
+  ],
+};
+
 export const CREDIT_REASONS = [
   "Sales Return",
   "Post Sale Discount",

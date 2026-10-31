@@ -9,20 +9,24 @@ Built with MongoDB, Express, React (Vite) and Node.js. One Node server runs the 
 | Module | Features |
 | --- | --- |
 | **Accounts** | Sign up (creates your organization), sign in, forgot/reset password, optional email verification |
-| **Home** | Total receivables with current/overdue ageing (1–15, 16–30, 31–45, 45+ days), 12-month sales vs receipts chart, financial-year totals, top customers by dues, recent invoices |
+| **Home** | Total payables (current/overdue), top expenses this financial year, total receivables with current/overdue ageing (1–15, 16–30, 31–45, 45+ days), 12-month sales vs receipts chart, financial-year totals, top customers by dues, recent invoices |
 | **Customers** | Business/individual, GST treatment, GSTIN (auto-sets place of supply), billing & shipping address, payment terms, receivables, transaction history |
 | **Items** | Goods/services, HSN/SAC, unit, selling & cost price, GST rate (0–28%) |
 | **Invoices** | Auto numbering, payment terms → due date, line items with discount, **CGST + SGST for intra-state or IGST for inter-state** worked out automatically, shipping & adjustment, draft/sent, unpaid/partially paid/paid/overdue/void, printable tax invoice with amount in words (Print → Save as PDF) |
 | **Quotes** | Draft → sent → accepted/declined, expiry date (shows Expired), one-click convert to Sales Order or Invoice |
 | **Sales Orders** | Draft → confirmed → invoiced, expected shipment date, cancel/reopen, one-click convert to Invoice |
 | **Credit Notes** | From scratch or from an invoice, GST reasons, apply credit to one or many invoices, refund, remove an application, void |
+| **Vendors** | GST treatment, GSTIN (fills source of supply and PAN), payment terms, payables, bills/payments/expenses history |
+| **Bills** | Vendor's bill number (duplicates blocked), cost prices from items, input GST (CGST+SGST or IGST from the vendor's state), draft/open/partially paid/paid/overdue/void |
+| **Payments Made** | Pay one or many bills, advance to vendor kept as unused amount, printable voucher |
+| **Expenses** | Expense accounts (rent, courier, ads, fuel…), GST inclusive or exclusive, paid through cash/UPI/bank/card, optional vendor |
 | **Payments Received** | Cash, UPI, bank, cheque, card; apply to one or many invoices (or auto-apply oldest first); excess kept as customer credit; printable receipt; deleting a payment re-opens the invoices |
 | **Settings** | Organization name, GSTIN, state, address, contact details, number prefixes, default terms and notes |
 
 ## Roadmap
 
 - **Phase 2 – Sales:** ✅ Quotes, Sales Orders, Credit Notes. Still to come: Delivery Challans, recurring invoices, emailing invoices to customers
-- **Phase 3 – Purchases:** Vendors, Bills, Expenses, Payments Made, Purchase Orders
+- **Phase 3 – Purchases:** ✅ Vendors, Bills, Expenses, Payments Made. Still to come: Purchase Orders, Vendor Credits
 - **Phase 4 – Accountant & Reports:** Chart of accounts, manual journals, banking, P&L, Balance Sheet, GSTR-1/GSTR-3B summaries, aging reports
 - **Later:** Inventory tracking, multiple users & roles, Shopify sync
 

@@ -134,17 +134,20 @@ export function DocForm({ kind }) {
   const [autoNumber, setAutoNumber] = useState("");
   const isCN = kind.key === "creditNote";
   const second = kind.second;
+  const party = kind.party || "customer";
+  const isVendor = party === "vendor";
+  const partyApi = isVendor ? "/vendors" : "/customers";
 
   useEffect(() => {
-    api.get("/customers", { params: { status: "active" } }).then((r) => setCustomers(r.data));
+    api.get(partyApi, { params: { status: "active" } }).then((r) => setCustomers(r.data));
     api.get("/items", { params: { status: "active" } }).then((r) => setItems(r.data));
-  }, []);
+  }, [partyApi]);
 
   useEffect(() => {
     if (id) {
       api.get(`${kind.api}/${id}`).then(({ data }) => {
         const f = {
-          customer: data.customer,
+          customer: data[party],
           number: data[kind.numberField] || "",
           ref: data[kind.refField] || "",
           date: isoDate(data.date),
@@ -164,11 +167,11 @@ export function DocForm({ kind }) {
       });
       return;
     }
-    api.get(`${kind.api}/next-number`).then((r) => setAutoNumber(r.data.number));
+    if (kind.numberAuto !== false) api.get(`${kind.api}/next-number`).then((r) => setAutoNumber(r.data.number));
     const terms = organization?.defaultPaymentTerms ?? 15;
     const today = isoDate();
     const base = {
-      customer: params.get("customer") || "",
+      customer: params.get(party) || "",
       number: "",
       ref: "",
       date: today,
@@ -178,8 +181,8 @@ export function DocForm({ kind }) {
       lineItems: [blankLine()],
       shippingCharge: 0,
       adjustment: 0,
-      customerNotes: isCN ? "" : organization?.defaultNotes || "",
-      terms: isCN ? "" : organization?.defaultTerms || "",
+      customerNotes: isCN || isVendor ? "" : organization?.defaultNotes || "",
+      terms: isCN || isVendor ? "" : organization?.defaultTerms || "",
       status: "draft",
       invoice: "",
       reason: isCN ? "Sales Return" : "",
@@ -196,7 +199,7 @@ export function DocForm({ kind }) {
         })
       );
     } else setForm(base);
-  }, [id, kind, organization, params, second, isCN]);
+  }, [id, kind, organization, params, second, isCN, party, isVendor]);
 
   // Customer picked from the URL: apply their defaults once customers load.
   useEffect(() => {
@@ -243,7 +246,8 @@ export function DocForm({ kind }) {
   const pickItem = (i, itemId) => {
     const it = items.find((x) => x._id === itemId);
     if (!it) return setLine(i, { item: "" });
-    setLine(i, { item: it._id, name: it.name, description: it.description, hsnSac: it.hsnSac, unit: it.unit, rate: it.rate, taxRate: it.taxRate });
+    const rate = isVendor ? it.purchaseRate || it.rate : it.rate;
+    setLine(i, { item: it._id, name: it.name, description: it.description, hsnSac: it.hsnSac, unit: it.unit, rate, taxRate: it.taxRate });
   };
 
   const submit = async (status) => {
@@ -253,7 +257,7 @@ export function DocForm({ kind }) {
     setError("");
     try {
       const body = {
-        customer: form.customer,
+        [party]: form.customer,
         [kind.numberField]: form.number,
         [kind.refField]: form.ref,
         date: form.date,
@@ -297,17 +301,17 @@ export function DocForm({ kind }) {
       <PageHeader title={title} back={id ? `${kind.route}/${id}` : kind.route} />
       <form className="card form doc-form" onSubmit={(e) => e.preventDefault()}>
         <div className="form-grid">
-          <Field label="Customer Name" required>
+          <Field label={isVendor ? "Vendor Name" : "Customer Name"} required>
             <div className="inline-add">
               <select required value={form.customer} onChange={pickCustomer}>
-                <option value="">Select or add a customer</option>
+                <option value="">Select or add a {party}</option>
                 {customers.map((c) => (
                   <option key={c._id} value={c._id}>
                     {c.displayName}
                   </option>
                 ))}
               </select>
-              <Link to="/customers/new" className="btn btn-sm" title="New customer">
+              <Link to={`${partyApi}/new`} className="btn btn-sm" title={`New ${party}`}>
                 <Icon name="plus" size={14} />
               </Link>
             </div>
@@ -320,11 +324,11 @@ export function DocForm({ kind }) {
                 </span>
               )}
               <span>
-                Receivables: <b>{money(customer.receivables)}</b>
+                {isVendor ? "Payables" : "Receivables"}: <b>{money(isVendor ? customer.payables : customer.receivables)}</b>
               </span>
             </div>
           )}
-          <Field label="Place of Supply" required>
+          <Field label={isVendor ? "Source of Supply" : "Place of Supply"} required>
             <select value={form.placeOfSupply} onChange={set("placeOfSupply")} required>
               <option value="">Select</option>
               {STATES.map(([c, n]) => (
@@ -357,7 +361,12 @@ export function DocForm({ kind }) {
           )}
           <div className="row-2">
             <Field label={kind.numberLabel} required>
-              <input value={form.number} placeholder={autoNumber || "Auto-generated"} onChange={set("number")} />
+              <input
+                value={form.number}
+                required={kind.numberAuto === false}
+                placeholder={kind.numberAuto === false ? "" : autoNumber || "Auto-generated"}
+                onChange={set("number")}
+              />
             </Field>
             <Field label={kind.refLabel}>
               <input value={form.ref} onChange={set("ref")} />
@@ -473,12 +482,14 @@ export function DocForm({ kind }) {
 
         <div className="invoice-bottom">
           <div className="stack">
-            <Field label="Customer Notes">
+            <Field label={isVendor ? "Notes" : "Customer Notes"} hint={isVendor ? "Internal note, not shown to the vendor" : undefined}>
               <textarea rows={3} value={form.customerNotes} onChange={set("customerNotes")} />
             </Field>
-            <Field label="Terms & Conditions">
-              <textarea rows={3} value={form.terms} onChange={set("terms")} />
-            </Field>
+            {!isVendor && (
+              <Field label="Terms & Conditions">
+                <textarea rows={3} value={form.terms} onChange={set("terms")} />
+              </Field>
+            )}
           </div>
           <div className="totals-box">
             <div className="tot-row">
@@ -547,7 +558,7 @@ function Addr({ a = {} }) {
   return lines.map((l, i) => <div key={i}>{l}</div>);
 }
 
-export function DocPaper({ doc, org, title, number, meta = [], ribbon, balance, extraTotals = [], extraInfo = [] }) {
+export function DocPaper({ doc, org, title, number, meta = [], ribbon, balance, extraTotals = [], extraInfo = [], partyLabel = "Bill To" }) {
   const taxRows = {};
   doc.lineItems.forEach((l) => {
     if (!l.taxRate) return;
@@ -586,11 +597,11 @@ export function DocPaper({ doc, org, title, number, meta = [], ribbon, balance, 
 
       <div className="doc-meta">
         <div>
-          <div className="doc-label">Bill To</div>
-          <strong>{doc.customerName}</strong>
+          <div className="doc-label">{partyLabel}</div>
+          <strong>{doc.customerName || doc.vendorName}</strong>
           <div className="doc-small">
             <Addr a={doc.billingAddress} />
-            {doc.customerGstin && <div>GSTIN {doc.customerGstin}</div>}
+            {(doc.customerGstin || doc.vendorGstin) && <div>GSTIN {doc.customerGstin || doc.vendorGstin}</div>}
           </div>
         </div>
         <table className="doc-kv">
@@ -604,7 +615,7 @@ export function DocPaper({ doc, org, title, number, meta = [], ribbon, balance, 
                 </tr>
               ))}
             <tr>
-              <td>Place of Supply :</td>
+              <td>{doc.vendorName ? "Source of Supply" : "Place of Supply"} :</td>
               <td>
                 {stateName(doc.placeOfSupply)} ({doc.placeOfSupply})
               </td>

@@ -21,6 +21,7 @@ export default function Settings() {
           quotePrefix: organization.quotePrefix || "QT-",
           salesOrderPrefix: organization.salesOrderPrefix || "SO-",
           creditNotePrefix: organization.creditNotePrefix || "CN-",
+          vendorPaymentPrefix: organization.vendorPaymentPrefix || "PM-",
           defaultPaymentTerms: organization.defaultPaymentTerms ?? 15,
           defaultNotes: organization.defaultNotes || "",
           defaultTerms: organization.defaultTerms || "",
@@ -118,6 +119,9 @@ export default function Settings() {
             </Field>
             <Field label="Credit Note Number Prefix">
               <input value={form.creditNotePrefix} onChange={set("creditNotePrefix")} />
+            </Field>
+            <Field label="Payment Made Number Prefix">
+              <input value={form.vendorPaymentPrefix} onChange={set("vendorPaymentPrefix")} />
             </Field>
             <Field label="Default Payment Terms">
               <select value={form.defaultPaymentTerms} onChange={set("defaultPaymentTerms")}>

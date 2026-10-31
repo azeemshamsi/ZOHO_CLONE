@@ -11,6 +11,10 @@ import { PaymentList, PaymentForm, PaymentView } from "./pages/Payments";
 import { QuoteList, QuoteForm, QuoteView } from "./pages/Quotes";
 import { SalesOrderList, SalesOrderForm, SalesOrderView } from "./pages/SalesOrders";
 import { CreditNoteList, CreditNoteForm, CreditNoteView } from "./pages/CreditNotes";
+import { VendorList, VendorForm, VendorDetail } from "./pages/Vendors";
+import { BillList, BillForm, BillView } from "./pages/Bills";
+import { VendorPaymentList, VendorPaymentForm, VendorPaymentView } from "./pages/VendorPayments";
+import { ExpenseList, ExpenseForm } from "./pages/Expenses";
 import Settings from "./pages/Settings";
 import ComingSoon from "./pages/ComingSoon";
 
@@ -26,7 +30,7 @@ function PublicOnly({ children }) {
   return user ? <Navigate to="/" replace /> : children;
 }
 
-const SOON = ["/vendors", "/expenses", "/bills", "/payments-made", "/banking", "/journals", "/chart-of-accounts", "/reports"];
+const SOON = ["/purchase-orders", "/vendor-credits", "/banking", "/journals", "/chart-of-accounts", "/reports"];
 
 export default function App() {
   return (
@@ -63,6 +67,20 @@ export default function App() {
           <Route path="credit-notes/new" element={<CreditNoteForm />} />
           <Route path="credit-notes/:id" element={<CreditNoteView />} />
           <Route path="credit-notes/:id/edit" element={<CreditNoteForm />} />
+          <Route path="vendors" element={<VendorList />} />
+          <Route path="vendors/new" element={<VendorForm />} />
+          <Route path="vendors/:id" element={<VendorDetail />} />
+          <Route path="vendors/:id/edit" element={<VendorForm />} />
+          <Route path="bills" element={<BillList />} />
+          <Route path="bills/new" element={<BillForm />} />
+          <Route path="bills/:id" element={<BillView />} />
+          <Route path="bills/:id/edit" element={<BillForm />} />
+          <Route path="payments-made" element={<VendorPaymentList />} />
+          <Route path="payments-made/new" element={<VendorPaymentForm />} />
+          <Route path="payments-made/:id" element={<VendorPaymentView />} />
+          <Route path="expenses" element={<ExpenseList />} />
+          <Route path="expenses/new" element={<ExpenseForm />} />
+          <Route path="expenses/:id/edit" element={<ExpenseForm />} />
           <Route path="payments" element={<PaymentList />} />
           <Route path="payments/new" element={<PaymentForm />} />
           <Route path="payments/:id" element={<PaymentView />} />

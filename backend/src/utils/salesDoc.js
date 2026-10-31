@@ -29,13 +29,14 @@ const baseDocJoi = {
   terms: Joi.string().allow(""),
 };
 
-// Look up customer + org, work out GST and totals.
-async function prepareDoc(req, data) {
+// Look up the customer (or vendor) + org, work out GST and totals.
+async function prepareDoc(req, data, party = "customer") {
+  const Party = party === "vendor" ? require("../models/Vendor") : Customer;
   const [customer, org] = await Promise.all([
-    Customer.findOne({ _id: data.customer, organization: req.org }),
+    Party.findOne({ _id: data[party], organization: req.org }),
     Organization.findById(req.org),
   ]);
-  if (!customer) throw new HttpError(400, "Choose a valid customer");
+  if (!customer) throw new HttpError(400, `Choose a valid ${party}`);
   const placeOfSupply = data.placeOfSupply || customer.placeOfSupply || org.state;
   const totals = computeTotals({
     lineItems: data.lineItems.map((l) => ({ ...l, item: l.item || undefined })),
@@ -51,8 +52,8 @@ async function prepareDoc(req, data) {
       ...data,
       ...totals,
       placeOfSupply,
-      customerName: customer.displayName,
-      customerGstin: customer.gstin,
+      [`${party}Name`]: customer.displayName,
+      [`${party}Gstin`]: customer.gstin,
       billingAddress: customer.billingAddress,
     },
   };
@@ -131,6 +132,20 @@ async function createInvoiceFrom(req, src, links, orderNumber) {
   return invoice;
 }
 
+// Same as settleInvoice, for bills (unpaid bills are "open").
+function settleBill(bill) {
+  bill.amountPaid = round2(bill.amountPaid || 0);
+  bill.balance = round2(Math.max(bill.total - bill.amountPaid, 0));
+  if (bill.status === "void") {
+    bill.balance = 0;
+    return bill;
+  }
+  if (bill.amountPaid > 0 && bill.balance === 0) bill.status = "paid";
+  else if (bill.amountPaid > 0) bill.status = "partially_paid";
+  else if (bill.status !== "draft") bill.status = "open";
+  return bill;
+}
+
 const escapeRx = (s) => new RegExp(String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
 
 module.exports = {
@@ -139,6 +154,7 @@ module.exports = {
   prepareDoc,
   peekNumber,
   settleInvoice,
+  settleBill,
   copyContent,
   createInvoiceFrom,
   escapeRx,

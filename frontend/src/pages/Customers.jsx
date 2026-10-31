@@ -78,7 +78,7 @@ export function CustomerList() {
 
 const emptyAddress = { street: "", city: "", state: "", pincode: "", country: "India" };
 
-function AddressFields({ value, onChange }) {
+export function AddressFields({ value, onChange }) {
   const set = (k) => (e) => onChange({ ...value, [k]: e.target.value });
   return (
     <div className="stack">
@@ -312,7 +312,7 @@ export function CustomerForm() {
   );
 }
 
-function fmtAddress(a = {}) {
+export function fmtAddress(a = {}) {
   return [a.street, a.city, [stateName(a.state), a.pincode].filter(Boolean).join(" "), a.country].filter(Boolean);
 }
 

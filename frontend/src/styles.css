@@ -281,6 +281,9 @@ input[type="radio"], input[type="checkbox"] { width: auto; height: auto; accent-
 .kpis { display: flex; gap: 28px; border-top: 1px solid var(--line-2); margin-top: 10px; padding-top: 12px; }
 .kpis > div { display: flex; flex-direction: column; gap: 4px; }
 .kpis strong { font-size: 17px; }
+.kpis.no-border { border-top: 0; margin-top: 0; padding-top: 0; }
+.bar-track { display: inline-block; width: 60px; height: 6px; border-radius: 99px; background: var(--line-2); margin-right: 10px; vertical-align: middle; overflow: hidden; }
+.bar-fill { display: block; height: 100%; background: var(--accent); border-radius: 99px; }
 .rank { list-style: none; padding: 0; margin: 8px 0 0; }
 .rank li { display: flex; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid var(--line-2); }
 .rank li:last-child { border-bottom: 0; }

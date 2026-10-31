@@ -5,10 +5,8 @@ const NAMES = {
   "/quotes": "Quotes",
   "/sales-orders": "Sales Orders",
   "/credit-notes": "Credit Notes",
-  "/vendors": "Vendors",
-  "/expenses": "Expenses",
-  "/bills": "Bills",
-  "/payments-made": "Payments Made",
+  "/purchase-orders": "Purchase Orders",
+  "/vendor-credits": "Vendor Credits",
   "/banking": "Banking",
   "/journals": "Manual Journals",
   "/chart-of-accounts": "Chart of Accounts",
@@ -22,7 +20,7 @@ export default function ComingSoon() {
     <Empty
       icon="chart"
       title={`${name} is coming soon`}
-      text="It's part of the next phases of MGI. Sales — quotes, sales orders, invoices, payments and credit notes — is ready to use today."
+      text="It's part of the next phases of MGI. Sales and Purchases (vendors, bills, payments made and expenses) are ready to use today."
       action={
         <Link to="/invoices" className="btn btn-primary">
           Go to Invoices
