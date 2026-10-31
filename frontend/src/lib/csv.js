@@ -29,7 +29,7 @@ export function parseCsv(text) {
   return rows;
 }
 
-const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12, january: 1, february: 2, march: 3, april: 4, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12 };
 const pad = (n) => String(n).padStart(2, "0");
 
 // Indian banks write day first. Returns "YYYY-MM-DD" or null.
@@ -44,10 +44,18 @@ export function parseBankDate(s) {
     if (+m[2] > 12) return null;
     return `${y}-${pad(m[2])}-${pad(m[1])}`;
   }
-  m = s.match(/^(\d{1,2})[-/ ]([A-Za-z]{3,4})[-/ ,]+(\d{2,4})/);
-  if (m && MONTHS[m[2].toLowerCase()]) {
+  m = s.match(/^(\d{1,2})[-/ ]([A-Za-z]{3,9})[-/ ,]+(\d{2,4})/);
+  if (m) {
+    const mon = MONTHS[m[2].toLowerCase()] || MONTHS[m[2].slice(0, 3).toLowerCase()];
     const y = m[3].length === 2 ? `20${m[3]}` : m[3];
-    return `${y}-${pad(MONTHS[m[2].toLowerCase()])}-${pad(m[1])}`;
+    if (mon) return `${y}-${pad(mon)}-${pad(m[1])}`;
+  }
+  // "Nov 02, 2026"
+  m = s.match(/^([A-Za-z]{3,9})[ -](\d{1,2}),?[ -](\d{2,4})/);
+  if (m) {
+    const mon = MONTHS[m[1].toLowerCase()] || MONTHS[m[1].slice(0, 3).toLowerCase()];
+    const y = m[3].length === 2 ? `20${m[3]}` : m[3];
+    if (mon) return `${y}-${pad(mon)}-${pad(m[2])}`;
   }
   return null;
 }
@@ -64,22 +72,29 @@ export function parseAmount(s) {
   return neg ? -n : n;
 }
 
-// Guess which column is which from the header names.
+// Guess which column is which from the header names (HDFC, ICICI, SBI, Axis, Kotak, Yes, IDFC… layouts).
 export function guessColumns(header) {
-  const find = (re) => header.findIndex((h) => re.test(h.toLowerCase()));
-  const amountIdx = find(/^amount|amount \(|txn amount|transaction amount/);
+  const h = header.map((x) => String(x || "").toLowerCase().trim());
+  const find = (re, not) => h.findIndex((x) => re.test(x) && !(not && not.test(x)));
+  const drcr = find(/^(cr\s*\/\s*dr|dr\s*\/\s*cr|type|txn type|transaction type|debit\s*\/\s*credit|cr\/dr indicator)$/);
+  const deposit = find(/deposit|credit|\bcr\b|money in|paid in/, /\/|indicator|balance/);
+  const withdrawal = find(/withdraw|debit|\bdr\b|money out|paid out/, /\/|indicator|balance/);
+  const amount = find(/^amount|amount\s*\(|txn amount|transaction amount|^amt/, /balance/);
+  const firstDate = find(/date|\bdt\b/);
+  const txnDate = find(/(txn|tran|transaction|posting)\.?\s*(date|dt)/);
   return {
-    date: Math.max(find(/(txn|transaction|value|posting)?\s*date/), 0),
-    description: find(/narration|description|particular|remark|details/),
-    reference: find(/ref|chq|cheque|utr/),
-    deposit: find(/deposit|credit|\bcr\b|money in/),
-    withdrawal: find(/withdraw|debit|\bdr\b|money out/),
-    amount: amountIdx,
+    date: txnDate !== -1 ? txnDate : Math.max(firstDate, 0),
+    description: find(/narration|description|particular|remark|details|naration/),
+    reference: find(/ref|chq|cheque|utr|instrument/),
+    deposit,
+    withdrawal,
+    amount,
+    drcr,
   };
 }
 
 // The header is the first row that looks like column names (has a "date"-ish cell).
 export function findHeaderRow(rows) {
-  const i = rows.findIndex((r) => r.some((c) => /date/i.test(c)) && r.length >= 3);
+  const i = rows.findIndex((r) => r.length >= 3 && r.some((c) => /date|\bdt\b/i.test(c)) && r.filter((c) => c !== "").length >= 3);
   return i === -1 ? 0 : i;
 }

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { money, date } from "../lib/format";
-import { parseCsv, parseBankDate, parseAmount, guessColumns, findHeaderRow } from "../lib/csv";
+import { parseBankDate, parseAmount, guessColumns, findHeaderRow } from "../lib/csv";
+import { readStatementFile, ACCEPT } from "../lib/statement";
 import { PageHeader, Spinner, Empty, Field, toast, Modal, Status, Confirm } from "../components/ui";
 import { clearBankAccountCache } from "../components/BankAccountSelect";
 import { docLink } from "./Accounts";
@@ -117,6 +118,10 @@ export function BankingHome() {
 
 /* ===================== Import ===================== */
 function ImportModal({ open, account, onClose, onDone }) {
+  const [book, setBook] = useState(null); // { sheets: [{name, rows}] }
+  const [sheetIdx, setSheetIdx] = useState(0);
+  const [readError, setReadError] = useState("");
+  const [reading, setReading] = useState(false);
   const [rows, setRows] = useState(null);
   const [headerIdx, setHeaderIdx] = useState(0);
   const [map, setMap] = useState(null);
@@ -127,23 +132,41 @@ function ImportModal({ open, account, onClose, onDone }) {
   useEffect(() => {
     if (!open) {
       setRows(null);
+      setBook(null);
       setMap(null);
       setFileName("");
+      setReadError("");
     }
   }, [open]);
 
-  const onFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    const text = await file.text();
-    const all = parseCsv(text);
+  const useSheet = (all) => {
     const h = findHeaderRow(all);
     const guess = guessColumns(all[h] || []);
     setRows(all);
     setHeaderIdx(h);
     setMap(guess);
     setUseAmount(guess.deposit === -1 && guess.withdrawal === -1 && guess.amount !== -1);
+  };
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setFileName(file.name);
+    setReadError("");
+    setRows(null);
+    setReading(true);
+    try {
+      const b = await readStatementFile(file);
+      setBook(b);
+      setSheetIdx(b.defaultSheet);
+      useSheet(b.sheets[b.defaultSheet].rows);
+    } catch (err) {
+      setBook(null);
+      setReadError(err.message || "Couldn't read this file");
+    } finally {
+      setReading(false);
+    }
   };
 
   const header = rows ? rows[headerIdx] || [] : [];
@@ -155,7 +178,12 @@ function ImportModal({ open, account, onClose, onDone }) {
       let withdrawal = 0;
       if (useAmount) {
         const a = parseAmount(r[map.amount]);
-        if (a >= 0) deposit = a;
+        const flag = map.drcr >= 0 ? String(r[map.drcr] || "").trim().toLowerCase() : "";
+        if (flag) {
+          // Separate Dr/Cr column: D, DR, Debit, Withdrawal → money out.
+          if (/^(d|dr|debit|withdraw)/.test(flag)) withdrawal = Math.abs(a);
+          else deposit = Math.abs(a);
+        } else if (a >= 0) deposit = a;
         else withdrawal = -a;
       } else {
         deposit = Math.abs(parseAmount(r[map.deposit]));
@@ -209,7 +237,7 @@ function ImportModal({ open, account, onClose, onDone }) {
         rows && (
           <>
             <span className="muted small" style={{ marginRight: "auto" }}>
-              {good.length} lines ready{bad ? ` · ${bad} rows skipped (no date or amount)` : ""}
+              {good.length} transactions ready{bad ? ` · ${bad} other row${bad > 1 ? "s" : ""} ignored (headings, totals, notes)` : ""}
             </span>
             <button className="btn" onClick={onClose}>
               Cancel
@@ -223,25 +251,66 @@ function ImportModal({ open, account, onClose, onDone }) {
     >
       <div className="stack">
         <p className="muted small">
-          Download your statement from net banking as <strong>CSV</strong> (Excel users: File → Save As → CSV). Lines already imported are skipped automatically.
+          Download your statement from net banking in <strong>Excel (.xls / .xlsx)</strong> or <strong>CSV</strong> format and upload it as is. Lines already
+          imported are skipped automatically.
         </p>
         <label className="file-drop">
-          <input type="file" accept=".csv,text/csv" onChange={onFile} />
-          <Icon name="doc" /> {fileName || "Choose a CSV file"}
+          <input type="file" accept={ACCEPT} onChange={onFile} />
+          <Icon name="doc" /> {reading ? "Reading…" : fileName || "Choose a statement file (.xlsx, .xls, .csv, .ods, .txt)"}
         </label>
+        {readError && <div className="alert alert-error">{readError}</div>}
+        {book && book.sheets.length > 1 && (
+          <Field label="Sheet">
+            <select
+              value={sheetIdx}
+              onChange={(e) => {
+                const i = Number(e.target.value);
+                setSheetIdx(i);
+                useSheet(book.sheets[i].rows);
+              }}
+            >
+              {book.sheets.map((sh, i) => (
+                <option key={i} value={i}>
+                  {sh.name} ({sh.rows.length} rows)
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         {rows && map && (
           <>
+            <Field label="Header row" hint="The row with the column names. Rows above it (bank name, account details) are ignored.">
+              <select
+                value={headerIdx}
+                onChange={(e) => {
+                  const h = Number(e.target.value);
+                  const guess = guessColumns(rows[h] || []);
+                  setHeaderIdx(h);
+                  setMap(guess);
+                  setUseAmount(guess.deposit === -1 && guess.withdrawal === -1 && guess.amount !== -1);
+                }}
+              >
+                {rows.slice(0, 40).map((r, i) => (
+                  <option key={i} value={i}>
+                    Row {i + 1}: {r.filter(Boolean).slice(0, 4).join(" | ").slice(0, 80)}
+                  </option>
+                ))}
+              </select>
+            </Field>
             <div className="row-3">
               <ColSelect k="date" label="Date column" />
               <ColSelect k="description" label="Description column" optional />
               <ColSelect k="reference" label="Reference column" optional />
             </div>
             <label className="check">
-              <input type="checkbox" checked={useAmount} onChange={(e) => setUseAmount(e.target.checked)} /> One amount column (money out is negative)
+              <input type="checkbox" checked={useAmount} onChange={(e) => setUseAmount(e.target.checked)} /> One amount column (with a Dr/Cr column, or money out shown as negative)
             </label>
             <div className="row-3">
               {useAmount ? (
-                <ColSelect k="amount" label="Amount column" />
+                <>
+                  <ColSelect k="amount" label="Amount column" />
+                  <ColSelect k="drcr" label="Dr / Cr column" optional />
+                </>
               ) : (
                 <>
                   <ColSelect k="deposit" label="Deposits / Credit column" optional />
@@ -259,9 +328,9 @@ function ImportModal({ open, account, onClose, onDone }) {
                 </tr>
               </thead>
               <tbody>
-                {parsed.slice(0, 6).map((r, i) => (
-                  <tr key={i} className={!r.date || !(r.deposit || r.withdrawal) ? "row-muted" : ""}>
-                    <td>{r.date ? date(r.date) : <span className="text-overdue">can't read date</span>}</td>
+                {good.slice(0, 6).map((r, i) => (
+                  <tr key={i}>
+                    <td>{date(r.date)}</td>
                     <td className="clamp">{r.description}</td>
                     <td className="num">{r.deposit ? money(r.deposit) : ""}</td>
                     <td className="num">{r.withdrawal ? money(r.withdrawal) : ""}</td>
@@ -269,7 +338,8 @@ function ImportModal({ open, account, onClose, onDone }) {
                 ))}
               </tbody>
             </table>
-            {parsed.length > 6 && <p className="muted small">…and {parsed.length - 6} more rows</p>}
+            {good.length > 6 && <p className="muted small">…and {good.length - 6} more transactions</p>}
+            {!good.length && <div className="alert alert-error">No transactions found. Check the header row and column choices above.</div>}
           </>
         )}
       </div>
