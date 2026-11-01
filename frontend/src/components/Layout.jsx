@@ -22,6 +22,7 @@ const NAV = [
       { to: "/quotes", label: "Quotes" },
       { to: "/sales-orders", label: "Sales Orders" },
       { to: "/invoices", label: "Invoices" },
+      { to: "/recurring-invoices", label: "Recurring Invoices" },
       { to: "/payments", label: "Payments Received" },
       { to: "/credit-notes", label: "Credit Notes" },
     ],
@@ -32,8 +33,10 @@ const NAV = [
     children: [
       { to: "/vendors", label: "Vendors" },
       { to: "/expenses", label: "Expenses" },
+      { to: "/recurring-expenses", label: "Recurring Expenses" },
       { to: "/purchase-orders", label: "Purchase Orders" },
       { to: "/bills", label: "Bills" },
+      { to: "/recurring-bills", label: "Recurring Bills" },
       { to: "/payments-made", label: "Payments Made" },
       { to: "/vendor-credits", label: "Vendor Credits" },
     ],

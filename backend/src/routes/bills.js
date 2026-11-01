@@ -173,4 +173,16 @@ router.delete(
   })
 );
 
+// Shared with recurring bills (no purchase order link).
+async function createBill(req, body) {
+  const data = validate(schema, body);
+  const { fields } = await build(req, data);
+  const bill = new Bill({ ...fields, organization: req.org, status: data.status || "open" });
+  settleBill(bill);
+  await bill.save();
+  return bill;
+}
+
 module.exports = router;
+module.exports.schema = schema;
+module.exports.createBill = createBill;

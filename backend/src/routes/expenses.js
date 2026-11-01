@@ -78,10 +78,7 @@ router.get(
 
 router.post(
   "/",
-  ah(async (req, res) => {
-    const data = validate(schema, req.body);
-    res.status(201).send(await Expense.create({ ...(await build(req, data)), organization: req.org }));
-  })
+  ah(async (req, res) => res.status(201).send(await createExpense(req, req.body)))
 );
 
 router.get(
@@ -116,4 +113,11 @@ router.delete(
   })
 );
 
+async function createExpense(req, body) {
+  const data = validate(schema, body);
+  return Expense.create({ ...(await build(req, data)), organization: req.org });
+}
+
 module.exports = router;
+module.exports.schema = schema;
+module.exports.createExpense = createExpense;

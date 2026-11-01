@@ -56,15 +56,7 @@ router.get(
 
 router.post(
   "/",
-  ah(async (req, res) => {
-    const data = validate(schema, req.body);
-    const { org, fields } = await build(req, data);
-    if (!fields.invoiceNumber) fields.invoiceNumber = await nextNumber(req.org, "invoice", org.invoicePrefix || "INV-");
-    const invoice = new Invoice({ ...fields, organization: req.org, status: data.status || "draft" });
-    settleInvoice(invoice);
-    await invoice.save();
-    res.status(201).send(invoice);
-  })
+  ah(async (req, res) => res.status(201).send(await createInvoice(req, req.body)))
 );
 
 router.get(
@@ -168,5 +160,18 @@ router.delete(
   })
 );
 
+// Shared with recurring invoices.
+async function createInvoice(req, body) {
+  const data = validate(schema, body);
+  const { org, fields } = await build(req, data);
+  if (!fields.invoiceNumber) fields.invoiceNumber = await nextNumber(req.org, "invoice", org.invoicePrefix || "INV-");
+  const invoice = new Invoice({ ...fields, organization: req.org, status: data.status || "draft" });
+  settleInvoice(invoice);
+  await invoice.save();
+  return invoice;
+}
+
 module.exports = router;
+module.exports.schema = schema;
+module.exports.createInvoice = createInvoice;
 module.exports.settle = settleInvoice;

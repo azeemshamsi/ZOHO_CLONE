@@ -5,6 +5,7 @@ const app = require("./app");
 connectDatabase()
   .then(() => {
     app.listen(env.PORT, () => console.log(`MGI running on port ${env.PORT}`));
+    require("./utils/recurring").startScheduler();
   })
   .catch((err) => {
     console.error("Could not start:", err.message);

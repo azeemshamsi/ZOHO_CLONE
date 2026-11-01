@@ -6,6 +6,7 @@ import { STATES, GST_RATES, PAYMENT_MODES, modeName } from "../lib/constants";
 import { money, date, isoDate, round2 } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
+import { ScheduleFields } from "../components/Schedule";
 import BankAccountSelect from "../components/BankAccountSelect";
 
 
@@ -95,7 +96,7 @@ export function ExpenseList() {
   );
 }
 
-export function ExpenseForm() {
+export function ExpenseForm({ recurring = false }) {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -113,7 +114,25 @@ export function ExpenseForm() {
   }, []);
 
   useEffect(() => {
-    if (id) {
+    if (id && recurring) {
+      api.get(`/recurring/${id}`).then(({ data: p }) => {
+        const t = p.template;
+        setForm({
+          date: isoDate(),
+          category: t.category,
+          amount: t.amount,
+          taxInclusive: !!t.taxInclusive,
+          taxRate: t.taxRate || 0,
+          placeOfSupply: t.placeOfSupply || organization?.state || "",
+          vendor: t.vendor || "",
+          paidThrough: t.paidThrough || "upi",
+          bankAccount: t.bankAccount || "",
+          reference: t.reference || "",
+          notes: t.notes || "",
+          sched: { name: p.name, every: p.every, unit: p.unit, startDate: isoDate(p.startDate), endDate: p.endDate ? isoDate(p.endDate) : "", never: !p.endDate },
+        });
+      });
+    } else if (id) {
       api.get(`/expenses/${id}`).then(({ data }) =>
         setForm({
           date: isoDate(data.date),
@@ -142,9 +161,10 @@ export function ExpenseForm() {
         bankAccount: "",
         reference: "",
         notes: "",
+        sched: recurring ? { name: "", every: 1, unit: "month", startDate: isoDate(), endDate: "", never: true } : undefined,
       });
     }
-  }, [id, organization, params]);
+  }, [id, organization, params, recurring]);
 
   if (!form) return <Spinner />;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
@@ -167,6 +187,18 @@ export function ExpenseForm() {
     setError("");
     try {
       const body = { ...form, amount: Number(form.amount), taxRate: Number(form.taxRate), vendor: form.vendor || null };
+      if (recurring) {
+        const sc = form.sched;
+        const template = { ...body };
+        delete template.sched;
+        delete template.date;
+        const rbody = { kind: "expense", name: sc.name, every: Number(sc.every), unit: sc.unit, startDate: sc.startDate, endDate: sc.never ? null : sc.endDate, template };
+        const { data } = id ? await api.put(`/recurring/${id}`, rbody) : await api.post("/recurring", rbody);
+        toast(id ? "Recurring expense updated" : "Recurring expense created");
+        navigate(`/recurring-expenses/${data._id}`);
+        return;
+      }
+      delete body.sched;
       if (id) await api.put(`/expenses/${id}`, body);
       else await api.post("/expenses", body);
       toast(id ? "Expense updated" : "Expense recorded");
@@ -190,8 +222,8 @@ export function ExpenseForm() {
 
   return (
     <>
-      <PageHeader title={id ? "Edit Expense" : "Record Expense"} back="/expenses">
-        {id && (
+      <PageHeader title={recurring ? (id ? "Edit Recurring Expense" : "New Recurring Expense") : id ? "Edit Expense" : "Record Expense"} back={recurring ? "/recurring-expenses" : "/expenses"}>
+        {id && !recurring && (
           <button className="icon-btn" title="Delete" onClick={() => setConfirm(true)}>
             <Icon name="trash" />
           </button>
@@ -199,10 +231,13 @@ export function ExpenseForm() {
       </PageHeader>
       <form className="card form" onSubmit={submit}>
         <div className="form-grid">
+          {recurring && <ScheduleFields sched={form.sched} onChange={(sched) => setForm({ ...form, sched })} />}
           <div className="row-2">
-            <Field label="Date" required>
-              <input type="date" required value={form.date} onChange={set("date")} />
-            </Field>
+            {!recurring && (
+              <Field label="Date" required>
+                <input type="date" required value={form.date} onChange={set("date")} />
+              </Field>
+            )}
             <Field label="Expense Account" required>
               <select required value={form.category} onChange={set("category")}>
                 <option value="">Select an account</option>
@@ -291,7 +326,7 @@ export function ExpenseForm() {
           <button className="btn btn-primary" disabled={busy}>
             Save
           </button>
-          <button type="button" className="btn" onClick={() => navigate("/expenses")}>
+          <button type="button" className="btn" onClick={() => navigate(recurring ? "/recurring-expenses" : "/expenses")}>
             Cancel
           </button>
         </div>

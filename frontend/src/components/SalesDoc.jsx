@@ -120,7 +120,7 @@ function calc(lines, orgState, pos, shipping, adjustment) {
   return { inter, sub: round2(sub), taxByRate, total };
 }
 
-export function DocForm({ kind }) {
+export function DocForm({ kind, recurring = false }) {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -148,6 +148,30 @@ export function DocForm({ kind }) {
   }, [partyApi]);
 
   useEffect(() => {
+    if (id && recurring) {
+      api.get(`/recurring/${id}`).then(({ data: p }) => {
+        const t = p.template;
+        setForm({
+          customer: t[party],
+          number: t.billNumber || "",
+          ref: t[kind.refField] || "",
+          date: isoDate(),
+          paymentTerms: p.paymentTerms,
+          second: "",
+          placeOfSupply: t.placeOfSupply || "",
+          lineItems: (t.lineItems || []).map(cleanLine),
+          shippingCharge: t.shippingCharge || 0,
+          adjustment: t.adjustment || 0,
+          customerNotes: t.customerNotes || "",
+          terms: t.terms || "",
+          status: "draft",
+          invoice: "",
+          reason: "",
+          sched: { name: p.name, every: p.every, unit: p.unit, startDate: isoDate(p.startDate), endDate: p.endDate ? isoDate(p.endDate) : "", never: !p.endDate, createAs: p.createAs },
+        });
+      });
+      return;
+    }
     if (id) {
       api.get(`${kind.api}/${id}`).then(({ data }) => {
         const f = {
@@ -171,7 +195,7 @@ export function DocForm({ kind }) {
       });
       return;
     }
-    if (kind.numberAuto !== false) api.get(`${kind.api}/next-number`).then((r) => setAutoNumber(r.data.number));
+    if (kind.numberAuto !== false && !recurring) api.get(`${kind.api}/next-number`).then((r) => setAutoNumber(r.data.number));
     const terms = organization?.defaultPaymentTerms ?? 15;
     const today = isoDate();
     const base = {
@@ -191,6 +215,7 @@ export function DocForm({ kind }) {
       invoice: "",
       reason: isCN ? (isVendor ? "Purchase Return" : "Sales Return") : "",
       purchaseOrder: "",
+      sched: recurring ? { name: "", every: 1, unit: "month", startDate: today, endDate: "", never: true, createAs: "final" } : null,
     };
     const fromInvoice = isCN && params.get(linkKey);
     const fromPO = kind.key === "bill" && params.get("po");
@@ -218,7 +243,7 @@ export function DocForm({ kind }) {
         })
       );
     } else setForm(base);
-  }, [id, kind, organization, params, second, isCN, party, isVendor, linkKey, linkApi]);
+  }, [id, kind, organization, params, second, isCN, party, isVendor, linkKey, linkApi, recurring]);
 
   // Customer picked from the URL: apply their defaults once customers load.
   useEffect(() => {
@@ -304,6 +329,17 @@ export function DocForm({ kind }) {
         body.reason = form.reason;
       }
       if (form.purchaseOrder) body.purchaseOrder = form.purchaseOrder;
+      if (recurring) {
+        const sc = form.sched;
+        const template = { ...body };
+        ["date", "status", "dueDate", "paymentTerms", "invoiceNumber"].forEach((k) => delete template[k]);
+        if (kind.key === "bill") template.billNumber = form.number || "RB";
+        const rbody = { kind: kind.key, name: sc.name, every: Number(sc.every), unit: sc.unit, startDate: sc.startDate, endDate: sc.never ? null : sc.endDate, paymentTerms: Number(form.paymentTerms || 0), createAs: sc.createAs, template };
+        const { data } = id ? await api.put(`/recurring/${id}`, rbody) : await api.post("/recurring", rbody);
+        toast(`Recurring ${kind.label.toLowerCase()} ${id ? "updated" : "created"}`);
+        navigate(`/recurring-${kind.key}s/${data._id}`);
+        return;
+      }
       const { data } = id ? await api.put(`${kind.api}/${id}`, body) : await api.post(kind.api, body);
       toast(`${kind.label} ${id ? "updated" : "created"}`);
       navigate(`${kind.route}/${data._id}`);
@@ -313,12 +349,13 @@ export function DocForm({ kind }) {
     }
   };
 
-  const isDraft = !id || form.status === "draft";
-  const title = id ? `Edit ${form.number}` : `New ${kind.label}`;
+  const isDraft = !recurring && (!id || form.status === "draft");
+  const title = recurring ? (id ? `Edit ${form.sched.name}` : `New Recurring ${kind.label}`) : id ? `Edit ${form.number}` : `New ${kind.label}`;
+  const setSched = (k, v) => setForm({ ...form, sched: { ...form.sched, [k]: v } });
 
   return (
     <>
-      <PageHeader title={title} back={id ? `${kind.route}/${id}` : kind.route} />
+      <PageHeader title={title} back={recurring ? `/recurring-${kind.key}s${id ? `/${id}` : ""}` : id ? `${kind.route}/${id}` : kind.route} />
       <form className="card form doc-form" onSubmit={(e) => e.preventDefault()}>
         <div className="form-grid">
           <Field label={isVendor ? "Vendor Name" : "Customer Name"} required>
@@ -379,6 +416,76 @@ export function DocForm({ kind }) {
               </Field>
             </div>
           )}
+          {recurring && (
+            <>
+              <Field label="Profile Name" required>
+                <input required value={form.sched.name} onChange={(e) => setSched("name", e.target.value)} placeholder="e.g. Monthly AMC" />
+              </Field>
+              <div className="row-3">
+                <Field label="Repeat Every" required>
+                  <div className="inline-add">
+                    <input type="number" min="1" max="365" required value={form.sched.every} onChange={(e) => setSched("every", e.target.value)} style={{ width: 80 }} />
+                    <select value={form.sched.unit} onChange={(e) => setSched("unit", e.target.value)}>
+                      {[
+                        ["day", "Day(s)"],
+                        ["week", "Week(s)"],
+                        ["month", "Month(s)"],
+                        ["year", "Year(s)"],
+                      ].map(([v, l]) => (
+                        <option key={v} value={v}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </Field>
+                <Field label="Start On" required hint={form.sched.startDate < isoDate() ? "Past dates are created straight away" : ""}>
+                  <input type="date" required value={form.sched.startDate} onChange={(e) => setSched("startDate", e.target.value)} />
+                </Field>
+                <Field label="Ends On">
+                  {form.sched.never ? (
+                    <label className="check">
+                      <input type="checkbox" checked onChange={() => setSched("never", false)} /> Never expires
+                    </label>
+                  ) : (
+                    <div className="inline-add">
+                      <input type="date" required value={form.sched.endDate} min={form.sched.startDate} onChange={(e) => setSched("endDate", e.target.value)} />
+                      <button type="button" className="btn btn-sm" title="Never expires" onClick={() => setForm({ ...form, sched: { ...form.sched, never: true, endDate: "" } })}>
+                        <Icon name="x" size={14} />
+                      </button>
+                    </div>
+                  )}
+                </Field>
+              </div>
+              <div className="row-3">
+                {kind.key !== "expense" && (
+                  <Field label="Payment Terms">
+                    <select value={form.paymentTerms} onChange={set("paymentTerms")}>
+                      {PAYMENT_TERMS.map(([v, l]) => (
+                        <option key={v} value={v}>
+                          {l}
+                        </option>
+                      ))}
+                      {!PAYMENT_TERMS.some(([v]) => v === Number(form.paymentTerms)) && <option value={form.paymentTerms}>Net {form.paymentTerms}</option>}
+                    </select>
+                  </Field>
+                )}
+                <Field label={`Create ${kind.plural} As`}>
+                  <select value={form.sched.createAs} onChange={(e) => setSched("createAs", e.target.value)}>
+                    <option value="final">{kind.key === "invoice" ? "Sent (unpaid)" : "Open"}</option>
+                    <option value="draft">Draft</option>
+                  </select>
+                </Field>
+                {kind.key === "bill" && (
+                  <Field label="Bill# Prefix" hint="Each bill gets this plus its date, e.g. RENT-20261101">
+                    <input value={form.number} onChange={set("number")} placeholder="RB" />
+                  </Field>
+                )}
+              </div>
+            </>
+          )}
+          {!recurring && (
+          <>
           <div className="row-2">
             <Field label={kind.numberLabel} required>
               <input
@@ -424,6 +531,8 @@ export function DocForm({ kind }) {
               </Field>
             )}
           </div>
+          </>
+          )}
         </div>
 
         <h4 className="section-title">

@@ -19,6 +19,9 @@ import { AccountList, AccountDetail } from "./pages/Accounts";
 import { JournalList, JournalForm, JournalView } from "./pages/Journals";
 import { ReportsHome, ReportPage } from "./pages/Reports";
 import { AdjustmentList, AdjustmentForm, AdjustmentView } from "./pages/InventoryAdjustments";
+import { RecurringList, RecurringView } from "./pages/Recurring";
+import { DocForm } from "./components/SalesDoc";
+import { KINDS } from "./lib/docKinds";
 import { PurchaseOrderList, PurchaseOrderForm, PurchaseOrderView } from "./pages/PurchaseOrders";
 import { VendorCreditList, VendorCreditForm, VendorCreditView } from "./pages/VendorCredits";
 import { BankingHome, BankAccountPage } from "./pages/Banking";
@@ -60,6 +63,18 @@ export default function App() {
           <Route path="items/new" element={<ItemForm />} />
           <Route path="items/:id" element={<ItemDetail />} />
           <Route path="items/:id/edit" element={<ItemForm />} />
+          <Route path="recurring-invoices" element={<RecurringList kind="invoice" />} />
+          <Route path="recurring-invoices/new" element={<DocForm kind={KINDS.invoice} recurring key="rec-invoice" />} />
+          <Route path="recurring-invoices/:id" element={<RecurringView kind="invoice" />} />
+          <Route path="recurring-invoices/:id/edit" element={<DocForm kind={KINDS.invoice} recurring key="rec-invoice" />} />
+          <Route path="recurring-bills" element={<RecurringList kind="bill" />} />
+          <Route path="recurring-bills/new" element={<DocForm kind={KINDS.bill} recurring key="rec-bill" />} />
+          <Route path="recurring-bills/:id" element={<RecurringView kind="bill" />} />
+          <Route path="recurring-bills/:id/edit" element={<DocForm kind={KINDS.bill} recurring key="rec-bill" />} />
+          <Route path="recurring-expenses" element={<RecurringList kind="expense" />} />
+          <Route path="recurring-expenses/new" element={<ExpenseForm recurring key="rec-exp" />} />
+          <Route path="recurring-expenses/:id" element={<RecurringView kind="expense" />} />
+          <Route path="recurring-expenses/:id/edit" element={<ExpenseForm recurring key="rec-exp" />} />
           <Route path="inventory-adjustments" element={<AdjustmentList />} />
           <Route path="inventory-adjustments/new" element={<AdjustmentForm />} />
           <Route path="inventory-adjustments/:id" element={<AdjustmentView />} />
