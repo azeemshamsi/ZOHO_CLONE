@@ -21,6 +21,7 @@ import { ReportsHome, ReportPage } from "./pages/Reports";
 import { AdjustmentList, AdjustmentForm, AdjustmentView } from "./pages/InventoryAdjustments";
 import { RecurringList, RecurringView } from "./pages/Recurring";
 import { UsersPage, AcceptInvite } from "./pages/Users";
+import { ProjectList, ProjectForm, ProjectView, Timesheet } from "./pages/Projects";
 import { DocForm } from "./components/SalesDoc";
 import { KINDS } from "./lib/docKinds";
 import { PurchaseOrderList, PurchaseOrderForm, PurchaseOrderView } from "./pages/PurchaseOrders";
@@ -77,6 +78,11 @@ export default function App() {
           <Route path="recurring-expenses/new" element={<ExpenseForm recurring key="rec-exp" />} />
           <Route path="recurring-expenses/:id" element={<RecurringView kind="expense" />} />
           <Route path="recurring-expenses/:id/edit" element={<ExpenseForm recurring key="rec-exp" />} />
+          <Route path="projects" element={<ProjectList />} />
+          <Route path="projects/new" element={<ProjectForm />} />
+          <Route path="projects/:id" element={<ProjectView />} />
+          <Route path="projects/:id/edit" element={<ProjectForm />} />
+          <Route path="timesheet" element={<Timesheet />} />
           <Route path="inventory-adjustments" element={<AdjustmentList />} />
           <Route path="inventory-adjustments/new" element={<AdjustmentForm />} />
           <Route path="inventory-adjustments/:id" element={<AdjustmentView />} />

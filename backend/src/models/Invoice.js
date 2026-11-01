@@ -18,6 +18,7 @@ const invoiceSchema = new mongoose.Schema(
     },
     quote: { type: mongoose.Schema.Types.ObjectId, ref: "Quote" },
     salesOrder: { type: mongoose.Schema.Types.ObjectId, ref: "SalesOrder" },
+    project: { type: mongoose.Schema.Types.ObjectId, ref: "Project" }, // invoiced from a project
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );

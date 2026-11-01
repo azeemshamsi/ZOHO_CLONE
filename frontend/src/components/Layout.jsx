@@ -44,6 +44,15 @@ const NAV = [
       { to: "/vendor-credits", label: "Vendor Credits" },
     ],
   },
+  {
+    label: "Time Tracking",
+    icon: "clock",
+    mod: "sales",
+    children: [
+      { to: "/projects", label: "Projects" },
+      { to: "/timesheet", label: "Timesheet" },
+    ],
+  },
   { to: "/banking", label: "Banking", icon: "bank", mod: "banking" },
   {
     label: "Accountant",
@@ -68,6 +77,8 @@ const PATH_MODULES = [
   ["/recurring-invoices", "sales"],
   ["/payments", "sales"],
   ["/credit-notes", "sales"],
+  ["/projects", "sales"],
+  ["/timesheet", "sales"],
   ["/vendors", "purchases"],
   ["/expenses", "purchases"],
   ["/recurring-expenses", "purchases"],

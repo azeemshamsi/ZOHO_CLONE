@@ -525,3 +525,21 @@ address { font-style: normal; line-height: 1.6; }
 .role-grid { display: grid; gap: 8px; }
 .perm-table td, .perm-table th { text-align: center; }
 .perm-table td:first-child, .perm-table th:first-child { text-align: left; }
+
+/* Time tracking */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+.spacer { flex: 1; }
+.nowrap { white-space: nowrap; }
+.budget { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.budget-bar { flex: 1; max-width: 420px; height: 8px; background: var(--line-2); border-radius: 99px; overflow: hidden; }
+.budget-fill { height: 100%; background: var(--brand); border-radius: 99px; }
+.budget-fill.warn { background: #f59e0b; }
+.budget-fill.over { background: var(--red); }
+.timer { display: flex; align-items: center; gap: 10px; padding: 12px 16px; margin-bottom: 14px; flex-wrap: wrap; }
+.timer select { width: 200px; }
+.timer input { flex: 1; min-width: 200px; }
+.timer.running { background: #f0fdf4; border-color: #bbf7d0; }
+.timer-dot { width: 10px; height: 10px; border-radius: 50%; background: #16a34a; animation: pulse 1.2s infinite; }
+.timer-clock { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 700; }
+@keyframes pulse { 50% { opacity: 0.3; } }
