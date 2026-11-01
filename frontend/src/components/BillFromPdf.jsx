@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { money } from "../lib/format";
 import { STATES, GST_RATES } from "../lib/constants";
@@ -28,17 +28,21 @@ export default function BillFromPdf({ kind = "bill", onClose }) {
     api.get("/vendors").then((r) => setVendors(r.data)).catch(() => {});
     if (kind === "expense") api.get("/expenses/categories").then((r) => setCats(r.data)).catch(() => {});
   }, [kind]);
-  const pick = async (fl) => {
+  const pick = async (fl, ai = false) => {
     if (!fl) return;
     setFile(fl);
     setReading(true);
+    if (ai) setF(null);
     try {
-      const b64 = await readB64(fl);
+      const b64 = ai && data ? data : await readB64(fl);
       setData(b64);
-      const { data: p } = await api.post("/bill-scan/read", { name: fl.name, data: b64 });
+      const { data: p } = await api.post("/bill-scan/read", { name: fl.name, data: b64, ai });
       const today = new Date().toISOString().slice(0, 10);
       setF({
         scanned: !!p.scanned,
+        ai: !!p.ai,
+        aiAvailable: !!p.aiAvailable,
+        lines: (p.lines || []).length > 1 ? p.lines : [],
         message: p.message || "",
         notes: p.notes || [],
         vendorId: p.vendor?._id || "",
@@ -67,12 +71,15 @@ export default function BillFromPdf({ kind = "bill", onClose }) {
     setReading(false);
   };
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const tax = f ? r2((Number(f.taxable) || 0) * (Number(f.rate) || 0) / 100) : 0;
-  const total = f ? r2((Number(f.taxable) || 0) + tax + (Number(f.adjustment) || 0)) : 0;
+  const multi = f && f.lines.length > 1;
+  const taxable = !f ? 0 : multi ? r2(f.lines.reduce((s, l) => s + (Number(l.taxable) || 0), 0)) : Number(f.taxable) || 0;
+  const tax = !f ? 0 : multi ? r2(f.lines.reduce((s, l) => s + ((Number(l.taxable) || 0) * (Number(l.rate) || 0)) / 100, 0)) : r2((taxable * (Number(f.rate) || 0)) / 100);
+  const total = f ? r2(taxable + tax + (Number(f.adjustment) || 0)) : 0;
+  const setLine = (i, k) => (e) => setF({ ...f, lines: f.lines.map((l, j) => (j === i ? { ...l, [k]: e.target.value } : l)) });
   const create = async () => {
     setBusy(true);
     try {
-      const { data: r } = await api.post("/bill-scan/create", { kind, ...f, taxable: Number(f.taxable) || 0, rate: Number(f.rate) || 0, adjustment: kind === "bill" ? Number(f.adjustment) || 0 : 0, dueDate: f.dueDate || null, name: file?.name, data, paidThrough: f.paidThrough === "cash" ? "cash" : "bank" });
+      const { data: r } = await api.post("/bill-scan/create", { kind, ...f, ai: undefined, aiAvailable: undefined, scanned: undefined, message: undefined, notes: undefined, total: undefined, cgst: undefined, sgst: undefined, igst: undefined, lines: kind === "bill" && multi ? f.lines.map((l) => ({ description: l.description || "", hsn: l.hsn || "", quantity: Number(l.quantity) || 1, unit: l.unit || "", taxable: Number(l.taxable) || 0, rate: Number(l.rate) || 0 })) : [], taxable: multi ? taxable : Number(f.taxable) || 0, rate: Number(f.rate) || 0, adjustment: kind === "bill" ? Number(f.adjustment) || 0 : 0, dueDate: f.dueDate || null, name: file?.name, data, paidThrough: f.paidThrough === "cash" ? "cash" : "bank" });
       toast(`${r.docType === "bill" ? "Bill" : "Expense"} created${r.attachment ? " with the PDF attached" : ""}`);
       onClose();
       nav(r.docType === "bill" ? `/bills/${r._id}` : `/expenses/${r._id}/edit`);
@@ -93,7 +100,7 @@ export default function BillFromPdf({ kind = "bill", onClose }) {
             <button className="btn" onClick={onClose}>
               Cancel
             </button>
-            <button className="btn btn-primary" disabled={busy || !(Number(f.taxable) > 0) || (kind === "bill" && !f.vendorId && !f.vendorName)} onClick={create}>
+            <button className="btn btn-primary" disabled={busy || !(taxable > 0) || (kind === "bill" && !f.vendorId && !f.vendorName)} onClick={create}>
               {busy ? "Creating…" : kind === "bill" ? "Create Bill" : "Create Expense"}
             </button>
           </>
@@ -103,13 +110,29 @@ export default function BillFromPdf({ kind = "bill", onClose }) {
       {!f ? (
         <label className="dropzone" style={{ display: "flex" }}>
           {reading ? <Spinner /> : <>{file ? <strong>{file.name}</strong> : "Choose the supplier's bill (PDF), or take a photo"}</>}
-          <span className="muted small">Text PDFs (e-invoices, system-generated bills) are read automatically. Photos and scans are attached and you fill in the amounts.</span>
+          <span className="muted small">PDFs, scans and phone photos are read automatically (scans and photos need Gemini under Settings → Integrations). The file is attached to what you create.</span>
           <input type="file" hidden accept="application/pdf,image/*" onChange={(e) => pick(e.target.files[0])} />
         </label>
       ) : (
         <div className="form-grid">
-          {f.scanned && <div className="alert alert-warn">{f.message}</div>}
-          {!f.scanned && <div className="alert alert-info">Read from {file?.name}. Check each field before creating.{f.notes.length ? ` ${f.notes.join(". ")}.` : ""}</div>}
+          {f.scanned && (
+            <div className="alert alert-warn">
+              {f.message} {!f.aiAvailable && <Link to="/settings#integrations" onClick={onClose}>Set up Gemini</Link>}
+            </div>
+          )}
+          {!f.scanned && (
+            <div className="alert alert-info">
+              {f.ai ? "Read by Google Gemini" : "Read"} from {file?.name}. Check each field before creating.{f.notes.length ? ` ${f.notes.join(". ")}.` : ""}
+              {!f.ai && f.aiAvailable && (
+                <>
+                  {" "}
+                  <button type="button" className="link-btn" onClick={() => pick(file, true)}>
+                    Read again with Gemini
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           <div className="row-2">
             <Field label="Supplier" required={kind === "bill"} hint={f.vendorId ? "Existing vendor" : f.vendorName ? "Will be created as a new vendor" : ""}>
               <select value={f.vendorId} onChange={(e) => setF({ ...f, vendorId: e.target.value, vendorName: e.target.value ? vendors.find((v) => v._id === e.target.value)?.displayName || "" : f.vendorName })}>
@@ -154,9 +177,11 @@ export default function BillFromPdf({ kind = "bill", onClose }) {
             )}
           </div>
           <div className="row-3">
-            <Field label={kind === "bill" ? "Item / description" : "Description"}>
-              <input value={f.description} onChange={set("description")} placeholder={`As per bill ${f.billNumber}`} />
-            </Field>
+            {!multi && (
+              <Field label={kind === "bill" ? "Item / description" : "Description"}>
+                <input value={f.description} onChange={set("description")} placeholder={`As per bill ${f.billNumber}`} />
+              </Field>
+            )}
             {kind === "expense" ? (
               <Field label="Expense account">
                 <select value={f.account} onChange={set("account")}>
@@ -166,9 +191,11 @@ export default function BillFromPdf({ kind = "bill", onClose }) {
                 </select>
               </Field>
             ) : (
-              <Field label="HSN/SAC">
-                <input value={f.hsn} onChange={set("hsn")} />
-              </Field>
+              !multi && (
+                <Field label="HSN/SAC">
+                  <input value={f.hsn} onChange={set("hsn")} />
+                </Field>
+              )
             )}
             <Field label="Place of supply">
               <select value={f.placeOfSupply} onChange={set("placeOfSupply")}>
@@ -181,7 +208,58 @@ export default function BillFromPdf({ kind = "bill", onClose }) {
               </select>
             </Field>
           </div>
-          <div className="row-4">
+          {multi && (
+            <div className="line-table-wrap">
+              <table className="table bill-lines">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>HSN</th>
+                    <th className="num">Qty</th>
+                    <th className="num">Taxable</th>
+                    <th className="num">GST %</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {f.lines.map((l, i) => (
+                    <tr key={i}>
+                      <td data-label="Item"><input value={l.description} onChange={setLine(i, "description")} /></td>
+                      <td data-label="HSN"><input value={l.hsn} onChange={setLine(i, "hsn")} style={{ width: 90 }} /></td>
+                      <td data-label="Qty" className="num"><input type="number" value={l.quantity} onChange={setLine(i, "quantity")} style={{ width: 70 }} /></td>
+                      <td data-label="Taxable" className="num"><input type="number" step="0.01" value={l.taxable} onChange={setLine(i, "taxable")} style={{ width: 110 }} /></td>
+                      <td data-label="GST %" className="num">
+                        <select value={l.rate} onChange={setLine(i, "rate")}>
+                          {GST_RATES.concat([40]).map((r) => (
+                            <option key={r} value={r}>{r}%</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="line-del">
+                        <button type="button" className="icon-btn" title="Remove line" onClick={() => setF({ ...f, lines: f.lines.filter((_, j) => j !== i) })}>×</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {multi ? (
+            <div className="row-3">
+              <Field label="Taxable value">
+                <input readOnly value={money(taxable)} />
+              </Field>
+              {kind === "bill" && (
+                <Field label="Round-off / other">
+                  <input type="number" step="0.01" value={f.adjustment} onChange={set("adjustment")} />
+                </Field>
+              )}
+              <Field label="Total">
+                <input readOnly value={money(total)} />
+              </Field>
+            </div>
+          ) : (
+            <div className="row-4">
             <Field label="Taxable value" required>
               <input type="number" step="0.01" value={f.taxable} onChange={set("taxable")} />
             </Field>
@@ -203,6 +281,7 @@ export default function BillFromPdf({ kind = "bill", onClose }) {
               <input readOnly value={money(total)} />
             </Field>
           </div>
+          )}
           {f.total > 0 && Math.abs(total - f.total) > 0.5 && <div className="alert alert-warn">The bill says {money(f.total)}; these fields make {money(total)}.</div>}
           {(f.igst > 0 || f.cgst > 0) && (
             <p className="muted small">

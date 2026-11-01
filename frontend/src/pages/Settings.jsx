@@ -162,6 +162,7 @@ export default function Settings() {
         </div>
       </form>
       <EmailSettings />
+      <AiSettings />
       <ReminderSettings />
     </>
   );
@@ -323,6 +324,72 @@ function ReminderSettings() {
       </div>
       <div className="form-footer">
         <button className="btn btn-primary">Save</button>
+      </div>
+    </form>
+  );
+}
+
+function AiSettings() {
+  const { organization, setOrganization } = useAuth();
+  const ai = organization?.ai || {};
+  const [key, setKey] = useState("");
+  const [model, setModel] = useState(ai.model || "");
+  const [busy, setBusy] = useState(false);
+  const save = async (e, remove = false) => {
+    e?.preventDefault();
+    setBusy(true);
+    try {
+      const { data } = await api.put("/organization/ai", { geminiKey: key, model, remove });
+      setOrganization(data);
+      setKey("");
+      toast(remove ? "Gemini key removed" : "Gemini connected — scanned bills and photos will now be read automatically");
+    } catch (err) {
+      toast(errMsg(err), "error");
+    }
+    setBusy(false);
+  };
+  const test = async () => {
+    try {
+      const { data } = await api.post("/organization/ai/test");
+      toast(data.message);
+    } catch (err) {
+      toast(errMsg(err), "error");
+    }
+  };
+  return (
+    <form className="card form" id="integrations" onSubmit={save} style={{ marginTop: 18 }}>
+      <h4 className="section-title" style={{ marginTop: 0 }}>
+        Integrations · Google Gemini
+        <span className="muted small">{ai.hasGeminiKey ? "Connected" : "Not connected"}</span>
+      </h4>
+      <p className="muted small">
+        Reads scanned bills and phone photos in “From bill PDF”. Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a> (sign in with your
+        Google account → Create API key). A Gemini app subscription (Pro/Advanced) doesn't include API access by itself; the API key is separate and has a free allowance.
+      </p>
+      <div className="form-grid">
+        <div className="row-2">
+          <Field label="Gemini API key" hint={ai.hasGeminiKey ? "Saved. Leave blank to keep it." : ""}>
+            <input type="password" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="new-password" placeholder={ai.hasGeminiKey ? "••••••••••••" : "AIza…"} />
+          </Field>
+          <Field label="Model" hint="Leave blank for the latest Flash model">
+            <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="gemini-flash-latest" />
+          </Field>
+        </div>
+      </div>
+      <div className="form-footer">
+        <button className="btn btn-primary" disabled={busy || (!key && !ai.hasGeminiKey)}>
+          {busy ? "Checking…" : "Save"}
+        </button>
+        {ai.hasGeminiKey && (
+          <>
+            <button type="button" className="btn" onClick={test}>
+              Test
+            </button>
+            <button type="button" className="btn" onClick={(e) => save(e, true)}>
+              Remove
+            </button>
+          </>
+        )}
       </div>
     </form>
   );

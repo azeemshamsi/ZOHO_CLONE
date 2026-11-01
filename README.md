@@ -160,7 +160,7 @@ A store connected in one company can be **shared** with your other companies (St
 
 Every invoice, quote, sales order, credit note, bill, purchase order, vendor credit, payment, payment made, journal and expense has an **Attachments** box: upload PDFs, images, Excel or Word files (up to 10 MB each; on a phone you can take a photo). Files are stored in MongoDB GridFS, so they survive redeploys, and open from the box at any time.
 
-**From bill PDF** (Bills and Expenses lists) reads a supplier's bill and fills in a new bill or expense: supplier and GSTIN (matched to an existing vendor or created), bill number, dates, place of supply, HSN, taxable value, GST rate and total. You check the figures and save; the PDF is attached automatically. It works on PDFs with a text layer (e-invoices and system-generated bills). Scanned images are attached and you type the amounts (`utils/billparse.js`, `routes/billScan.js`).
+**From bill PDF** (Bills and Expenses lists) reads a supplier's bill and fills in a new bill or expense: supplier and GSTIN (matched to an existing vendor or created), bill number, dates, place of supply, HSN, taxable value, GST rate and total. You check the figures and save; the PDF is attached automatically. PDFs with a text layer (e-invoices, system-generated bills) are read on the server for free. Scanned PDFs and phone photos are read by **Google Gemini** once a Gemini API key is added under Settings → Integrations (or `GEMINI_API_KEY` on the server); Gemini returns every line item with its HSN and GST rate, so a mixed-rate bill becomes a multi-line bill. "Read again with Gemini" re-reads a text PDF that came out wrong. Code: `utils/billparse.js`, `utils/aiBill.js`, `routes/billScan.js`.
 
 ## GST returns and compliance
 

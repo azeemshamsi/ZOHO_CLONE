@@ -48,6 +48,8 @@ const organizationSchema = new mongoose.Schema(
     fxAutoUpdate: { type: Boolean, default: false }, // fetch exchange rates daily
     einvoicing: { enabled: { type: Boolean, default: false }, fromDate: { type: Date } },
     ewayBills: { enabled: { type: Boolean, default: false }, threshold: { type: Number, default: 50000 } },
+    // Google Gemini API key, used to read scanned bills and photos.
+    ai: { geminiKey: { type: String, default: "" }, model: { type: String, default: "" } },
     gstFiling: { frequency: { type: String, enum: ["monthly", "quarterly"], default: "monthly" } },
     fxUpdatedAt: { type: Date },
     reminders: {
@@ -65,6 +67,9 @@ const organizationSchema = new mongoose.Schema(
           ret.smtp.hasApiKey = Boolean(ret.smtp.apiKey);
           delete ret.smtp.pass;
           delete ret.smtp.apiKey;
+        }
+        if (ret.ai) {
+          ret.ai = { hasGeminiKey: Boolean(ret.ai.geminiKey), model: ret.ai.model || "" };
         }
         return ret;
       },

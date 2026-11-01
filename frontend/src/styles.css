@@ -814,3 +814,17 @@ tr.clickable:hover td { background: var(--brand-50); }
   .company-btn { max-width: 52vw; }
   .summary-strip { flex-wrap: wrap; gap: 6px; }
 }
+.form-grid > * { min-width: 0; }
+.bill-lines input, .bill-lines select { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.bill-lines td:first-child { min-width: 180px; }
+@media (max-width: 760px) {
+  .bill-lines thead { display: none; }
+  .bill-lines, .bill-lines tbody { display: block; width: 100%; }
+  .bill-lines tr { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; padding: 10px; border-bottom: 1px solid var(--line); position: relative; }
+  .bill-lines td { display: flex; flex-direction: column; gap: 2px; padding: 0 !important; border: 0 !important; text-align: left; min-width: 0 !important; }
+  .bill-lines td::before { content: attr(data-label); font-size: 11px; color: var(--muted); }
+  .bill-lines td:first-child { grid-column: 1 / -1; padding-right: 30px !important; }
+  .bill-lines td input { width: 100% !important; }
+  .bill-lines td.line-del { position: absolute; top: 8px; right: 8px; }
+  .bill-lines td.line-del::before { content: none; }
+}

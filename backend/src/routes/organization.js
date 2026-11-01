@@ -102,4 +102,30 @@ router.put(
   })
 );
 
+// Google Gemini key for reading scanned bills and photos (blank key = keep the saved one).
+router.put(
+  "/ai",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ geminiKey: Joi.string().allow("").trim(), model: Joi.string().allow("").trim().max(60), remove: Joi.boolean().default(false) }), req.body);
+    const org = await Organization.findById(req.org);
+    const old = org.ai || {};
+    const key = d.remove ? "" : (d.geminiKey || "").replace(/\s+/g, "") || old.geminiKey || "";
+    if (key && d.geminiKey) await require("../utils/aiBill").testKey(key, d.model);
+    org.ai = { geminiKey: key, model: d.remove ? "" : d.model ?? old.model ?? "" };
+    await org.save();
+    res.send(org);
+  })
+);
+
+router.post(
+  "/ai/test",
+  ah(async (req, res) => {
+    const org = await Organization.findById(req.org);
+    const key = org.ai?.geminiKey || process.env.GEMINI_API_KEY;
+    if (!key) throw new HttpError(400, "Add a Gemini API key first");
+    const model = await require("../utils/aiBill").testKey(key, org.ai?.model);
+    res.send({ message: `Gemini is connected (model ${model})` });
+  })
+);
+
 module.exports = router;
