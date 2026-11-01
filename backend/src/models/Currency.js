@@ -9,6 +9,8 @@ const currencySchema = new mongoose.Schema(
     name: { type: String, default: "" },
     rate: { type: Number, required: true }, // ₹ per 1 unit, used as the default on new documents
     rates: [{ _id: false, date: Date, rate: Number }], // history
+    rateSource: { type: String, default: "manual" },
+    rateUpdatedAt: { type: Date },
   },
   { timestamps: true }
 );

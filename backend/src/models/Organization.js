@@ -43,6 +43,8 @@ const organizationSchema = new mongoose.Schema(
       fromName: { type: String, default: "" },
     },
     // Automatic payment reminders: days after the due date to remind (e.g. [1, 7, 15]).
+    fxAutoUpdate: { type: Boolean, default: false }, // fetch exchange rates daily
+    fxUpdatedAt: { type: Date },
     reminders: {
       enabled: { type: Boolean, default: false },
       days: { type: [Number], default: [3, 10] },

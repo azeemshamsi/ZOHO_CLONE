@@ -35,6 +35,7 @@ const SYSTEM_ACCOUNTS = [
   { code: "depreciation", name: "Depreciation Expense", group: "Expense" },
   { code: "asset_disposal", name: "Loss / (Gain) on Asset Disposal", group: "Other Expense" },
   { code: "fx_gain_loss", name: "Exchange Loss / (Gain)", group: "Other Expense" },
+  { code: "fx_unrealised", name: "Unrealised Exchange Loss / (Gain)", group: "Other Expense" },
   { code: "cogs", name: "Cost of Goods Sold", group: "Cost Of Goods Sold" },
   ...EXPENSE_CATEGORIES.map((n) => ({ code: expCode(n), name: n, group: n === "Raw Materials" ? "Cost Of Goods Sold" : "Expense" })),
 ].map((a) => ({ ...a, system: true, type: GROUP_TYPE(a.group) }));
@@ -306,6 +307,23 @@ async function buildEntries(org, { to } = {}) {
         },
       });
     }
+  }
+  // Exchange rate adjustments: revalue open invoices/bills, reversed the next day.
+  const fxAdjs = await require("../models/ExchangeAdjustment").find({ organization: org }).lean();
+  for (const a of fxAdjs) {
+    const ar = round2(a.lines.filter((l) => l.kind === "invoice").reduce((s, l) => s + l.gain, 0));
+    const ap = round2(a.lines.filter((l) => l.kind === "bill").reduce((s, l) => s + l.gain, 0));
+    const post = (date, sign, type) =>
+      add({
+        date, type, id: a._id, number: `${a.currency} @ ${a.rate}`, party: "",
+        build: (dr, cr, drB, crB) => {
+          drB("ar", sign * ar);
+          drB("ap", sign * ap); // bill gain = payable goes down
+          crB("fx_unrealised", sign * (ar + ap));
+        },
+      });
+    post(a.date, 1, "Exchange Adjustment");
+    post(new Date(new Date(a.date).getTime() + 86400000), -1, "Exchange Adjustment Reversal");
   }
   for (const j of journals) {
     add({

@@ -158,6 +158,8 @@ const DOC_LINK = {
   "Fixed Asset": (id) => `/fixed-assets/${id}`,
   Depreciation: (id) => `/fixed-assets/${id}`,
   "Asset Disposal": (id) => `/fixed-assets/${id}`,
+  "Exchange Adjustment": () => "/currencies",
+  "Exchange Adjustment Reversal": () => "/currencies",
 };
 export const docLink = (type, id) => (DOC_LINK[type] ? DOC_LINK[type](id) : "#");
 
