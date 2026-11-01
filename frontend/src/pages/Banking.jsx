@@ -4,7 +4,7 @@ import api, { errMsg } from "../lib/api";
 import { money, date, isoDate } from "../lib/format";
 import { parseBankDate, parseAmount, guessColumns, findHeaderRow } from "../lib/csv";
 import { readStatementFile, ACCEPT } from "../lib/statement";
-import { PageHeader, Spinner, Empty, Field, toast, Modal, Status, Confirm } from "../components/ui";
+import { PageHeader, Spinner, Empty, Field, toast, Modal, Status, Confirm, MoreMenu } from "../components/ui";
 import { clearBankAccountCache } from "../components/BankAccountSelect";
 import { docLink } from "./Accounts";
 import Icon from "../components/Icon";
@@ -82,7 +82,7 @@ export function BankingHome() {
       </PageHeader>
       <div className="bank-grid">
         {rows.map((a) => (
-          <button key={a.code} className="card bank-card" onClick={() => navigate(`/banking/${encodeURIComponent(a.code)}`)}>
+          <button key={a.code} className={`card bank-card ${a.active === false ? "inactive" : ""}`} onClick={() => navigate(`/banking/${encodeURIComponent(a.code)}`)}>
             <div className="bank-card-head">
               <span className="bank-icon">
                 <Icon name="bank" />
@@ -90,6 +90,7 @@ export function BankingHome() {
               <div>
                 <strong>{a.name}</strong>
                 <div className="muted small">
+                  {a.active === false ? "Inactive · " : ""}
                   {a.group}
                   {a.accountCode ? ` · ••${a.accountCode.slice(-4)}` : ""}
                 </div>
@@ -811,6 +812,29 @@ export function BankAccountPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [matchLine, setMatchLine] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [delOpen, setDelOpen] = useState(false);
+  const navigateTo = useNavigate();
+  const setActive = async (active) => {
+    try {
+      await api.put(`/banking/accounts/${encodeURIComponent(code)}/active`, { active });
+      clearBankAccountCache();
+      toast(active ? "Account is active again" : "Account marked inactive — it's hidden when picking accounts");
+      loadAcc();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  const removeAccount = async () => {
+    setDelOpen(false);
+    try {
+      const { data } = await api.delete(`/banking/accounts/${encodeURIComponent(code)}`);
+      clearBankAccountCache();
+      toast(data.message);
+      navigateTo("/banking");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
 
   const loadAcc = () => api.get("/banking/accounts").then((r) => setAcc(r.data.find((a) => a.code === code) || null));
   const loadLines = () =>
@@ -911,7 +935,24 @@ export function BankAccountPage() {
         <button className="btn btn-primary" onClick={() => setImportOpen(true)}>
           <Icon name="plus" size={16} /> Import Statement
         </button>
+        {!acc.system && (
+          <MoreMenu
+            items={[
+              acc.active === false ? { label: "Mark as active", onClick: () => setActive(true) } : { label: "Mark as inactive", onClick: () => setActive(false) },
+              { label: "Delete account", danger: true, onClick: () => setDelOpen(true) },
+            ]}
+          />
+        )}
       </PageHeader>
+      {acc.active === false && <div className="alert alert-warn" style={{ marginBottom: 12 }}>This account is inactive: it's hidden when choosing an account for payments and expenses. Its history is kept.</div>}
+      <Confirm
+        open={delOpen}
+        title={`Delete ${acc.name}?`}
+        text="Only possible when no payment, expense or other transaction in the books uses this account. Its imported statement lines, reconciliations and rules for it are deleted too. This can't be undone."
+        confirmLabel="Delete account"
+        onConfirm={removeAccount}
+        onCancel={() => setDelOpen(false)}
+      />
 
       <div className="card stat-row" style={{ marginBottom: 18 }}>
         <div>

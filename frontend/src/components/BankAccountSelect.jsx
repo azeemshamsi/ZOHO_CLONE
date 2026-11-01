@@ -23,7 +23,7 @@ export default function BankAccountSelect({ label = "Deposit To", value, onChang
     <Field label={label}>
       <select value={value || ""} onChange={(e) => onChange(e.target.value)}>
         <option value="">Automatic ({auto})</option>
-        {accounts.map((a) => (
+        {accounts.filter((a) => a.active !== false || a.code === value).map((a) => (
           <option key={a.code} value={a.code}>
             {a.name}
           </option>

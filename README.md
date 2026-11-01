@@ -150,6 +150,11 @@ An hourly scheduler creates whatever is due. On hosts that sleep, such as Render
 
 From Users & Roles you can invite people by link or email. Built-in roles: Admin, Accountant, Staff, Sales Staff, Warehouse, Returns Scanner and View Only. **New Role** creates your own: for each module (Sales, Purchases, Items, Inventory, Banking, Accountant, Reports, GST, Store orders, Store shipping, Store returns, Store settings, Settings) choose No access, View or Full, and the page the user opens on. A user only sees the menu items their role allows, and every API route checks the same permissions (`backend/src/utils/roles.js`, `models/Role.js`). Example: a "Returns Scanner" role opens straight on Scan Returns and can't reach invoices, reports or anything else.
 
+## Deleting a bank account or a company
+
+- **Bank account:** open it under Banking → More → *Delete account*. Allowed when nothing in the books uses it; its imported statement lines, reconciliations and rules go with it. Otherwise *Mark as inactive* hides it from account pickers while keeping its history. The built-in Cash in Hand and Bank Account stay.
+- **Company:** Settings → *Delete this company* (admins only, type the company name to confirm). Deletes every record of that company, its attachments and its users' access; people left with no company lose their login. You're moved to your next company.
+
 ## Several companies
 
 One login can belong to several companies (`models/Membership.js`), with a different role in each. Switch from the company name at the top left, or add a new company there. The chosen company is sent with every request in the `X-Org` header.

@@ -164,6 +164,7 @@ export default function Settings() {
       <EmailSettings />
       <AiSettings />
       <ReminderSettings />
+      <DeleteCompany />
     </>
   );
 }
@@ -394,5 +395,57 @@ function AiSettings() {
         )}
       </div>
     </form>
+  );
+}
+
+function DeleteCompany() {
+  const { user, organization, organizations, signOut, switchCompany } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  if (user?.role !== "admin") return null;
+  const others = (organizations || []).filter((o) => String(o._id) !== String(organization?._id));
+  const remove = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.delete(`/companies/${organization._id}`, { data: { confirmName: name } });
+      toast(data.message);
+      if (data.next) switchCompany(data.next);
+      else {
+        signOut();
+        window.location.href = "/login";
+      }
+    } catch (e) {
+      toast(errMsg(e), "error");
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="card danger-zone" style={{ marginTop: 18 }}>
+      <h4 className="section-title" style={{ marginTop: 0 }}>Delete this company</h4>
+      <p className="muted small">
+        Permanently deletes <strong>{organization?.name}</strong> and everything in it: customers, vendors, items, invoices, bills, payments, banking, GST records, store orders, attachments and users' access to it.
+        {others.length ? ` Your other ${others.length === 1 ? "company stays" : "companies stay"} as they are.` : " This is your only company, so your login will be removed too."} This can't be undone — export any reports you need first.
+      </p>
+      {!open ? (
+        <button className="btn btn-danger" onClick={() => setOpen(true)}>
+          Delete company…
+        </button>
+      ) : (
+        <div className="form-grid" style={{ maxWidth: 460 }}>
+          <Field label={`Type the company name to confirm: ${organization?.name}`}>
+            <input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          </Field>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-danger" disabled={busy || name.trim().toLowerCase() !== (organization?.name || "").trim().toLowerCase()} onClick={remove}>
+              {busy ? "Deleting…" : "Delete permanently"}
+            </button>
+            <button className="btn" onClick={() => (setOpen(false), setName(""))}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

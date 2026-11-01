@@ -150,7 +150,7 @@ function Invoicing({ store, onSaved }) {
   const [ful, setFul] = useState({ fulfillInShopify: !!store.fulfillInShopify, notifyCustomer: store.notifyCustomer !== false });
   const [accounts, setAccounts] = useState([]);
   useEffect(() => {
-    api.get("/banking/accounts").then((r) => setAccounts(r.data)).catch(() => {});
+    api.get("/banking/accounts").then((r) => setAccounts(r.data.filter((a) => a.active !== false))).catch(() => {});
   }, []);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   const save = async (e) => {

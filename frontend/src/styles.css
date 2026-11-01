@@ -828,3 +828,5 @@ tr.clickable:hover td { background: var(--brand-50); }
   .bill-lines td.line-del { position: absolute; top: 8px; right: 8px; }
   .bill-lines td.line-del::before { content: none; }
 }
+.bank-card.inactive { opacity: .6; }
+.danger-zone { border-color: #f3c2c4; }

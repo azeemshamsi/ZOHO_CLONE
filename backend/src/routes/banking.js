@@ -83,6 +83,44 @@ router.post(
   })
 );
 
+// Mark a bank/cash account inactive (hidden from pickers, history kept) or active again.
+router.put(
+  "/accounts/:code/active",
+  ah(async (req, res) => {
+    const { active } = validate(Joi.object({ active: Joi.boolean().required() }), req.body);
+    const acc = await Account.findOne({ _id: req.params.code, organization: req.org }).catch(() => null);
+    if (!acc) throw new HttpError(400, "The built-in Cash in Hand and Bank Account can't be made inactive");
+    acc.active = active;
+    await acc.save();
+    res.send({ active });
+  })
+);
+
+// Delete a bank/cash account. Only when no transaction in the books uses it; its imported statement
+// lines, reconciliations and rules for it go too.
+router.delete(
+  "/accounts/:code",
+  ah(async (req, res) => {
+    const code = req.params.code;
+    const acc = await Account.findOne({ _id: code, organization: req.org, group: { $in: ["Bank", "Cash"] } }).catch(() => null);
+    if (!acc) throw new HttpError(400, "The built-in Cash in Hand and Bank Account can't be deleted");
+    const entries = await buildEntries(req.org);
+    const used = entries.filter((e) => e.lines.some((l) => l.account === code));
+    if (used.length) {
+      throw new HttpError(409, `${acc.name} has ${used.length} transaction${used.length === 1 ? "" : "s"} in the books (payments, expenses, transfers…). Delete them or move them to another account first, or mark this account inactive to hide it.`, { transactions: used.length });
+    }
+    const BankRule = require("../models/BankRule");
+    const ShopifyStore = require("../models/ShopifyStore");
+    const [lines, recs] = await Promise.all([BankStatementLine.deleteMany({ organization: req.org, account: code }), BankReconciliation.deleteMany({ organization: req.org, account: code })]);
+    // Rules only for this account, or that post to it, go; others just stop listing it.
+    await BankRule.deleteMany({ organization: req.org, $or: [{ account: code }, { accounts: [code] }] });
+    await BankRule.updateMany({ organization: req.org, accounts: code }, { $pull: { accounts: code } });
+    await ShopifyStore.updateMany({ organization: req.org, "invoice.paymentAccount": code }, { $set: { "invoice.paymentAccount": "" } });
+    await acc.deleteOne();
+    res.send({ message: `${acc.name} deleted`, statementLines: lines.deletedCount, reconciliations: recs.deletedCount });
+  })
+);
+
 // All lines of an account in statement order (date, then import, then position in the file).
 async function orderedLines(org, code) {
   const lines = await BankStatementLine.find({ organization: org, account: code }).lean();
