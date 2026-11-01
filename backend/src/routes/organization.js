@@ -1,7 +1,7 @@
 const router = require("express").Router();
 const Joi = require("joi");
 const Organization = require("../models/Organization");
-const { ah, validate } = require("../utils/http");
+const { ah, validate, HttpError } = require("../utils/http");
 
 const address = Joi.object({
   street: Joi.string().allow(""),
@@ -49,24 +49,32 @@ router.put(
   })
 );
 
-// Outgoing email account (Gmail, Zoho Mail, Outlook… via SMTP).
+// Outgoing email account: a mailbox over SMTP, or Brevo / Resend over HTTPS (works where SMTP ports are blocked).
 router.put(
   "/email",
   ah(async (req, res) => {
     const data = validate(
       Joi.object({
+        provider: Joi.string().valid("smtp", "brevo", "resend").default("smtp"),
         host: Joi.string().allow("").trim(),
         port: Joi.number().integer().min(1).max(65535).default(587),
         secure: Joi.boolean().default(false),
         user: Joi.string().allow("").trim(),
         pass: Joi.string().allow(""), // blank = keep the saved password
+        apiKey: Joi.string().allow("").trim(), // blank = keep the saved key
         fromName: Joi.string().allow("").trim(),
       }),
       req.body
     );
     const org = await Organization.findById(req.org);
-    const pass = data.pass ? data.pass.replace(/\s+/g, "") : org.smtp?.pass || "";
-    org.smtp = { ...data, pass: data.host ? pass : "" };
+    const old = org.smtp || {};
+    const api = data.provider !== "smtp";
+    if (api && data.user && !data.apiKey && !(old.apiKey && old.provider === data.provider)) throw new HttpError(400, "Enter the API key");
+    const pass = data.pass ? data.pass.replace(/\s+/g, "") : old.pass || "";
+    const apiKey = data.apiKey || (old.provider === data.provider ? old.apiKey : "") || "";
+    org.smtp = api
+      ? { provider: data.provider, host: "", port: 587, secure: false, user: data.user, pass: "", apiKey: data.user ? apiKey : "", fromName: data.fromName }
+      : { provider: "smtp", host: data.host, port: data.port, secure: data.secure, user: data.user, pass: data.host ? pass : "", apiKey: "", fromName: data.fromName };
     await org.save();
     res.send(org);
   })

@@ -35,6 +35,8 @@ const organizationSchema = new mongoose.Schema(
     defaultTerms: { type: String, default: "" },
     // Outgoing email (e.g. Gmail with an app password). Falls back to the server's SMTP settings.
     smtp: {
+      provider: { type: String, enum: ["smtp", "brevo", "resend"], default: "smtp" },
+      apiKey: { type: String, default: "" },
       host: { type: String, default: "" },
       port: { type: Number, default: 587 },
       secure: { type: Boolean, default: false },
@@ -59,7 +61,9 @@ const organizationSchema = new mongoose.Schema(
         // Never send the SMTP password to the browser.
         if (ret.smtp) {
           ret.smtp.hasPassword = Boolean(ret.smtp.pass);
+          ret.smtp.hasApiKey = Boolean(ret.smtp.apiKey);
           delete ret.smtp.pass;
+          delete ret.smtp.apiKey;
         }
         return ret;
       },

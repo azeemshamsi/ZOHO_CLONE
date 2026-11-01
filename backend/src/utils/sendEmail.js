@@ -1,21 +1,6 @@
-const nodemailer = require("nodemailer");
-const env = require("../config/env");
+// System emails (verification, password reset, invites) via the server's email settings.
+const { sendSystemMail } = require("./mailer");
 
-let transporter;
-
-module.exports = async function sendEmail(to, subject, text) {
-  if (!env.emailEnabled) {
-    console.log(`[email disabled] Would send "${subject}" to ${to}: ${text}`);
-    return false;
-  }
-  transporter =
-    transporter ||
-    nodemailer.createTransport({
-      host: env.SMTP_HOST,
-      port: env.SMTP_PORT,
-      secure: env.SMTP_SECURE,
-      auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
-    });
-  await transporter.sendMail({ from: env.MAIL_FROM, to, subject, text });
-  return true;
+module.exports = function sendEmail(to, subject, text) {
+  return sendSystemMail(to, subject, text);
 };

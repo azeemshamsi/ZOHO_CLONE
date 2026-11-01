@@ -4,7 +4,6 @@ const Joi = require("joi");
 const env = require("../config/env");
 const User = require("../models/User");
 const Organization = require("../models/Organization");
-const sendEmail = require("../utils/sendEmail");
 const { ROLES } = require("../utils/roles");
 const { ah, validate, HttpError } = require("../utils/http");
 
@@ -19,11 +18,20 @@ async function invite(req, user) {
   const base = req.get("origin") || (req.get("host") ? `${req.get("x-forwarded-proto") || req.protocol}://${req.get("host")}` : env.APP_URL);
   const link = `${base.replace(/\/+$/, "")}/invite/${user._id}/${user.inviteToken}`;
   const org = await Organization.findById(req.org);
-  const sent = await sendEmail(
-    user.email,
-    `${req.user.name} invited you to ${org.name} on MGI`,
-    `Hi ${user.name},\n\n${req.user.name} has invited you to join ${org.name} on MGI as ${ROLES[user.role].label}.\n\nAccept the invitation and set your password: ${link}\n\nThe link works for 7 days.`
-  );
+  // Send from the organization's email account (or the server's); if that fails, the admin still gets the link to share.
+  let sent = false;
+  const { canEmail, sendOrgMail } = require("../utils/mailer");
+  if (canEmail(org))
+    try {
+      await sendOrgMail(org, {
+        to: [user.email],
+        subject: `${req.user.name} invited you to ${org.name} on MGI`,
+        text: `Hi ${user.name},\n\n${req.user.name} has invited you to join ${org.name} on MGI as ${ROLES[user.role].label}.\n\nAccept the invitation and set your password: ${link}\n\nThe link works for 7 days.`,
+      });
+      sent = true;
+    } catch (e) {
+      console.error(`[invite] email failed: ${e.message}`);
+    }
   return { link, emailed: sent };
 }
 

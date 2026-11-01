@@ -84,7 +84,8 @@ Or with Docker: `docker compose up`, then open <http://localhost:8080>.
 | `MONGODB_URI` | Yes | MongoDB connection string |
 | `JWT_SECRET` | Yes (production) | Long random string that signs login sessions |
 | `APP_URL` | Recommended | Public address of the app, used in email links |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | No | Outgoing email for password resets |
+| `BREVO_API_KEY` or `RESEND_API_KEY`, with `MAIL_FROM` | No | Server email (password resets, verification, and documents for organizations without their own email settings) over HTTPS. Use this on Render's free plan |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | No | The same over SMTP (needs a paid Render instance: the free plan blocks SMTP ports) |
 | `REQUIRE_EMAIL_VERIFICATION` | No | `true` to make new users verify their email |
 
 ## Project layout
@@ -149,7 +150,7 @@ From Users & Roles you can invite people by link or email as Admin, Accountant, 
 
 ## Email
 
-Documents are emailed as PDFs made on the server, sent from the organization's own mailbox (Settings → Email: Gmail app password, Zoho Mail, Outlook or SMTP). Automatic payment reminders can be switched on under Settings → Payment Reminders.
+Documents are emailed as PDFs made on the server, sent from the organization's email account (Settings → Email). **Brevo** or **Resend** send over HTTPS and work on Render's free plan. Gmail, Zoho Mail, Outlook or other SMTP need outbound SMTP, which Render's free plan blocks. Automatic payment reminders can be switched on under Settings → Payment Reminders.
 
 ## Projects and timesheets
 

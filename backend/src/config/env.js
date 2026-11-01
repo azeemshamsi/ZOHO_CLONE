@@ -15,11 +15,13 @@ const env = {
   SMTP_SECURE: String(process.env.SMTP_SECURE || "false") === "true",
   SMTP_USER: process.env.SMTP_USER || "",
   SMTP_PASS: process.env.SMTP_PASS || "",
+  BREVO_API_KEY: process.env.BREVO_API_KEY || "",
+  RESEND_API_KEY: process.env.RESEND_API_KEY || "",
   MAIL_FROM: process.env.MAIL_FROM || process.env.SMTP_USER || "",
   REQUIRE_EMAIL_VERIFICATION: String(process.env.REQUIRE_EMAIL_VERIFICATION || "false") === "true",
 };
 
-env.emailEnabled = Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS);
+env.emailEnabled = Boolean((env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS) || ((env.BREVO_API_KEY || env.RESEND_API_KEY) && (env.MAIL_FROM || env.SMTP_USER)));
 
 if (!env.JWT_SECRET) {
   if (env.NODE_ENV === "production") {
