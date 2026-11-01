@@ -543,3 +543,10 @@ address { font-style: normal; line-height: 1.6; }
 .timer-dot { width: 10px; height: 10px; border-radius: 50%; background: #16a34a; animation: pulse 1.2s infinite; }
 .timer-clock { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 700; }
 @keyframes pulse { 50% { opacity: 0.3; } }
+
+/* Budgets */
+.budget-grid-wrap { overflow-x: auto; margin-top: 12px; }
+.budget-grid input { width: 96px; text-align: right; padding: 6px 8px; height: 32px; }
+.budget-grid td { padding: 4px 6px; }
+.text-good { color: #0b8a43; }
+.bva { line-height: 1.25; }

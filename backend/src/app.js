@@ -35,6 +35,7 @@ app.use("/api/bank-rules", auth, permit("banking"), require("./routes/bankRules"
 app.use("/api/banking", auth, permit((req) => (req.method === "GET" && req.path === "/accounts" ? null : "banking")), require("./routes/banking"));
 app.use("/api/accounts", auth, permit("accountant", { readAll: true }), require("./routes/accounts"));
 app.use("/api/journals", auth, permit("accountant"), require("./routes/journals"));
+app.use("/api/budgets", auth, permit("accountant"), require("./routes/budgets"));
 app.use("/api/reports", auth, permit("reports"), require("./routes/reports"));
 app.use("/api/payments", auth, permit("sales"), require("./routes/payments"));
 app.use("/api/documents", auth, permit((req) => require("./routes/documents").moduleOf(req)), require("./routes/documents"));

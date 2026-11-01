@@ -22,6 +22,7 @@ import { AdjustmentList, AdjustmentForm, AdjustmentView } from "./pages/Inventor
 import { RecurringList, RecurringView } from "./pages/Recurring";
 import { UsersPage, AcceptInvite } from "./pages/Users";
 import { ProjectList, ProjectForm, ProjectView, Timesheet } from "./pages/Projects";
+import { BudgetList, BudgetForm, BudgetView } from "./pages/Budgets";
 import { DocForm } from "./components/SalesDoc";
 import { KINDS } from "./lib/docKinds";
 import { PurchaseOrderList, PurchaseOrderForm, PurchaseOrderView } from "./pages/PurchaseOrders";
@@ -78,6 +79,10 @@ export default function App() {
           <Route path="recurring-expenses/new" element={<ExpenseForm recurring key="rec-exp" />} />
           <Route path="recurring-expenses/:id" element={<RecurringView kind="expense" />} />
           <Route path="recurring-expenses/:id/edit" element={<ExpenseForm recurring key="rec-exp" />} />
+          <Route path="budgets" element={<BudgetList />} />
+          <Route path="budgets/new" element={<BudgetForm />} />
+          <Route path="budgets/:id" element={<BudgetView />} />
+          <Route path="budgets/:id/edit" element={<BudgetForm />} />
           <Route path="projects" element={<ProjectList />} />
           <Route path="projects/new" element={<ProjectForm />} />
           <Route path="projects/:id" element={<ProjectView />} />

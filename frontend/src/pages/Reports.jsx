@@ -112,6 +112,7 @@ export const REPORTS = [
   R("reconciliation-status", "Reconciliation Status", "Banking", "none", "Books vs bank balance and lines still to match, per account."),
   // Accountant
   R("account-transactions", "Account Transactions", "Accountant", "link", "Pick an account to see every entry with a running balance.", { to: "/chart-of-accounts" }),
+  R("budget-vs-actuals", "Budget vs Actuals", "Accountant", "link", "Compare each budget with what actually happened.", { to: "/budgets" }),
   R("account-type-summary", "Account Type Summary", "Accountant", "range", "Debits and credits per account type."),
   R("general-ledger", "General Ledger", "Accountant", "range", "Opening, debits, credits and closing for every account."),
   R("detailed-general-ledger", "Detailed General Ledger", "Accountant", "range", "Every transaction in every account with a running balance."),
