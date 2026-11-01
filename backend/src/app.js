@@ -23,6 +23,7 @@ app.use("/api/inventory-adjustments", auth, permit("items"), require("./routes/i
 app.use("/api/recurring", auth, permit((req) => { const k = req.body?.kind || req.query.kind; return k === "invoice" ? "sales" : k ? "purchases" : ["sales", "purchases"]; }), require("./routes/recurring"));
 app.use("/api/projects", auth, permit("sales"), require("./routes/projects"));
 app.use("/api/time-entries", auth, permit("sales"), require("./routes/timeEntries"));
+app.use("/api/gst", auth, permit("sales"), require("./routes/gst"));
 app.use("/api/invoices", auth, permit("sales"), require("./routes/invoices"));
 app.use("/api/quotes", auth, permit("sales"), require("./routes/quotes"));
 app.use("/api/sales-orders", auth, permit("sales"), require("./routes/salesOrders"));

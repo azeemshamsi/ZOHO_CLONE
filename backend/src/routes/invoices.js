@@ -25,6 +25,11 @@ async function build(req, data) {
   return out;
 }
 
+// Invoices with a live IRN can't be changed in MGI: cancel the e-invoice first.
+const blockIfEInvoiced = (doc) => {
+  if (doc.einvoice && doc.einvoice.status === "generated") throw new HttpError(400, "This document has an e-invoice (IRN). Cancel the e-invoice first, then edit or void it.");
+};
+
 router.get(
   "/",
   ah(async (req, res) => {
@@ -88,6 +93,7 @@ router.put(
   "/:id",
   ah(async (req, res) => {
     const invoice = await Invoice.findOne({ _id: req.params.id, organization: req.org });
+    if (invoice) blockIfEInvoiced(invoice);
     if (!invoice) throw new HttpError(404, "Invoice not found");
     if (invoice.status === "void") throw new HttpError(400, "A void invoice can't be edited");
     const data = validate(schema, req.body);
@@ -129,6 +135,7 @@ router.post(
     const invoice = await Invoice.findOne({ _id: req.params.id, organization: req.org });
     if (!invoice) throw new HttpError(404, "Invoice not found");
     blockIfMoneyApplied(invoice, "voiding");
+    blockIfEInvoiced(invoice);
     invoice.status = "void";
     invoice.balance = 0;
     await invoice.save();
@@ -142,6 +149,7 @@ router.delete(
     const invoice = await Invoice.findOne({ _id: req.params.id, organization: req.org });
     if (!invoice) throw new HttpError(404, "Invoice not found");
     blockIfMoneyApplied(invoice, "deleting");
+    blockIfEInvoiced(invoice);
     // Free up the quote / sales order it came from.
     const Quote = require("../models/Quote");
     const SalesOrder = require("../models/SalesOrder");

@@ -189,9 +189,41 @@ function pageNumbers(doc, org) {
  * kind: invoice | quote | salesOrder | creditNote | purchaseOrder | vendorCredit | bill
  * meta: { title, number, partyLabel, facts: [[label, value]], balance }
  */
+// IRN, acknowledgement and the IRP's signed QR code (e-invoice), plus the e-way bill number.
+async function gstBlock(doc, d) {
+  const e = d.einvoice || {};
+  const w = d.eway || {};
+  const hasE = e.status === "generated" && e.irn;
+  const hasW = w.status === "generated" && w.ewbNo;
+  if (!hasE && !hasW) return;
+  const L = 40;
+  const W = doc.page.width - 80;
+  const top = doc.y;
+  let qrH = 0;
+  if (hasE && e.signedQr) {
+    const png = await require("qrcode").toBuffer(e.signedQr, { errorCorrectionLevel: "M", margin: 1, width: 300 });
+    doc.image(png, L + W - 92, top, { width: 92 });
+    qrH = 96;
+  }
+  doc.font("r").fontSize(8).fillColor(MUTED);
+  let y = top;
+  const line = (k, v) => {
+    doc.font("r").fillColor(MUTED).text(k, L, y, { continued: true }).font("b").fillColor("#111827").text(` ${v}`, { width: W - 110 });
+    y = doc.y + 2;
+  };
+  if (hasE) {
+    line("IRN:", e.irn);
+    line("Ack No:", e.ackNo);
+    line("Ack Date:", e.ackDate ? new Date(e.ackDate).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "");
+  }
+  if (hasW) line("E-Way Bill No:", `${w.ewbNo}${w.validUpto ? `  (valid till ${fmtDate(w.validUpto)})` : ""}`);
+  doc.y = Math.max(y, top + qrH) + 8;
+}
+
 async function documentPdf(org, d, meta) {
   const doc = setup();
   header(doc, org, meta.title, meta.number);
+  await gstBlock(doc, d);
   const party = d.vendorName ? "vendor" : "customer";
   partyBlock(doc, meta.partyLabel, d[`${party}Name`], d[`${party}Gstin`], d.billingAddress, [
     ...meta.facts,

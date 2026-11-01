@@ -180,3 +180,24 @@ Accountant → Fixed Assets: assets with Written Down Value (Income Tax) or Stra
 Settings → Currencies holds foreign currencies with ₹ rates. A customer or vendor can use one of them; its invoices, bills and payments are then in that currency at a per-document rate.
 
 The books and all reports stay in ₹ (`config/baseCurrency.js` converts documents for reports). Differences between invoice and payment rates are posted to "Exchange Loss / (Gain)".
+
+## Branch number series
+
+Give a branch its own prefixes (Branches & Warehouses → edit branch → Number Series) and its invoices, credit notes, payments, quotes, orders and vendor documents get a separate series (e.g. `DL/INV-000001`).
+
+## Exchange rates and revaluation
+
+- **Rates:** Currencies → **Fetch Latest Rates** (or "Update rates daily") pulls ₹ rates from open.er-api.com (override with `FX_API_URL`).
+- **Revaluation:** **Exchange Rate Adjustments** revalue unpaid foreign invoices and bills at a closing rate (e.g. 31 March). The result posts to "Unrealised Exchange Loss / (Gain)" and is reversed the next day.
+
+## e-Invoicing and e-Way Bills
+
+Turn them on under Sales → e-Invoices / e-Way Bills.
+
+1. MGI builds the government JSON (e-invoice schema INV-01 v1.1, and the e-way bill bulk format 1.0.0421) and checks it against the portal rules (`backend/src/utils/einvoice.js`).
+2. Upload the file on the e-invoice portal (Bulk Upload) or the e-way bill portal (Generate Bulk).
+3. Record the IRN, Ack No and signed QR (or upload the portal's response file), or the e-way bill number.
+
+The QR code, IRN and e-way bill number then print on the invoice and PDF. An invoice with a live IRN is locked until its e-invoice is cancelled.
+
+Generating directly through the API needs a GST Suvidha Provider (GSP) account; the JSON upload route needs nothing extra.

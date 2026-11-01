@@ -9,6 +9,7 @@ import { PageHeader, Spinner, toast, Status, Confirm, Modal, MoreMenu, Field, in
 import { DocList, DocForm, DocPaper, MiniTable } from "../components/SalesDoc";
 import Icon from "../components/Icon";
 import { DocEmail } from "../components/EmailDoc";
+import { GstPanel } from "../components/GstPanel";
 import BankAccountSelect from "../components/BankAccountSelect";
 
 
@@ -321,6 +322,7 @@ export function CreditNoteView() {
         />
       )}
 
+      <GstPanel kind="creditNote" doc={cn} onChanged={load} eligible={!!cn.customerGstin || (cn.currency && cn.currency !== "INR")} />
       <div className="doc-wrap">
         <DocPaper
           doc={cn}

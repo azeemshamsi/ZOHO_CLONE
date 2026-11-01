@@ -25,6 +25,16 @@ const refundSchema = new mongoose.Schema(
 const creditNoteSchema = new mongoose.Schema(
   {
     ...salesDocFields(),
+    // GST e-invoice details returned by the IRP
+    einvoice: {
+      status: { type: String, enum: ["none", "generated", "cancelled"], default: "none" },
+      irn: { type: String, default: "" },
+      ackNo: { type: String, default: "" },
+      ackDate: { type: Date },
+      signedQr: { type: String, default: "" },
+      cancelReason: { type: String, default: "" },
+      cancelledAt: { type: Date },
+    },
     number: { type: String, required: true },
     reference: { type: String, default: "" },
     invoice: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },

@@ -551,3 +551,19 @@ address { font-style: normal; line-height: 1.6; }
 .text-good { color: #0b8a43; }
 .bva { line-height: 1.25; }
 .pad-row { display: flex; align-items: center; justify-content: space-between; padding-right: 16px; }
+
+/* GST e-invoice / e-way bill */
+.gst-panel { padding: 0; }
+.gst-row { display: flex; gap: 16px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line-2); }
+.gst-row:last-child { border-bottom: 0; }
+.gst-main { flex: 1; min-width: 0; }
+.gst-title { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.gst-meta { margin-top: 4px; word-break: break-all; }
+.gst-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.err-list { margin: 6px 0 0; padding-left: 18px; }
+.doc-irn { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 10px 0; font-size: 11px; }
+.doc-irn .mono { word-break: break-all; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg > a, .seg > button { padding: 6px 12px; font-size: 13px; background: #fff; border: 0; border-right: 1px solid var(--line); cursor: pointer; color: inherit; text-decoration: none; font: inherit; }
+.seg > :last-child { border-right: 0; }
+.seg .on { background: var(--brand-50); color: var(--brand-600); font-weight: 600; }

@@ -44,6 +44,11 @@ async function linkInvoice(req, fields) {
   fields.invoiceNumber = inv.invoiceNumber;
 }
 
+// Invoices with a live IRN can't be changed in MGI: cancel the e-invoice first.
+const blockIfEInvoiced = (doc) => {
+  if (doc.einvoice && doc.einvoice.status === "generated") throw new HttpError(400, "This document has an e-invoice (IRN). Cancel the e-invoice first, then edit or void it.");
+};
+
 router.get(
   "/",
   ah(async (req, res) => {
@@ -90,6 +95,7 @@ router.put(
   ah(async (req, res) => {
     const cn = await findCN(req);
     if (cn.status === "void") throw new HttpError(400, "A void credit note can't be edited");
+    blockIfEInvoiced(cn);
     const data = validate(schema, req.body);
     const { fields } = await prepareDoc(req, data);
     await linkInvoice(req, fields);
@@ -221,6 +227,7 @@ router.post(
   ah(async (req, res) => {
     const cn = await findCN(req);
     if (used(cn) > 0) throw new HttpError(400, "Remove the applied credits and refunds before voiding");
+    blockIfEInvoiced(cn);
     cn.status = "void";
     cn.balance = 0;
     await cn.save();
@@ -233,6 +240,7 @@ router.delete(
   ah(async (req, res) => {
     const cn = await findCN(req);
     if (used(cn) > 0) throw new HttpError(400, "Remove the applied credits and refunds before deleting");
+    blockIfEInvoiced(cn);
     await cn.deleteOne();
     res.send({ message: "Credit note deleted" });
   })

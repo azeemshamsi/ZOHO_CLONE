@@ -26,6 +26,7 @@ import { BudgetList, BudgetForm, BudgetView } from "./pages/Budgets";
 import { AssetList, AssetForm, AssetView } from "./pages/FixedAssets";
 import { Locations } from "./pages/Locations";
 import { Currencies } from "./pages/Currencies";
+import { GstCompliance } from "./pages/GstCompliance";
 import { TransferList, TransferForm, TransferView } from "./pages/TransferOrders";
 import { DocForm } from "./components/SalesDoc";
 import { KINDS } from "./lib/docKinds";
@@ -85,6 +86,8 @@ export default function App() {
           <Route path="recurring-expenses/:id/edit" element={<ExpenseForm recurring key="rec-exp" />} />
           <Route path="locations" element={<Locations />} />
           <Route path="currencies" element={<Currencies />} />
+          <Route path="e-invoices" element={<GstCompliance tab="einvoice" />} />
+          <Route path="e-way-bills" element={<GstCompliance tab="eway" />} />
           <Route path="transfer-orders" element={<TransferList />} />
           <Route path="transfer-orders/new" element={<TransferForm />} />
           <Route path="transfer-orders/:id" element={<TransferView />} />

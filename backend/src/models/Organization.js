@@ -44,6 +44,8 @@ const organizationSchema = new mongoose.Schema(
     },
     // Automatic payment reminders: days after the due date to remind (e.g. [1, 7, 15]).
     fxAutoUpdate: { type: Boolean, default: false }, // fetch exchange rates daily
+    einvoicing: { enabled: { type: Boolean, default: false }, fromDate: { type: Date } },
+    ewayBills: { enabled: { type: Boolean, default: false }, threshold: { type: Number, default: 50000 } },
     fxUpdatedAt: { type: Date },
     reminders: {
       enabled: { type: Boolean, default: false },

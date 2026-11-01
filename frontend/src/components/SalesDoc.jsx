@@ -8,6 +8,7 @@ import { money, amount, date, isoDate, addDays, round2, inWords } from "../lib/f
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Status } from "./ui";
 import Icon from "./Icon";
 import { useLocations } from "../lib/locations";
+import { QrImage } from "./GstPanel";
 import { LogoMark } from "./Logo";
 
 /* ======================= List ======================= */
@@ -789,6 +790,31 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
   return (
     <div className="invoice-doc">
       {ribbon && <div className={`ribbon ribbon-${ribbon.cls}`}>{ribbon.text}</div>}
+      {doc.einvoice?.status === "generated" && (
+        <div className="doc-irn">
+          <div>
+            <div>
+              <b>IRN:</b> <span className="mono">{doc.einvoice.irn}</span>
+            </div>
+            <div>
+              <b>Ack No:</b> {doc.einvoice.ackNo} &nbsp; <b>Ack Date:</b> {doc.einvoice.ackDate && new Date(doc.einvoice.ackDate).toLocaleString("en-IN")}
+            </div>
+            {doc.eway?.status === "generated" && (
+              <div>
+                <b>E-Way Bill No:</b> {doc.eway.ewbNo}
+              </div>
+            )}
+          </div>
+          {doc.einvoice.signedQr && <QrImage text={doc.einvoice.signedQr} size={96} />}
+        </div>
+      )}
+      {doc.einvoice?.status !== "generated" && doc.eway?.status === "generated" && (
+        <div className="doc-irn">
+          <div>
+            <b>E-Way Bill No:</b> {doc.eway.ewbNo}
+          </div>
+        </div>
+      )}
       <div className="doc-head">
         <div className="doc-brand">
           <LogoMark size={36} />

@@ -28,6 +28,8 @@ const NAV = [
       { to: "/recurring-invoices", label: "Recurring Invoices" },
       { to: "/payments", label: "Payments Received" },
       { to: "/credit-notes", label: "Credit Notes" },
+      { to: "/e-invoices", label: "e-Invoices" },
+      { to: "/e-way-bills", label: "e-Way Bills" },
     ],
   },
   {
@@ -83,6 +85,8 @@ const PATH_MODULES = [
   ["/recurring-invoices", "sales"],
   ["/payments", "sales"],
   ["/credit-notes", "sales"],
+  ["/e-invoices", "sales"],
+  ["/e-way-bills", "sales"],
   ["/projects", "sales"],
   ["/timesheet", "sales"],
   ["/vendors", "purchases"],

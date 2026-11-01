@@ -4,6 +4,32 @@ const { salesDocFields, startOfToday } = require("./shared");
 const invoiceSchema = new mongoose.Schema(
   {
     ...salesDocFields(),
+    // GST e-invoice details returned by the IRP
+    einvoice: {
+      status: { type: String, enum: ["none", "generated", "cancelled"], default: "none" },
+      irn: { type: String, default: "" },
+      ackNo: { type: String, default: "" },
+      ackDate: { type: Date },
+      signedQr: { type: String, default: "" },
+      cancelReason: { type: String, default: "" },
+      cancelledAt: { type: Date },
+    },
+    // E-way bill: transport details and the number from the e-way bill portal
+    eway: {
+      transMode: { type: String, default: "1" }, // 1 road, 2 rail, 3 air, 4 ship
+      distance: { type: Number, default: 0 },
+      transporterName: { type: String, default: "" },
+      transporterId: { type: String, default: "" },
+      vehicleNo: { type: String, default: "" },
+      vehicleType: { type: String, default: "R" },
+      transDocNo: { type: String, default: "" },
+      transDocDate: { type: Date },
+      shipTo: { street: String, city: String, state: String, pincode: String },
+      status: { type: String, enum: ["none", "generated", "cancelled"], default: "none" },
+      ewbNo: { type: String, default: "" },
+      ewbDate: { type: Date },
+      validUpto: { type: Date },
+    },
     invoiceNumber: { type: String, required: true },
     orderNumber: { type: String, default: "" },
     dueDate: { type: Date, required: true },

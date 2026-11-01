@@ -9,6 +9,7 @@ import { PageHeader, Spinner, toast, Status, Confirm, Modal, MoreMenu, invoiceSt
 import { DocList, DocForm, DocPaper, MiniTable } from "../components/SalesDoc";
 import Icon from "../components/Icon";
 import { DocEmail } from "../components/EmailDoc";
+import { GstPanel } from "../components/GstPanel";
 
 const K = KINDS.invoice;
 
@@ -252,6 +253,7 @@ export function InvoiceView() {
         />
       )}
 
+      <GstPanel kind="invoice" doc={inv} onChanged={load} eligible={!!inv.customerGstin || (inv.currency && inv.currency !== "INR")} />
       <div className="doc-wrap">
         <DocPaper
           doc={inv}
