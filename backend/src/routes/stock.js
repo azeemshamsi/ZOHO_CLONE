@@ -214,7 +214,11 @@ router.get(
   "/shopify/variants",
   ah(async (req, res) => {
     const store = await ShopifyStore.findOne({ organization: req.org });
-    if (!store?.connected) throw new HttpError(400, "Connect Shopify first");
+    if (!store?.connected) {
+      const shared = await ShopifyStore.findOne({ sharedWith: req.org, connected: true }).populate("organization", "name").lean();
+      if (shared) throw new HttpError(400, `The Shopify store belongs to ${shared.organization?.name || "your other company"}. Switch to that company to link listings and sync stock.`);
+      throw new HttpError(400, "Connect your Shopify store first (Store → Store Settings)");
+    }
     try {
       res.send(await inv.searchVariants(store, (req.query.q || "").trim()));
     } catch (e) {

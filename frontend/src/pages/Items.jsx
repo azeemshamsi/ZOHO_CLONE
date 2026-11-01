@@ -7,6 +7,9 @@ import { docLink } from "./Accounts";
 import { useLocations } from "../lib/locations";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
+import { LinkPicker } from "./Inventory";
+import { useAuth } from "../lib/auth";
+import { can } from "../components/Layout";
 
 export function ItemList() {
   const [rows, setRows] = useState(null);
@@ -351,6 +354,7 @@ export function ItemDetail() {
           </table>
         )}
       </div>
+      {item.type === "goods" && <ShopifyLinks itemId={item._id} />}
       {item.trackInventory &&
         (!stock ? (
           <Spinner />
@@ -399,5 +403,51 @@ export function ItemDetail() {
           </div>
         ))}
     </>
+  );
+}
+
+// Shopify listings that sell this item (its own listing plus linked ones, e.g. the same table listed 4 ways).
+function ShopifyLinks({ itemId }) {
+  const { user } = useAuth();
+  const [d, setD] = useState(null);
+  const [open, setOpen] = useState(false);
+  const load = () => api.get(`/stock/${itemId}`).then((r) => setD(r.data)).catch(() => setD(false));
+  useEffect(() => {
+    if (can(user, "inventory")) load();
+  }, [itemId]);
+  if (!d) return null;
+  return (
+    <div className="card" style={{ marginTop: 14 }}>
+      <div className="card-head">
+        <h3 style={{ margin: 0, fontSize: 15 }}>Shopify listings</h3>
+        {can(user, "inventory", "full") && (
+          <button className="btn btn-sm" onClick={() => setOpen(true)}>
+            Manage links
+          </button>
+        )}
+      </div>
+      <p className="muted small" style={{ margin: "4px 0 8px" }}>
+        {d.shopifyVariantId ? "Has its own Shopify listing" : "No own Shopify listing"} · {d.links.length} linked listing{d.links.length === 1 ? "" : "s"}. Orders for linked listings use this item's stock, and its stock is pushed to all of them.
+      </p>
+      {d.links.length > 0 && (
+        <ul className="plain-list small">
+          {d.links.map((l) => (
+            <li key={l.variantId}>
+              {l.title} <span className="muted">{l.sku}</span> {d.pushed?.[l.variantId] !== undefined && <span className="muted">· Shopify stock {d.pushed[l.variantId]}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {open && (
+        <LinkPicker
+          item={{ _id: itemId, name: d.name, sku: d.sku, links: d.links, shopifyVariantId: d.shopifyVariantId }}
+          onClose={() => setOpen(false)}
+          onSaved={() => {
+            setOpen(false);
+            load();
+          }}
+        />
+      )}
+    </div>
   );
 }

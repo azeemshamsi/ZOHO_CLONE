@@ -64,8 +64,8 @@ function RacksModal({ racks, warehouses, onClose, onChanged }) {
   );
 }
 
-function LinkPicker({ item, onClose, onSaved }) {
-  const [q, setQ] = useState(item.sku || item.name.split(" ").slice(0, 2).join(" "));
+export function LinkPicker({ item, onClose, onSaved }) {
+  const [q, setQ] = useState(item.name.split(" ").slice(0, 2).join(" "));
   const dq = useDebounced(q, 400);
   const [found, setFound] = useState(null);
   const [links, setLinks] = useState(item.links || []);
