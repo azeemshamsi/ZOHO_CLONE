@@ -162,7 +162,7 @@ router.get(
     const countFilter = { ...f };
     delete countFilter.status;
     const [rows, total, byStatus] = await Promise.all([
-      ShopifyOrder.find(f, { "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.sku": 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, tags: 1, cancelledAt: 1 })
+      ShopifyOrder.find(f, { "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, tags: 1, cancelledAt: 1 })
         .sort(sort)
         .skip((page - 1) * limit)
         .limit(limit)
@@ -196,7 +196,7 @@ router.get(
     const out = [head.map(csv).join(",")];
     for (const o of rows)
       out.push(
-        [o.name, new Date(o.orderDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }), o.customer?.name, o.customer?.phone || o.shippingAddress?.phone, o.customer?.email, o.shippingAddress?.city, o.shippingAddress?.province, o.shippingAddress?.zip, o.paymentMode === "cod" ? "COD" : "Prepaid", o.financialStatus, o.status, (o.lines || []).map((l) => `${l.quantity} x ${l.title}${l.sku ? ` (${l.sku})` : ""}`).join("; "), o.total, o.shipment?.courierName, o.shipment?.awb, o.invoiceNumber]
+        [o.name, new Date(o.orderDate).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }), o.customer?.name, o.customer?.phone || o.shippingAddress?.phone, o.customer?.email, o.shippingAddress?.city, o.shippingAddress?.province, o.shippingAddress?.zip, o.paymentMode === "cod" ? "COD" : o.paymentMode === "partial" ? `Partly paid (${o.prepaidAmount} online, ${o.codAmount} COD)` : "Prepaid", o.financialStatus, o.status, (o.lines || []).map((l) => `${l.quantity} x ${l.title}${l.sku ? ` (${l.sku})` : ""}`).join("; "), o.total, o.shipment?.courierName, o.shipment?.awb, o.invoiceNumber]
           .map(csv)
           .join(",")
       );
@@ -366,14 +366,14 @@ router.get(
 router.post(
   "/orders/labels",
   ah(async (req, res) => {
-    const d = validate(Joi.object({ ids: idsJoi }), req.body);
+    const d = validate(Joi.object({ ids: idsJoi, format: Joi.string().valid("4x6", "a4").allow("") }), req.body);
     const orders = (await ordersFor(req, d.ids)).filter((o) => o.shipment?.awb);
     if (!orders.length) throw new HttpError(400, "None of these orders has a shipment booked");
     const org = await Organization.findById(req.org);
     const accs = new Map((await CourierAccount.find({ organization: req.org })).map((a) => [String(a._id), a]));
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="labels.pdf"`);
-    res.send(await labelsPdf(orders, org, accs));
+    res.send(await labelsPdf(orders, org, accs, d.format));
   })
 );
 

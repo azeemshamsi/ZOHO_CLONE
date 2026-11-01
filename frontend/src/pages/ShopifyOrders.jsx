@@ -19,6 +19,14 @@ const TABS = [
 const STATUS_LABEL = Object.fromEntries(TABS);
 const TRACK_LABEL = { pending: "Awaiting pickup", in_transit: "In transit", out_for_delivery: "Out for delivery", delivered: "Delivered", rto: "RTO", cancelled: "Cancelled by courier" };
 const FIN = { PAID: "Paid", PENDING: "Pending", PARTIALLY_PAID: "Partly paid", REFUNDED: "Refunded", PARTIALLY_REFUNDED: "Part refunded", VOIDED: "Voided", AUTHORIZED: "Authorized", EXPIRED: "Expired" };
+const PAY = { cod: ["COD", "status-partially_paid"], prepaid: ["Prepaid", "status-paid"], partial: ["Partly paid", "status-sent"] };
+const PayBadge = ({ o }) => <span className={`status ${(PAY[o.paymentMode] || PAY.prepaid)[1]}`}>{(PAY[o.paymentMode] || PAY.prepaid)[0]}</span>;
+const PaySplit = ({ o }) =>
+  o.paymentMode === "partial" ? (
+    <div className="muted small">
+      {money(o.prepaidAmount)} paid · {money(o.codAmount)} COD
+    </div>
+  ) : null;
 const EMPTY_FILTERS = { q: "", from: "", to: "", payment: "", financial: "", state: "", courier: "", invoiced: "", tag: "", sort: "newest" };
 
 const openPdf = async (url, body) => {
@@ -73,7 +81,7 @@ function ShipModal({ ids, couriers, store, onClose, onDone }) {
   const p = store?.pkg || {};
   const [pkg, setPkg] = useState({ weight: p.weight || 0.5, length: p.length || 20, breadth: p.breadth || 15, height: p.height || 10 });
   const [manual, setManual] = useState({ awb: "", courierName: "" });
-  const [invoiceFirst, setInvoiceFirst] = useState(true);
+  const [invoiceFirst, setInvoiceFirst] = useState(false);
   const [busy, setBusy] = useState(false);
   const acc = active.find((c) => c._id === account);
   const set = (k) => (e) => setPkg({ ...pkg, [k]: e.target.value });
@@ -147,7 +155,7 @@ function ShipModal({ ids, couriers, store, onClose, onDone }) {
             </Field>
           </div>
           <label className="check">
-            <input type="checkbox" checked={invoiceFirst} onChange={(e) => setInvoiceFirst(e.target.checked)} /> Create the invoice first (the invoice number goes on the shipment)
+            <input type="checkbox" checked={invoiceFirst} onChange={(e) => setInvoiceFirst(e.target.checked)} /> Also create the invoice (optional — its number then goes on the shipment)
           </label>
           {store?.fulfillInShopify && <p className="muted small">Orders will be marked fulfilled in Shopify with the tracking number.</p>}
         </div>
@@ -229,7 +237,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
     >
       <div className="order-head">
         <div>
-          <span className={`status ship-${o.status}`}>{STATUS_LABEL[o.status]}</span> <span className={`status ${o.paymentMode === "cod" ? "status-partially_paid" : "status-paid"}`}>{o.paymentMode === "cod" ? "COD" : "Prepaid"}</span> <span className="muted small">{FIN[o.financialStatus] || o.financialStatus}</span>
+          <span className={`status ship-${o.status}`}>{STATUS_LABEL[o.status]}</span> <PayBadge o={o} /> <span className="muted small">{FIN[o.financialStatus] || o.financialStatus}{o.paymentMode === "partial" ? ` · ${money(o.prepaidAmount)} paid online, ${money(o.codAmount)} to collect on delivery` : o.paymentMode === "cod" ? ` · collect ${money(o.codAmount || o.total)}` : ""}</span>
         </div>
         <div className="muted small">{new Date(o.orderDate).toLocaleString("en-IN")}</div>
       </div>
@@ -289,6 +297,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
           {o.lines.map((l) => (
             <tr key={l.lineId} className={l.quantity ? "" : "muted"}>
               <td>
+                {l.image && <img src={l.image} alt="" className="ship-thumb" style={{ float: "left", marginRight: 8 }} />}
                 {l.title}
                 {l.variantTitle && <span className="muted"> — {l.variantTitle}</span>}
                 {l.sku && <div className="muted small">SKU {l.sku}</div>}
@@ -549,9 +558,10 @@ export function ShopifyOrders() {
           <span className="muted">to</span>
           <input type="date" value={filters.to} onChange={setF("to")} title="To" />
           <select value={filters.payment} onChange={setF("payment")}>
-            <option value="">COD & Prepaid</option>
+            <option value="">All payment types</option>
             <option value="cod">COD</option>
             <option value="prepaid">Prepaid</option>
+            <option value="partial">Partly paid</option>
           </select>
           <button className={`btn btn-sm ${showFilters || activeFilters ? "btn-active" : ""}`} onClick={() => setShowFilters(!showFilters)}>
             More filters{activeFilters ? ` (${activeFilters})` : ""}
@@ -626,9 +636,14 @@ export function ShopifyOrders() {
               </button>
             )}
             {["ready_to_ship", "shipped", "delivered", "rto", "all"].includes(tab) && (
-              <button className="btn btn-sm" disabled={busy} onClick={() => openPdf("/shopify/orders/labels", { ids })}>
-                Print Labels
-              </button>
+              <>
+                <button className="btn btn-sm" disabled={busy} onClick={() => openPdf("/shopify/orders/labels", { ids, format: "4x6" })}>
+                  Labels 4x6
+                </button>
+                <button className="btn btn-sm" disabled={busy} onClick={() => openPdf("/shopify/orders/labels", { ids, format: "a4" })}>
+                  Labels A4
+                </button>
+              </>
             )}
             {["ready_to_ship", "shipped", "all"].includes(tab) && (
               <>
@@ -693,19 +708,26 @@ export function ShopifyOrders() {
                       <div className="muted small">{o.customer?.phone}</div>
                     </td>
                     <td className="small">
-                      {items.slice(0, 2).map((l, i) => (
-                        <div key={i} className="ellipsis">
-                          {l.quantity} × {l.title}
-                          {l.variantTitle ? ` (${l.variantTitle})` : ""}
+                      <div className="ship-items">
+                        {items[0]?.image ? <img src={items[0].image} alt="" className="ship-thumb" loading="lazy" /> : <div className="ship-thumb empty" />}
+                        <div>
+                          {items.slice(0, 2).map((l, i) => (
+                            <div key={i} className="ellipsis">
+                              {l.quantity} × {l.title}
+                              {l.variantTitle ? ` (${l.variantTitle})` : ""}
+                              {l.sku && <span className="muted"> · {l.sku}</span>}
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      </div>
                       {items.length > 2 && <div className="muted">+{items.length - 2} more</div>}
                     </td>
                     <td>
                       <strong>{money(o.total)}</strong>
                       <div>
-                        <span className={`status ${o.paymentMode === "cod" ? "status-partially_paid" : "status-paid"}`}>{o.paymentMode === "cod" ? "COD" : "Prepaid"}</span>
+                        <PayBadge o={o} />
                       </div>
+                      <PaySplit o={o} />
                     </td>
                     <td className="small">
                       {sh.awb ? (

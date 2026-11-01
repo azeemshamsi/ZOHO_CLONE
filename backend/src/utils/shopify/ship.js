@@ -35,6 +35,7 @@ async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {} }) {
   const items = new Map((await Item.find({ _id: { $in: order.lines.map((l) => l.item).filter(Boolean) } }).lean()).map((i) => [String(i._id), i]));
   const s = shipmentFrom(order, org, p, items);
   if (acc.carrier !== "custom") checkShipment(s);
+  if (s.cod && acc.options?.codEnabled === false) throw new Error(`${acc.name} isn't set up for COD; choose another courier for this ₹${s.codAmount} COD order`);
   const out = await CARRIERS[acc.carrier].book(acc, s, manual);
   order.shipment = {
     account: acc._id,

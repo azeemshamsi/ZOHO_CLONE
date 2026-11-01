@@ -25,6 +25,7 @@ const lineSchema = new mongoose.Schema(
     productType: String,
     category: String, // Shopify taxonomy category
     tags: [String],
+    image: String,
     hsn: String, // from Shopify (inventory item)
     shopifyTaxRate: Number, // sum of the line's tax lines
     quantity: Number, // current quantity (after removals)
@@ -53,7 +54,9 @@ const shopifyOrderSchema = new mongoose.Schema(
     fulfillmentStatus: String, // UNFULFILLED, FULFILLED…
     cancelledAt: Date,
     cancelReason: String,
-    paymentMode: { type: String, enum: ["cod", "prepaid"], default: "prepaid" },
+    paymentMode: { type: String, enum: ["cod", "prepaid", "partial"], default: "prepaid" },
+    prepaidAmount: { type: Number, default: 0 }, // paid online
+    codAmount: { type: Number, default: 0 }, // to collect on delivery
     gateways: [String],
     tags: [String],
     note: String,

@@ -149,7 +149,7 @@ async function buildEwayBill(org, doc) {
   const rate = Number(doc.exchangeRate) || 1;
   const inr = (n) => r2(n * rate);
   const sa = s.address || {};
-  const ship = t.shipTo && (t.shipTo.pincode || t.shipTo.city) ? t.shipTo : doc.billingAddress || customer?.billingAddress || {};
+  const ship = t.shipTo && (t.shipTo.pincode || t.shipTo.city) ? t.shipTo : doc.shipTo && (doc.shipTo.pincode || doc.shipTo.city) ? doc.shipTo : doc.billingAddress || customer?.billingAddress || {};
   const goods = (doc.lineItems || []).filter((l) => !isService(l.hsnSac));
   if (!goods.length) errors.push("E-way bills are for goods; every line here is a service (SAC 99…)");
   if (!s.gstin || !GSTIN_RX.test(s.gstin)) errors.push("Your GSTIN is missing or invalid");

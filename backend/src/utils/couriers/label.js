@@ -1,19 +1,87 @@
-// MGI's own 4x6" shipping label (used for custom couriers and whenever a carrier gives no label).
+// MGI's own shipping label: 4x6" thermal (one per page) or A4 (four per page).
 const path = require("path");
 const PDFDocument = require("pdfkit");
 const bwipjs = require("bwip-js");
-const { stateName } = require("./index");
+const { stateName, codOf } = require("./index");
 
 const FONT = path.join(__dirname, "..", "..", "..", "assets", "fonts", "DejaVuSans.ttf");
 const BOLD = path.join(__dirname, "..", "..", "..", "assets", "fonts", "DejaVuSans-Bold.ttf");
-const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+const W4 = 288;
+const H6 = 432;
 
-async function barcode(text, height = 12) {
-  return bwipjs.toBuffer({ bcid: "code128", text: String(text), scale: 3, height, includetext: false });
+const barcode = (text, height = 12) => bwipjs.toBuffer({ bcid: "code128", text: String(text), scale: 3, height, includetext: false });
+
+async function drawLabel(doc, o, org, acc) {
+  const sh = o.shipment || {};
+  const a = o.shippingAddress || {};
+  const p = acc?.pickup || {};
+  const L = 12;
+  const W = 264;
+  const line = (y) => doc.moveTo(6, y).lineTo(282, y).stroke();
+  doc.lineWidth(1.2).rect(6, 6, 276, 420).stroke();
+  doc.lineWidth(0.8);
+  // Seller + payment
+  doc.font("b").fontSize(12).fillColor("#000").text(org.name, L, 16, { width: 170, height: 16, ellipsis: true });
+  const cod = codOf(o);
+  const payText = o.paymentMode === "prepaid" || !cod ? "PREPAID" : o.paymentMode === "partial" ? "PART COD" : "COD";
+  doc.roundedRect(190, 12, 84, cod ? 32 : 22, 5).stroke();
+  doc.font("b").fontSize(10).text(payText, 190, 17, { width: 84, align: "center" });
+  if (cod) doc.font("b").fontSize(9).text(`Collect ${money(cod)}`, 190, 30, { width: 84, align: "center" });
+  line(50);
+  // AWB
+  doc.font("r").fontSize(7.5).text("AWB NUMBER", L, 56);
+  doc.font("b").fontSize(12).text(sh.awb || "", L, 66, { width: 160 });
+  doc.font("b").fontSize(11).text((sh.courierName || acc?.name || "").toUpperCase(), 140, 56, { width: 134, align: "right" });
+  if (sh.refs?.routing) doc.font("b").fontSize(10).text(`RC: ${sh.refs.routing}`, 140, 70, { width: 134, align: "right" });
+  if (sh.awb) doc.image(await barcode(sh.awb, 12), 44, 86, { width: 200, height: 44 });
+  line(136);
+  // Deliver to
+  doc.font("b").fontSize(8).text("DELIVER TO:", L, 142);
+  doc.font("b").fontSize(11).text(a.name || o.customer?.name || "", L, 153, { width: W, height: 14, ellipsis: true });
+  doc.font("r").fontSize(8.5);
+  const addr = [a.address1, a.address2, a.company].filter(Boolean);
+  for (const t of addr.slice(0, 3)) doc.text(t, L, doc.y, { width: W, height: 11, ellipsis: true });
+  doc.text(`${a.city || ""}${a.city ? ", " : ""}${a.province || stateName(a.state)}, ${a.zip || ""}`, L, doc.y, { width: W });
+  doc.font("b").text(`Ph: ${String(a.phone || o.customer?.phone || "").replace(/\D/g, "").slice(-10)}`, L, doc.y, { width: W });
+  line(232);
+  // Order
+  const kv = (k, v, x, y) => {
+    doc.font("r").fontSize(8).text(k, x, y);
+    doc.font("b").fontSize(9).text(v, x + 52, y - 1, { width: 84, height: 11, ellipsis: true });
+  };
+  kv("ORDER NO:", o.name || "", L, 240);
+  kv("DATE:", new Date(o.orderDate).toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }).replace(/\//g, "-"), 146, 240);
+  kv("WEIGHT:", sh.weight ? `${sh.weight} kg` : "", L, 255);
+  kv("DIMS:", sh.length ? `${sh.length}x${sh.breadth}x${sh.height} cm` : "", 146, 255);
+  if (o.invoiceNumber || o.paymentMode === "partial") {
+    kv("INVOICE:", o.invoiceNumber || "", L, 270);
+    kv("VALUE:", money(o.total), 146, 270);
+  }
+  line(286);
+  // Products
+  doc.font("b").fontSize(8).text("PRODUCTS", L, 291);
+  let y = 302;
+  const lines = o.lines.filter((x) => x.quantity > 0);
+  for (const l of lines.slice(0, 4)) {
+    doc.font("r").fontSize(7.5).text(`• ${l.variantTitle ? `${l.title} - ${l.variantTitle}` : l.title}`, L, y, { width: 150, height: 10, ellipsis: true });
+    doc.text(l.sku ? `SKU: ${l.sku}` : "", 165, y, { width: 75, height: 10, ellipsis: true });
+    doc.text(`Qty: ${l.quantity}`, 240, y, { width: 34, align: "right" });
+    y += 11;
+  }
+  if (lines.length > 4) doc.font("r").fontSize(7.5).text(`+ ${lines.length - 4} more item(s)`, L, y);
+  line(350);
+  // Return address
+  doc.font("b").fontSize(8).text("FROM (Return Address):", L, 355);
+  doc.font("b").fontSize(9).text(p.name || org.name, L, 366, { width: W });
+  doc.font("r").fontSize(7.5).text([p.address || org.address?.street, `${p.city || org.address?.city || ""}, ${stateName(p.state || org.state)}, ${p.pincode || org.address?.pincode || ""}`, `Ph: ${p.phone || org.phone || ""}${org.gstin ? `   GSTIN: ${org.gstin}` : ""}`].filter(Boolean).join("\n"), L, doc.y, { width: W });
+  if (acc?.options?.customText) doc.font("b").fontSize(7.5).text(String(acc.options.customText).slice(0, 150), L, 410, { width: W, align: "center", height: 12, ellipsis: true });
 }
 
-async function labelsPdf(orders, org, accounts = new Map()) {
-  const doc = new PDFDocument({ size: [288, 432], margin: 0, autoFirstPage: false });
+async function labelsPdf(orders, org, accounts = new Map(), format) {
+  const first = orders[0]?.shipment?.account ? accounts.get(String(orders[0].shipment.account)) : null;
+  const a4 = (format || first?.options?.labelFormat) === "a4";
+  const doc = new PDFDocument({ size: a4 ? "A4" : [W4, H6], margin: 0, autoFirstPage: false });
   doc.registerFont("r", FONT);
   doc.registerFont("b", BOLD);
   const chunks = [];
@@ -22,48 +90,27 @@ async function labelsPdf(orders, org, accounts = new Map()) {
     doc.on("end", () => res(Buffer.concat(chunks)));
     doc.on("error", rej);
   });
-  for (const o of orders) {
-    const sh = o.shipment || {};
-    const a = o.shippingAddress || {};
-    const acc = sh.account ? accounts.get(String(sh.account)) : null;
-    const p = acc?.pickup || {};
-    doc.addPage();
-    const L = 12;
-    const W = 264;
-    doc.lineWidth(1).rect(6, 6, 276, 420).stroke();
-    // Courier + AWB
-    doc.font("b").fontSize(13).text(sh.courierName || acc?.name || "Courier", L, 14, { width: W * 0.6 });
-    doc.font("b").fontSize(13).text(o.paymentMode === "cod" ? "COD" : "PREPAID", L, 14, { width: W, align: "right" });
-    if (o.paymentMode === "cod") doc.font("b").fontSize(10).text(`Collect ${money(o.outstanding > 0 ? o.outstanding : o.total)}`, L, 30, { width: W, align: "right" });
-    if (sh.awb) {
-      doc.image(await barcode(sh.awb, 14), L + 12, 46, { width: W - 24, height: 50 });
-      doc.font("b").fontSize(11).text(`AWB ${sh.awb}`, L, 100, { width: W, align: "center" });
+  // A4: 2 x 2 labels, scaled to fit with margins.
+  const k = 0.95;
+  const slots = [
+    [12, 12],
+    [12 + W4 * k + 7, 12],
+    [12, 12 + H6 * k + 7],
+    [12 + W4 * k + 7, 12 + H6 * k + 7],
+  ];
+  for (const [i, o] of orders.entries()) {
+    const acc = o.shipment?.account ? accounts.get(String(o.shipment.account)) : null;
+    if (!a4) {
+      doc.addPage();
+      await drawLabel(doc, o, org, acc);
+      continue;
     }
-    doc.moveTo(6, 118).lineTo(282, 118).stroke();
-    // Ship to
-    doc.font("b").fontSize(8).text("SHIP TO", L, 124);
-    doc.font("b").fontSize(11).text(a.name || o.customer?.name || "", L, 135, { width: W });
-    doc.font("r").fontSize(9).text([a.address1, a.address2, `${a.city || ""}${a.city ? ", " : ""}${a.province || stateName(a.state)} ${a.zip || ""}`].filter(Boolean).join("\n"), { width: W });
-    doc.font("b").fontSize(9).text(`Phone: ${a.phone || o.customer?.phone || ""}`, { width: W });
-    doc.font("b").fontSize(18).text(a.zip || "", L, 222, { width: W, align: "right" });
-    doc.moveTo(6, 246).lineTo(282, 246).stroke();
-    // Order
-    doc.font("b").fontSize(8).text("ORDER", L, 252);
-    doc.font("b").fontSize(10).text(`${o.name}   ${new Date(o.orderDate).toLocaleDateString("en-IN")}`, L, 262);
-    doc.image(await barcode(String(o.name).replace(/^#/, ""), 8), L + 150, 252, { width: 100, height: 22 });
-    let y = 280;
-    doc.font("r").fontSize(8);
-    for (const l of o.lines.filter((x) => x.quantity > 0).slice(0, 6)) {
-      doc.text(`${l.quantity} × ${(l.variantTitle ? `${l.title} - ${l.variantTitle}` : l.title).slice(0, 48)}${l.sku ? ` (${l.sku})` : ""}`, L, y, { width: W, lineBreak: false, ellipsis: true });
-      y += 11;
-    }
-    const more = o.lines.filter((x) => x.quantity > 0).length - 6;
-    if (more > 0) doc.text(`+ ${more} more`, L, y), (y += 11);
-    doc.font("b").fontSize(8).text(`Value ${money(o.total)}${o.invoiceNumber ? `   Invoice ${o.invoiceNumber}` : ""}   ${sh.weight ? `${sh.weight} kg` : ""}`, L, Math.max(y + 2, 340), { width: W });
-    doc.moveTo(6, 360).lineTo(282, 360).stroke();
-    // Return address
-    doc.font("b").fontSize(8).text("IF UNDELIVERED, RETURN TO", L, 366);
-    doc.font("r").fontSize(8).text([p.name || org.name, p.address || [org.address?.street, org.address?.city].filter(Boolean).join(", "), `${p.city || org.address?.city || ""} ${stateName(p.state || org.state)} ${p.pincode || org.address?.pincode || ""}`, p.phone || org.phone ? `Phone: ${p.phone || org.phone}` : "", org.gstin ? `GSTIN: ${org.gstin}` : ""].filter(Boolean).join("\n"), L, 377, { width: W });
+    if (i % 4 === 0) doc.addPage();
+    const [x, y] = slots[i % 4];
+    doc.save();
+    doc.translate(x, y).scale(k);
+    await drawLabel(doc, o, org, acc);
+    doc.restore();
   }
   if (!orders.length) doc.addPage();
   doc.end();

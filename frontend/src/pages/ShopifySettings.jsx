@@ -13,20 +13,28 @@ const FIELD_LABEL = {
   loginId: "Login ID",
   licenceKey: "Licence key",
   apiKey: "API key",
-  trackUsername: "Tracking username",
-  trackPassword: "Tracking password",
+  trackingKey: "Tracking API key (optional)",
+  trackingToken: "Tracking access token",
+  clientName: "Client name (optional)",
+  awbPool: "AWB numbers in stock",
+  pincodes: "Serviceable pincodes (blank = all)",
   pickupLocation: "Pickup location name",
   courierId: "Courier ID (optional)",
   autoPickup: "Schedule pickup automatically",
   shippingMode: "Shipping mode",
   customerCode: "Customer code",
-  originArea: "Origin area code",
-  productCode: "Product code",
+  originArea: "Pickup area code",
+  productCode: "Service type",
   vendorCode: "Vendor code (optional)",
   serviceType: "Service type",
   commodityId: "Commodity ID (optional)",
 };
-const OPTIONAL = ["courierId", "vendorCode", "commodityId", "trackUsername", "trackPassword", "productCode", "serviceType", "shippingMode", "autoPickup"];
+const OPTIONAL = ["courierId", "vendorCode", "commodityId", "trackingKey", "trackingToken", "productCode", "serviceType", "shippingMode", "autoPickup", "clientName", "awbPool", "pincodes"];
+const SELECTS = {
+  productCode: [["A", "eTail Apex (air)"], ["E", "eTail Surface (ground)"], ["D", "Domestic Priority"]],
+  serviceType: [["B2C SMART EXPRESS", "B2C Smart Express"], ["B2C PRIORITY", "B2C Priority"], ["B2C GROUND ECONOMY", "B2C Ground Economy"], ["GROUND EXPRESS", "Ground Express"], ["PRIORITY", "Priority"], ["STD EXP-A", "Standard Express (air)"]],
+  shippingMode: [["Surface", "Surface"], ["Express", "Express"]],
+};
 const list = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
 
 function Connection({ store, onSaved }) {
@@ -325,6 +333,15 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
     setBusy(false);
   };
   const setP = (k) => (e) => setF({ ...f, pickup: { ...f.pickup, [k]: e.target.value } });
+  const setO = (k, v) => setF((x) => ({ ...x, options: { ...x.options, [k]: v } }));
+  const [warehouses, setWarehouses] = useState([]);
+  useEffect(() => {
+    api.get("/warehouses").then((r) => setWarehouses(r.data.filter((w) => w.active !== false && w.address?.pincode))).catch(() => {});
+  }, []);
+  const fromWarehouse = (id) => {
+    const w = warehouses.find((x) => x._id === id);
+    if (w) setF((x) => ({ ...x, pickup: { ...x.pickup, name: w.name, address: w.address.street || "", city: w.address.city || "", state: w.address.state || "", pincode: w.address.pincode || "" } }));
+  };
   return (
     <Modal
       open
@@ -367,28 +384,64 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
             ))}
           </div>
         )}
-        {c.fields.options.length > 0 && (
+        {c.fields.options.filter((k) => !["awbPool", "pincodes"].includes(k)).length > 0 && (
           <div className="row-2">
-            {c.fields.options.map((k) =>
-              k === "autoPickup" ? (
-                <label key={k} className="check" style={{ alignSelf: "end" }}>
-                  <input type="checkbox" checked={!!f.options[k]} onChange={(e) => setF({ ...f, options: { ...f.options, [k]: e.target.checked } })} /> {FIELD_LABEL[k]}
-                </label>
-              ) : k === "shippingMode" ? (
-                <Field key={k} label={FIELD_LABEL[k]}>
-                  <select value={f.options[k] || "Surface"} onChange={(e) => setF({ ...f, options: { ...f.options, [k]: e.target.value } })}>
-                    <option>Surface</option>
-                    <option>Express</option>
-                  </select>
-                </Field>
-              ) : (
-                <Field key={k} label={FIELD_LABEL[k] || k} required={!OPTIONAL.includes(k)}>
-                  <input value={f.options[k] || ""} onChange={(e) => setF({ ...f, options: { ...f.options, [k]: e.target.value } })} />
-                </Field>
-              )
-            )}
+            {c.fields.options
+              .filter((k) => !["awbPool", "pincodes"].includes(k))
+              .map((k) =>
+                k === "autoPickup" ? (
+                  <label key={k} className="check" style={{ alignSelf: "end" }}>
+                    <input type="checkbox" checked={!!f.options[k]} onChange={(e) => setO(k, e.target.checked)} /> {FIELD_LABEL[k]}
+                  </label>
+                ) : SELECTS[k] ? (
+                  <Field key={k} label={FIELD_LABEL[k]}>
+                    <select value={f.options[k] || SELECTS[k][0][0]} onChange={(e) => setO(k, e.target.value)}>
+                      {SELECTS[k].map(([v, l]) => (
+                        <option key={v} value={v}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                ) : (
+                  <Field key={k} label={FIELD_LABEL[k] || k} required={!OPTIONAL.includes(k)}>
+                    <input value={f.options[k] || ""} onChange={(e) => setO(k, e.target.value)} />
+                  </Field>
+                )
+              )}
           </div>
         )}
+        {f.carrier === "custom" && (
+          <div className="row-2">
+            <Field label={FIELD_LABEL.awbPool} hint={`${String(f.options.awbPool || "").split(/[\s,;]+/).filter(Boolean).length} left · one per line, used in order when you book. Paste or upload a CSV/TXT.`}>
+              <textarea rows={5} value={f.options.awbPool || ""} onChange={(e) => setO("awbPool", e.target.value)} placeholder={"SELF000101\nSELF000102"} />
+              <input type="file" accept=".csv,.txt" style={{ marginTop: 6 }} onChange={async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const found = (await file.text()).split(/[\r\n,;\t]+/).map((x) => x.trim().replace(/^"|"$/g, "")).filter((x) => x && !/awb/i.test(x));
+                setO("awbPool", [...String(f.options.awbPool || "").split(/\s+/).filter(Boolean), ...found].join("\n"));
+                toast(`${found.length} AWB numbers added — save to keep them`);
+              }} />
+            </Field>
+            <Field label={FIELD_LABEL.pincodes} hint="Separate with commas or new lines">
+              <textarea rows={5} value={f.options.pincodes || ""} onChange={(e) => setO("pincodes", e.target.value)} />
+            </Field>
+          </div>
+        )}
+        <div className="row-3">
+          <label className="check" style={{ alignSelf: "end" }}>
+            <input type="checkbox" checked={f.options.codEnabled !== false} onChange={(e) => setO("codEnabled", e.target.checked)} /> COD enabled
+          </label>
+          <Field label="Label format (MGI labels)">
+            <select value={f.options.labelFormat || "4x6"} onChange={(e) => setO("labelFormat", e.target.value)}>
+              <option value="4x6">4x6 thermal</option>
+              <option value="a4">A4 (4 per page)</option>
+            </select>
+          </Field>
+          <Field label="Text printed on labels" hint={`${String(f.options.customText || "").length}/150`}>
+            <input maxLength={150} value={f.options.customText || ""} onChange={(e) => setO("customText", e.target.value)} placeholder="Thank you for shopping with us!" />
+          </Field>
+        </div>
         {f.carrier === "custom" ? (
           <Field label="Tracking link" hint="Use {awb} where the tracking number goes">
             <input value={f.trackingUrl} onChange={(e) => setF({ ...f, trackingUrl: e.target.value })} placeholder="https://courier.example/track?awb={awb}" />
@@ -396,6 +449,18 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
         ) : (
           <>
             <div className="label-sm">Pickup / return address</div>
+            {warehouses.length > 0 && (
+              <Field label="Fill from a warehouse">
+                <select value="" onChange={(e) => fromWarehouse(e.target.value)}>
+                  <option value="">Choose a warehouse…</option>
+                  {warehouses.map((w) => (
+                    <option key={w._id} value={w._id}>
+                      {w.name} — {w.address.city} {w.address.pincode}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
             <div className="row-2">
               <Field label="Contact name">
                 <input value={f.pickup.name} onChange={setP("name")} />
@@ -477,7 +542,11 @@ function Couriers({ carriers }) {
                   <strong>{a.name}</strong> {a.isDefault && <span className="pill pill-green">Default</span>} {a.test && <span className="pill pill-amber">Test</span>} {!a.active && <span className="pill">Inactive</span>}
                 </td>
                 <td>{carriers[a.carrier]?.label}</td>
-                <td className="muted small">{a.pickup?.pincode ? `Pickup ${a.pickup.city || ""} ${a.pickup.pincode}` : a.carrier === "custom" ? "Manual AWB" : "No pickup address"}</td>
+                <td className="muted small">
+                  {a.carrier === "custom" ? `${String(a.options?.awbPool || "").split(/\s+/).filter(Boolean).length} AWBs in stock` : a.pickup?.pincode ? `Pickup ${a.pickup.city || ""} ${a.pickup.pincode}` : "No pickup address"}
+                  {" · "}
+                  {a.options?.codEnabled === false ? "Prepaid only" : "COD"} · {a.options?.labelFormat === "a4" ? "A4" : "4x6"}
+                </td>
               </tr>
             ))}
           </tbody>

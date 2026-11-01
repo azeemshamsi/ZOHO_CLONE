@@ -192,6 +192,8 @@ export function DocForm({ kind, recurring = false }) {
           paymentTerms: data.paymentTerms ?? 0,
           second: second && data[second.field] ? isoDate(data[second.field]) : "",
           placeOfSupply: data.placeOfSupply,
+          billingAddress: addrOf(data.billingAddress),
+          shipTo: { name: data.shipTo?.name || "", phone: data.shipTo?.phone || "", ...addrOf(data.shipTo) },
           lineItems: data.lineItems.map(cleanLine),
           shippingCharge: data.shippingCharge,
           adjustment: data.adjustment,
@@ -269,6 +271,7 @@ export function DocForm({ kind, recurring = false }) {
           placeOfSupply: c.placeOfSupply || organization?.state || "",
           paymentTerms: c.paymentTerms,
           second: second?.terms ? addDays(f.date, c.paymentTerms) : f.second,
+          ...(f.billingAddress && hasAddr(f.billingAddress) ? {} : addressesFor(c)),
         }));
     }
   }, [customers, form, id, organization, second]);
@@ -307,6 +310,7 @@ export function DocForm({ kind, recurring = false }) {
       ...form,
       customer: e.target.value,
       invoice: "",
+      ...addressesFor(c),
       placeOfSupply: c?.placeOfSupply || organization?.state || "",
       paymentTerms: c ? c.paymentTerms : form.paymentTerms,
       second: second?.terms && c ? addDays(form.date, c.paymentTerms) : form.second,
@@ -333,6 +337,7 @@ export function DocForm({ kind, recurring = false }) {
         [kind.refField]: form.ref,
         date: form.date,
         placeOfSupply: form.placeOfSupply,
+        ...(!isVendor && form.billingAddress ? { billingAddress: form.billingAddress, shipTo: form.shipTo } : {}),
         shippingCharge: Number(form.shippingCharge || 0),
         adjustment: Number(form.adjustment || 0),
         customerNotes: form.customerNotes,
@@ -413,6 +418,12 @@ export function DocForm({ kind, recurring = false }) {
               <span>
                 {isVendor ? "Payables" : "Receivables"}: <b>{money(isVendor ? customer.payables : customer.receivables, customer.currency)}</b>
               </span>
+            </div>
+          )}
+          {customer && !isVendor && form.billingAddress && (
+            <div className="row-2 addr-row">
+              <AddressEditor label="Bill To" value={form.billingAddress} onChange={(v) => setForm({ ...form, billingAddress: v })} />
+              <AddressEditor label="Ship To" withName value={form.shipTo} onChange={(v) => setForm({ ...form, shipTo: v })} />
             </div>
           )}
           <Field label={isVendor ? "Source of Supply" : "Place of Supply"} required>
@@ -770,6 +781,55 @@ export function DocForm({ kind, recurring = false }) {
 }
 
 /* ======================= Printable document ======================= */
+const hasAddr = (a) => Boolean(a && (a.street || a.city || a.pincode));
+const addrOf = (a = {}) => ({ street: a.street || "", city: a.city || "", state: a.state || "", pincode: a.pincode || "", country: a.country || "India" });
+// Bill To / Ship To from a customer's saved addresses.
+const addressesFor = (c) => (c ? { billingAddress: addrOf(c.billingAddress), shipTo: { name: c.displayName, phone: c.phone || "", ...addrOf(hasAddr(c.shippingAddress) ? c.shippingAddress : c.billingAddress) } } : { billingAddress: addrOf(), shipTo: { name: "", phone: "", ...addrOf() } });
+
+function AddressEditor({ label, value, onChange, withName }) {
+  const [open, setOpen] = useState(false);
+  const set = (k) => (e) => onChange({ ...value, [k]: e.target.value });
+  return (
+    <div className="addr-box">
+      <div className="addr-head">
+        <span className="doc-label">{label}</span>
+        <button type="button" className="link-btn small" onClick={() => setOpen(!open)}>
+          {open ? "Done" : "Change"}
+        </button>
+      </div>
+      {!open ? (
+        <div className="doc-small">
+          {withName && value.name && <strong>{value.name}</strong>}
+          {hasAddr(value) ? <Addr a={value} /> : <div className="muted">No address</div>}
+          {withName && value.phone && <div>{value.phone}</div>}
+        </div>
+      ) : (
+        <div className="addr-edit">
+          {withName && (
+            <div className="row-2">
+              <input placeholder="Name" value={value.name || ""} onChange={set("name")} />
+              <input placeholder="Phone" value={value.phone || ""} onChange={set("phone")} />
+            </div>
+          )}
+          <input placeholder="Street address" value={value.street || ""} onChange={set("street")} />
+          <div className="row-3">
+            <input placeholder="City" value={value.city || ""} onChange={set("city")} />
+            <select value={value.state || ""} onChange={set("state")}>
+              <option value="">State</option>
+              {STATES.map(([c, n]) => (
+                <option key={c} value={c}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <input placeholder="Pincode" value={value.pincode || ""} onChange={set("pincode")} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Addr({ a = {} }) {
   const lines = [a.street, a.city, [stateName(a.state), a.pincode].filter(Boolean).join(" "), a.country].filter(Boolean);
   return lines.map((l, i) => <div key={i}>{l}</div>);
@@ -849,6 +909,16 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
             {(doc.customerGstin || doc.vendorGstin) && <div>GSTIN {doc.customerGstin || doc.vendorGstin}</div>}
           </div>
         </div>
+        {!doc.vendorName && hasAddr(doc.shipTo) && (
+          <div>
+            <div className="doc-label">Ship To</div>
+            <strong>{doc.shipTo.name || doc.customerName}</strong>
+            <div className="doc-small">
+              <Addr a={doc.shipTo} />
+              {doc.shipTo.phone && <div>Phone {doc.shipTo.phone}</div>}
+            </div>
+          </div>
+        )}
         <table className="doc-kv">
           <tbody>
             {meta

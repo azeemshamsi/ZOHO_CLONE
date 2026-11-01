@@ -80,8 +80,12 @@ async function invoiceOrder(ctx, order, store) {
   const adjustment = r2(target - t.total);
   const date = store.invoice?.dateFrom === "today" ? new Date() : order.orderDate;
   const iso = new Date(date.getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
+  const sa = order.shippingAddress || {};
+  const billA = order.billingAddress?.address1 ? order.billingAddress : sa;
   const body = {
     customer: String(customer._id),
+    billingAddress: { street: [billA.address1, billA.address2].filter(Boolean).join(", "), city: billA.city || "", state: billA.state || "", pincode: billA.zip || "", country: billA.country || "India" },
+    shipTo: { name: sa.name || order.customer?.name || "", phone: sa.phone || order.customer?.phone || "", street: [sa.address1, sa.address2].filter(Boolean).join(", "), city: sa.city || "", state: sa.state || "", pincode: sa.zip || "", country: sa.country || "India" },
     date: iso,
     dueDate: iso,
     placeOfSupply: pos,
@@ -89,17 +93,19 @@ async function invoiceOrder(ctx, order, store) {
     adjustment,
     orderNumber: order.name,
     status: store.invoice?.status || "sent",
-    customerNotes: `Shopify order ${order.name}${order.paymentMode === "cod" ? " · Cash on delivery" : ""}`,
+    customerNotes: `Shopify order ${order.name}${order.paymentMode === "cod" ? " · Cash on delivery" : order.paymentMode === "partial" ? ` · Paid online ₹${order.prepaidAmount}, ₹${order.codAmount} on delivery` : ""}`,
     ...(store.invoice?.branch ? { branch: String(store.invoice.branch) } : {}),
     ...(store.invoice?.warehouse ? { warehouse: String(store.invoice.warehouse) } : {}),
   };
   const { createInvoice } = require("../../routes/invoices");
   const inv = await createInvoice({ org: ctx.org, user: ctx.user }, body);
-  let paid = false;
-  if (store.invoice?.recordPayment && store.invoice.paymentAccount && order.paymentMode === "prepaid" && order.financialStatus === "PAID" && inv.status !== "draft") {
+  // Money already received online (full prepaid, or the prepaid part of a partly paid order).
+  let paid = 0;
+  const online = Math.min(inv.total, order.paymentMode === "cod" ? 0 : order.prepaidAmount || (order.financialStatus === "PAID" ? inv.total : 0));
+  if (store.invoice?.recordPayment && store.invoice.paymentAccount && online > 0 && inv.status !== "draft") {
     const { call } = require("../import/commit");
-    await call(require("../../routes/payments"), "POST", "/", ctx, { customer: String(customer._id), date: iso, amount: inv.total, mode: "bank_transfer", reference: `Shopify ${order.name}`, bankAccount: store.invoice.paymentAccount, allocations: [{ invoice: String(inv._id), amount: inv.total }] });
-    paid = true;
+    await call(require("../../routes/payments"), "POST", "/", ctx, { customer: String(customer._id), date: iso, amount: online, mode: "bank_transfer", reference: `Shopify ${order.name}`, bankAccount: store.invoice.paymentAccount, allocations: [{ invoice: String(inv._id), amount: online }] });
+    paid = online;
   }
   order.invoice = inv._id;
   order.invoiceNumber = inv.invoiceNumber;

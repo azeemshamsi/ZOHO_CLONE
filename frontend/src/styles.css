@@ -623,3 +623,12 @@ address { font-style: normal; line-height: 1.6; }
 .rule-test { margin-top: 16px; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; }
 .section-title .pill, .section-title .btn { margin-left: auto; text-transform: none; letter-spacing: 0; }
 @media (max-width: 760px) { .row-4 { grid-template-columns: 1fr 1fr; } .filter-bar .searchbox { max-width: none; } }
+.ship-items { display: flex; gap: 8px; align-items: flex-start; }
+.ship-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line-2); flex: none; background: var(--line-2); }
+.ship-thumb.empty { opacity: .5; }
+.addr-row { align-items: start; }
+.addr-box { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.addr-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.addr-head .doc-label { margin: 0; }
+.addr-edit { display: flex; flex-direction: column; gap: 6px; }
+.addr-edit input, .addr-edit select { height: 34px; }

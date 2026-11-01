@@ -127,7 +127,7 @@ const shiprocket = {
 /* ---------------- Delhivery ---------------- */
 const delhivery = {
   title: "Delhivery",
-  fields: { credentials: ["token"], options: ["pickupLocation", "shippingMode"] },
+  fields: { credentials: ["token"], options: ["clientName", "pickupLocation", "shippingMode"] },
   help: "Delhivery One → Settings → API Setup for the API token. Pickup location must match the warehouse (facility) name registered in Delhivery exactly. Shipping mode: Surface or Express.",
   base: (acc) => (acc.baseUrl || (acc.test ? "https://staging-express.delhivery.com" : "https://track.delhivery.com")).replace(/\/$/, ""),
   h: (acc) => ({ authorization: `Token ${acc.credentials.token}` }),
@@ -176,7 +176,7 @@ const delhivery = {
       const why = (pkg?.remarks || []).join("; ") || data.rmk || data.error || data.detail || short(data);
       throw new Error(`Delhivery didn't book the shipment (${status}): ${why}`);
     }
-    return { awb: String(pkg.waybill), courierName: `Delhivery ${acc.options.shippingMode || "Surface"}`, trackingUrl: `https://www.delhivery.com/track-v2/package/${pkg.waybill}`, refs: { refnum: pkg.refnum } };
+    return { awb: String(pkg.waybill), courierName: `Delhivery ${acc.options.shippingMode || "Surface"}`, trackingUrl: `https://www.delhivery.com/track-v2/package/${pkg.waybill}`, refs: { refnum: pkg.refnum, routing: pkg.sort_code || "" } };
   },
   async track(acc, sh) {
     const { data } = await request(`${this.base(acc)}/api/v1/packages/json/?waybill=${encodeURIComponent(sh.awb)}`, { headers: this.h(acc) });
@@ -204,8 +204,8 @@ const delhivery = {
 /* ---------------- Blue Dart ---------------- */
 const bluedart = {
   title: "Blue Dart",
-  fields: { credentials: ["clientId", "clientSecret", "loginId", "licenceKey"], options: ["customerCode", "originArea", "productCode", "vendorCode"] },
-  help: "From Blue Dart's API portal (developer.bluedart.com / DHL developer portal): Client ID and secret for the JWT token, plus your Login ID and Licence Key. Customer code and origin area are on your Blue Dart contract. Product code: A (Apex/air) or E (Surface); COD is set automatically.",
+  fields: { credentials: ["licenceKey", "loginId", "clientId", "clientSecret", "trackingKey"], options: ["customerCode", "originArea", "productCode", "vendorCode", "autoPickup"] },
+  help: "From Blue Dart (NetConnect / API portal): Licence key, Login ID, Client ID and secret, and the separate tracking API key if you have one. Customer code and pickup area code are on your contract. Service: A = eTail Apex (air), E = Surface. COD orders are sent as COD automatically.",
   base: (acc) => (acc.baseUrl || (acc.test ? "https://apigateway-sandbox.bluedart.com/in/transportation" : "https://apigateway.bluedart.com/in/transportation")).replace(/\/$/, ""),
   profile: (acc) => ({ LoginID: acc.credentials.loginId, LicenceKey: acc.credentials.licenceKey, Api_type: "S" }),
   async token(acc) {
@@ -244,7 +244,7 @@ const bluedart = {
           Dimensions: [{ Length: s.length, Breadth: s.breadth, Height: s.height, Count: 1 }],
           PickupDate: `/Date(${Date.now()})/`,
           PickupTime: "1600",
-          RegisterPickup: !!acc.options.registerPickup,
+          RegisterPickup: !!acc.options.autoPickup,
           PDFOutputNotRequired: false,
           Commodity: { CommodityDetail1: s.description.slice(0, 30) },
           itemdtl: s.items.map((i) => ({ ItemName: i.name.slice(0, 50), Itemquantity: i.quantity, ItemValue: r2(i.price * i.quantity), HSCode: i.hsn, SKUNumber: i.sku })),
@@ -258,19 +258,26 @@ const bluedart = {
       const why = (r.Status || []).map((x) => x.StatusInformation).join("; ") || data["error-response"]?.[0]?.Status?.[0]?.StatusInformation || short(data);
       throw new Error(`Blue Dart didn't generate a waybill (${status}): ${why}`);
     }
-    const out = { awb: String(r.AWBNo), courierName: "Blue Dart", trackingUrl: `https://www.bluedart.com/web/guest/trackdartresultthirdparty?trackFor=0&trackNo=${r.AWBNo}`, refs: { destination: r.DestinationArea, location: r.DestinationLocation, token: r.TokenNumber } };
+    const out = { awb: String(r.AWBNo), courierName: "Blue Dart", trackingUrl: `https://www.bluedart.com/web/guest/trackdartresultthirdparty?trackFor=0&trackNo=${r.AWBNo}`, refs: { routing: [r.DestinationArea, r.DestinationLocation].filter(Boolean).join("/"), token: r.TokenNumber } };
     if (Array.isArray(r.AWBPrintContent) && r.AWBPrintContent.length) out.labelPdf = Buffer.from(r.AWBPrintContent);
     return out;
   },
   async track(acc, sh) {
-    need(acc, ["loginId", "licenceKey"]);
-    const tok = await this.token(acc);
-    const q = new URLSearchParams({ handler: "tnt", action: "custawbquery", loginid: acc.credentials.loginId, awb: "awb", numbers: sh.awb, format: "json", lickey: acc.credentials.licenceKey, verno: "1", scan: "1" });
-    const { data } = await request(`${this.base(acc)}/tracking/v1/shipment?${q}`, { headers: { JWTToken: tok } });
-    const sh0 = data.ShipmentData?.Shipment?.[0] || data.ShipmentData?.Shipment;
-    if (!sh0) throw new Error(short(data));
-    const events = (sh0.Scans || []).map((x) => x.ScanDetail?.[0] || x.ScanDetail).filter(Boolean).map((d) => ({ at: new Date(`${d.ScanDate} ${d.ScanTime || ""}`), status: d.Scan, location: d.ScannedLocation }));
-    return { status: normStatus(sh0.Status), text: sh0.Status, events };
+    need(acc, ["loginId"]);
+    const key = acc.credentials.trackingKey || acc.credentials.licenceKey;
+    const url = `${acc.options.trackUrl || "https://api.bluedart.com/servlet/RoutingServlet"}?${new URLSearchParams({ handler: "tnt", action: "custawbquery", loginid: acc.credentials.loginId, awb: "awb", numbers: sh.awb, format: "xml", lickey: key, verno: "1.3", scan: "1" })}`;
+    const res = await request(url);
+    const xml = res.data.raw || "";
+    const { XMLParser } = require("fast-xml-parser");
+    const doc = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_", isArray: (t) => t === "ScanDetail" || t === "Shipment" }).parse(xml);
+    const sh0 = doc.ShipmentData?.Shipment?.[0];
+    if (!sh0 || sh0.StatusType === "NF" || !sh0.Status) throw new Error(sh0?.Status || "No tracking yet");
+    const scans = sh0.Scans?.ScanDetail || [];
+    const events = scans.map((d) => ({ at: new Date(`${String(d.ScanDate).split("-").reverse().join("-")} ${d.ScanTime || ""}`.replace(/(\d{2})-([A-Za-z]{3})-(\d{4})/, "$1 $2 $3")), status: d.Scan, location: d.ScannedLocation }));
+    let status = normStatus(sh0.Status);
+    if (sh0.StatusType === "DL") status = /rto|return/i.test(sh0.Status) ? "rto" : "delivered";
+    if (sh0.StatusType === "RT") status = "rto";
+    return { status, text: sh0.Status, events };
   },
   async label() {
     return null;
@@ -286,8 +293,8 @@ const bluedart = {
 /* ---------------- DTDC (Shipsy) ---------------- */
 const dtdc = {
   title: "DTDC",
-  fields: { credentials: ["apiKey", "trackUsername", "trackPassword"], options: ["customerCode", "serviceType", "commodityId"] },
-  help: "From your DTDC account manager: the API key and customer code for booking (Shipsy), and the tracking username/password. Service type e.g. B2C PRIORITY, B2C SMART EXPRESS, GROUND EXPRESS.",
+  fields: { credentials: ["apiKey", "trackingToken"], options: ["customerCode", "serviceType", "commodityId"] },
+  help: "From your DTDC account manager: the API key and customer code for booking, and the tracking access token (looks like CUSTOMERCODE_trk_json:…). Service type as enabled on your account, e.g. B2C SMART EXPRESS, B2C PRIORITY, GROUND EXPRESS.",
   base: (acc) => (acc.baseUrl || (acc.test ? "https://demodashboardapi.shipsy.in" : "https://dtdcapi.shipsy.io")).replace(/\/$/, ""),
   addr(a) {
     return { name: a.name, phone: a.phone, address_line_1: a.address1, address_line_2: a.address2 || "", pincode: a.pincode, city: a.city, state: a.stateName };
@@ -327,14 +334,12 @@ const dtdc = {
     return { awb: String(r.reference_number), courierName: "DTDC", trackingUrl: `https://www.dtdc.in/trace.asp?strCnno=${r.reference_number}`, refs: {} };
   },
   async track(acc, sh) {
-    need(acc, ["trackUsername", "trackPassword"]);
+    need(acc, ["trackingToken"]);
     const base = acc.options.trackBaseUrl || "https://blktracksvc.dtdc.com/dtdc-api";
-    const a = await request(`${base}/api/dtdc/authenticate?username=${encodeURIComponent(acc.credentials.trackUsername)}&password=${encodeURIComponent(acc.credentials.trackPassword)}`);
-    const tok = typeof a.data === "string" ? a.data : a.data.raw || a.data.token;
-    if (!tok) throw new Error("DTDC tracking login failed");
-    const { data } = await request(`${base}/rest/JSONCnTrk/getTrackDetails`, { method: "POST", headers: { "X-Access-Token": tok }, json: { trkType: "cnno", strcnno: sh.awb, addtnlDtl: "Y" } });
+    const { data } = await request(`${base}/rest/JSONCnTrk/getTrackDetails`, { method: "POST", headers: { "X-Access-Token": acc.credentials.trackingToken }, json: { trkType: "cnno", strcnno: sh.awb, addtnlDtl: "Y" } });
     const st = data.trackHeader?.strStatus || "";
-    const events = (data.trackDetails || []).map((d) => ({ at: new Date(`${(d.strActionDate || "").replace(/(\d{2})(\d{2})(\d{4})/, "$3-$2-$1")} ${(d.strActionTime || "").replace(/(\d{2})(\d{2})/, "$1:$2")}`), status: d.strAction, location: d.strOrigin }));
+    if (!st) throw new Error(data.statusMessage || data.errorDetails?.[0]?.value || "No tracking yet");
+    const events = (data.trackDetails || []).map((d) => ({ at: new Date(`${(d.strActionDate || "").replace(/(\d{2})(\d{2})(\d{4})/, "$3-$2-$1")}T${(d.strActionTime || "0000").replace(/(\d{2})(\d{2})/, "$1:$2")}:00+05:30`), status: d.strAction, location: d.strOrigin }));
     return { status: normStatus(st), text: st, events };
   },
   async label(acc, sh) {
@@ -393,11 +398,22 @@ const shadowfax = {
 /* ---------------- Custom / manual ---------------- */
 const custom = {
   title: "Custom courier",
-  fields: { credentials: [], options: [] },
-  help: "Any other courier (India Post, Ekart, Xpressbees…): enter the AWB yourself when shipping. Tracking URL: use {awb} where the number goes, e.g. https://www.indiapost.gov.in/?awb={awb}.",
+  fields: { credentials: [], options: ["awbPool", "pincodes"] },
+  help: "Couriers without an API (self delivery, local couriers, India Post…): paste a stock of AWB numbers to use one per shipment, or type the AWB when booking. Optionally limit it to certain pincodes. Tracking link: use {awb} where the number goes.",
   async book(acc, s, manual = {}) {
-    if (!manual.awb) throw new Error("Enter the AWB / tracking number");
-    return { awb: manual.awb.trim(), courierName: manual.courierName || acc.name, trackingUrl: acc.trackingUrl ? acc.trackingUrl.replace("{awb}", encodeURIComponent(manual.awb.trim())) : "", refs: {} };
+    const pins = String(acc.options.pincodes || "").split(/[\s,;]+/).filter(Boolean);
+    if (pins.length && !pins.includes(s.consignee.pincode)) throw new Error(`${acc.name} doesn't deliver to ${s.consignee.pincode}`);
+    let awb = (manual.awb || "").trim();
+    if (!awb) {
+      // Next unused AWB from the uploaded stock.
+      const pool = String(acc.options.awbPool || "").split(/[\s,;]+/).filter(Boolean);
+      if (!pool.length) throw new Error(`Enter the AWB, or upload AWB numbers for ${acc.name} in Shopify Settings → Couriers`);
+      awb = pool.shift();
+      acc.options = { ...acc.options, awbPool: pool.join("\n") };
+      acc.markModified("options");
+      await acc.save();
+    }
+    return { awb, courierName: manual.courierName || acc.name, trackingUrl: acc.trackingUrl ? acc.trackingUrl.replace("{awb}", encodeURIComponent(awb)) : "", refs: {} };
   },
   async track() {
     throw new Error("Custom couriers aren't tracked automatically — update the status from the order");
@@ -410,6 +426,13 @@ const custom = {
 
 const CARRIERS = { shiprocket, delhivery, bluedart, dtdc, shadowfax, custom };
 
+// Amount to collect on delivery: all of a COD order, the unpaid part of a partly paid one.
+function codOf(order) {
+  if (order.paymentMode === "prepaid") return 0;
+  if (order.codAmount > 0) return r2(order.codAmount);
+  return order.paymentMode === "cod" ? r2(order.outstanding > 0 ? order.outstanding : order.total) : 0;
+}
+
 // Everything a carrier needs, from a Shopify order.
 function shipmentFrom(order, org, pkg, itemMap = new Map()) {
   const a = order.shippingAddress || {};
@@ -418,8 +441,9 @@ function shipmentFrom(order, org, pkg, itemMap = new Map()) {
   return {
     reference: String(order.name || order.orderNumber).replace(/^#/, ""),
     orderDate: order.orderDate,
-    cod: order.paymentMode === "cod",
-    codAmount: r2(order.outstanding > 0 ? order.outstanding : order.total),
+    cod: codOf(order) > 0,
+    codAmount: codOf(order),
+    prepaidAmount: r2(order.prepaidAmount || 0),
     value: r2(order.total),
     invoiceNumber: order.invoiceNumber || "",
     description: items.map((i) => i.name).join(", ").slice(0, 100) || "Goods",
@@ -443,4 +467,4 @@ function checkShipment(s) {
   if (miss.length) throw new Error(`Shipping address is missing: ${miss.join(", ")} — fix it in Shopify and sync again`);
 }
 
-module.exports = { CARRIERS, shipmentFrom, checkShipment, normStatus, stateName };
+module.exports = { CARRIERS, shipmentFrom, checkShipment, normStatus, stateName, codOf };

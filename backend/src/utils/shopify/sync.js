@@ -26,9 +26,11 @@ const ORDERS_QUERY = `query Orders($first: Int!, $after: String, $query: String)
       currentTotalPriceSet { ${MONEY} }
       totalOutstandingSet { ${MONEY} }
       fulfillments(first: 5) { trackingInfo(first: 1) { company number url } }
+      transactions(first: 30) { kind status gateway amountSet { ${MONEY} } }
       lineItems(first: 50) {
         nodes {
           id title variantTitle sku quantity currentQuantity vendor
+          image { url(transform: { maxWidth: 160 }) }
           originalUnitPriceSet { ${MONEY} }
           discountAllocations { allocatedAmountSet { ${MONEY} } }
           taxLines { ratePercentage }
@@ -60,7 +62,25 @@ function address(a) {
   };
 }
 
-const isCod = (o) => (o.paymentGatewayNames || []).some((g) => /cod|cash on delivery|cash_on_delivery/i.test(g));
+const COD_RX = /\bcod\b|cash on delivery|cash_on_delivery|cash-on-delivery/i;
+
+// Prepaid, COD, or partly paid (part prepaid online, the rest collected on delivery).
+function payment(o, total) {
+  const gws = o.paymentGatewayNames || [];
+  const hasCod = gws.some((g) => COD_RX.test(g));
+  const ok = (o.transactions || []).filter((t) => t.status === "SUCCESS");
+  const online = (t) => !COD_RX.test(t.gateway || "") && !(hasCod && /^manual$/i.test(t.gateway || ""));
+  const paid = ok.filter((t) => ["SALE", "CAPTURE"].includes(t.kind) && online(t)).reduce((s, t) => s + amt(t.amountSet), 0);
+  const refunded = ok.filter((t) => t.kind === "REFUND" && online(t)).reduce((s, t) => s + amt(t.amountSet), 0);
+  let prepaid = r2(Math.max(0, paid - refunded));
+  if (!hasCod) {
+    // No COD gateway: prepaid. (Shopify's own "partially paid" without COD stays prepaid; the rest is outstanding.)
+    return { paymentMode: o.displayFinancialStatus === "PARTIALLY_PAID" && prepaid < total ? "partial" : "prepaid", prepaidAmount: prepaid || (o.displayFinancialStatus === "PAID" ? total : 0), codAmount: o.displayFinancialStatus === "PARTIALLY_PAID" ? r2(Math.max(0, total - prepaid)) : 0 };
+  }
+  if (prepaid >= total - 0.5) return { paymentMode: "prepaid", prepaidAmount: total, codAmount: 0 };
+  if (prepaid > 0) return { paymentMode: "partial", prepaidAmount: prepaid, codAmount: r2(total - prepaid) };
+  return { paymentMode: "cod", prepaidAmount: 0, codAmount: total };
+}
 
 function normalise(o) {
   const lines = (o.lineItems?.nodes || []).map((l) => {
@@ -80,6 +100,7 @@ function normalise(o) {
       productType: l.product?.productType || "",
       category: l.product?.category?.fullName || "",
       tags: l.product?.tags || [],
+      image: l.image?.url || "",
       hsn: (l.variant?.inventoryItem?.harmonizedSystemCode || "").replace(/\D/g, ""),
       shopifyTaxRate: r2((l.taxLines || []).reduce((s, t) => s + (Number(t.ratePercentage) || 0), 0)),
       quantity: qty,
@@ -89,7 +110,9 @@ function normalise(o) {
     };
   });
   const ship = address(o.shippingAddress);
+  const total = amt(o.currentTotalPriceSet);
   return {
+    ...payment(o, total),
     shopifyId: o.id,
     name: o.name,
     orderNumber: o.number,
@@ -106,7 +129,6 @@ function normalise(o) {
     fulfillmentStatus: o.displayFulfillmentStatus || "",
     cancelledAt: o.cancelledAt ? new Date(o.cancelledAt) : null,
     cancelReason: o.cancelReason || "",
-    paymentMode: isCod(o) ? "cod" : "prepaid",
     gateways: o.paymentGatewayNames || [],
     tags: o.tags || [],
     note: o.note || "",

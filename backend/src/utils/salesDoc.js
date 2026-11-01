@@ -17,6 +17,8 @@ const lineItemJoi = Joi.object({
   taxRate: Joi.number().min(0).max(100),
 });
 
+const addrJoi = Joi.object({ street: Joi.string().allow(""), city: Joi.string().allow(""), state: Joi.string().allow(""), pincode: Joi.string().allow(""), country: Joi.string().allow("") });
+
 // Joi fields shared by every sales document form.
 const baseDocJoi = {
   customer: Joi.string().required().label("Customer"),
@@ -30,6 +32,8 @@ const baseDocJoi = {
   branch: Joi.string().allow(null, ""),
   warehouse: Joi.string().allow(null, ""),
   exchangeRate: Joi.number().greater(0),
+  billingAddress: addrJoi,
+  shipTo: addrJoi.keys({ name: Joi.string().allow(""), phone: Joi.string().allow("") }),
 };
 
 // Currency of a party and the rate to use (₹ per unit): the one given, else the currency's current rate.
@@ -66,6 +70,13 @@ async function resolveLocation(req, data) {
 }
 
 // Look up the customer (or vendor) + org, work out GST and totals.
+const hasAddr = (a) => Boolean(a && (a.street || a.city || a.pincode));
+function shipToFor(given, customer) {
+  if (hasAddr(given)) return { name: given.name || customer.displayName, phone: given.phone || "", street: given.street || "", city: given.city || "", state: given.state || "", pincode: given.pincode || "", country: given.country || "India" };
+  const a = hasAddr(customer.shippingAddress) ? customer.shippingAddress : customer.billingAddress || {};
+  return { name: customer.displayName, phone: customer.phone || "", street: a.street || "", city: a.city || "", state: a.state || "", pincode: a.pincode || "", country: a.country || "India" };
+}
+
 async function prepareDoc(req, data, party = "customer") {
   const Party = party === "vendor" ? require("../models/Vendor") : Customer;
   const [customer, org] = await Promise.all([
@@ -95,7 +106,9 @@ async function prepareDoc(req, data, party = "customer") {
       placeOfSupply,
       [`${party}Name`]: customer.displayName,
       [`${party}Gstin`]: customer.gstin,
-      billingAddress: customer.billingAddress,
+      // Bill To / Ship To: as given on the document, else the customer's addresses.
+      billingAddress: hasAddr(data.billingAddress) ? data.billingAddress : customer.billingAddress,
+      ...(party === "customer" ? { shipTo: shipToFor(data.shipTo, customer) } : {}),
     },
   };
 }

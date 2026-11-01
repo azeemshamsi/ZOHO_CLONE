@@ -34,6 +34,16 @@ const salesDocFields = (party = "customer") => ({
   warehouse: { type: mongoose.Schema.Types.ObjectId, ref: "Warehouse" },
   [`${party}Gstin`]: { type: String, default: "" },
   billingAddress: { type: addressSchema, default: () => ({}) },
+  // Ship To (customer documents): where the goods go, if not the billing address.
+  shipTo: {
+    name: { type: String, default: "" },
+    phone: { type: String, default: "" },
+    street: { type: String, default: "" },
+    city: { type: String, default: "" },
+    state: { type: String, default: "" },
+    pincode: { type: String, default: "" },
+    country: { type: String, default: "" },
+  },
   date: { type: Date, required: true },
   placeOfSupply: { type: String, default: "" },
   isInterState: { type: Boolean, default: false },

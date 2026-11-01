@@ -70,19 +70,31 @@ function header(doc, org, title, number) {
 }
 
 // Two columns: party on the left, key/value facts on the right.
-function partyBlock(doc, label, partyName, gstin, address, facts) {
+function partyBlock(doc, label, partyName, gstin, address, facts, shipTo) {
   const L = 40;
   const W = doc.page.width - 80;
   const top = doc.y;
+  const ship = shipTo && (shipTo.street || shipTo.city || shipTo.pincode);
+  const colW = ship ? W * 0.27 : W * 0.5;
   doc.font("r").fontSize(8).fillColor(MUTED).text(label.toUpperCase(), L, top);
-  doc.font("b").fontSize(11).fillColor("#111827").text(partyName, L, doc.y + 2, { width: W * 0.5 });
+  doc.font("b").fontSize(11).fillColor("#111827").text(partyName, L, doc.y + 2, { width: colW });
   doc.font("r").fontSize(8.5).fillColor(MUTED);
-  addrLines(address).forEach((l) => doc.text(l, L, doc.y, { width: W * 0.5 }));
-  if (gstin) doc.text(`GSTIN ${gstin}`, L, doc.y, { width: W * 0.5 });
-  const leftEnd = doc.y;
+  addrLines(address).forEach((l) => doc.text(l, L, doc.y, { width: colW }));
+  if (gstin) doc.text(`GSTIN ${gstin}`, L, doc.y, { width: colW });
+  let leftEnd = doc.y;
+  if (ship) {
+    const X = L + W * 0.29;
+    doc.font("r").fontSize(8).fillColor(MUTED).text("SHIP TO", X, top);
+    doc.font("b").fontSize(11).fillColor("#111827").text(shipTo.name || partyName, X, doc.y + 2, { width: colW });
+    doc.font("r").fontSize(8.5).fillColor(MUTED);
+    addrLines(shipTo).forEach((l) => doc.text(l, X, doc.y, { width: colW }));
+    if (shipTo.phone) doc.text(`Phone ${shipTo.phone}`, X, doc.y, { width: colW });
+    leftEnd = Math.max(leftEnd, doc.y);
+  }
   let y = top;
+  const fx = ship ? 0.6 : 0.55;
   for (const [k, v] of facts.filter(([, v]) => v)) {
-    doc.font("r").fontSize(9).fillColor(MUTED).text(k, L + W * 0.55, y, { width: W * 0.22 });
+    doc.font("r").fontSize(9).fillColor(MUTED).text(k, L + W * fx, y, { width: W * (0.77 - fx + 0.05) });
     doc.font("r").fontSize(9).fillColor("#111827").text(v, L + W * 0.77, y, { width: W * 0.23, align: "right" });
     y += 15;
   }
@@ -228,7 +240,7 @@ async function documentPdf(org, d, meta) {
   partyBlock(doc, meta.partyLabel, d[`${party}Name`], d[`${party}Gstin`], d.billingAddress, [
     ...meta.facts,
     ["Place of Supply", d.placeOfSupply ? `${stateName(d.placeOfSupply)} (${d.placeOfSupply})` : ""],
-  ]);
+  ], d.vendorName ? null : d.shipTo);
   itemTable(doc, d.lineItems || [], d.isInterState);
   const rows = [["Sub Total", num(d.subTotal)]];
   if (d.isInterState) rows.push(["IGST", num(d.igst)]);
