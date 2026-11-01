@@ -14,7 +14,7 @@ const ORDERS_QUERY = `query Orders($first: Int!, $after: String, $query: String)
     pageInfo { hasNextPage endCursor }
     nodes {
       id name number createdAt updatedAt processedAt cancelledAt cancelReason
-      displayFinancialStatus displayFulfillmentStatus
+      displayFinancialStatus displayFulfillmentStatus returnStatus
       email phone note tags paymentGatewayNames currencyCode
       customer { displayName email phone }
       shippingAddress { ${ADDR} }
@@ -129,6 +129,7 @@ function normalise(o) {
     fulfillmentStatus: o.displayFulfillmentStatus || "",
     cancelledAt: o.cancelledAt ? new Date(o.cancelledAt) : null,
     cancelReason: o.cancelReason || "",
+    returnStatus: o.returnStatus || "",
     gateways: o.paymentGatewayNames || [],
     tags: o.tags || [],
     note: o.note || "",
@@ -166,6 +167,9 @@ async function upsert(orgId, n) {
     existing.statusChangedAt = new Date();
   } else if (!n.cancelledAt && existing.status === "cancelled") {
     existing.status = "new"; // un-cancelled (rare)
+  } else if (["RETURN_REQUESTED", "IN_PROGRESS", "INSPECTION_COMPLETE"].includes(n.returnStatus) && ["shipped", "delivered"].includes(existing.status)) {
+    existing.status = "return_created"; // return opened in Shopify
+    existing.statusChangedAt = new Date();
   } else if (n.fulfillmentStatus === "FULFILLED" && ["new", "packed"].includes(existing.status)) {
     existing.status = "shipped";
     existing.statusChangedAt = new Date();
@@ -222,3 +226,35 @@ async function autoSyncAll() {
 }
 
 module.exports = { syncStore, autoSyncAll, normalise, upsert, ORDERS_QUERY };
+
+// Real-time: Shopify calls MGI when orders are created or updated (Dev Dashboard apps; signed with the client secret).
+async function registerWebhooks(store, baseUrl) {
+  if (store.authType !== "client" || !store.clientSecret || !/^https:\/\//.test(baseUrl || "") || /localhost|127\.0\.0\.1/.test(baseUrl)) return [];
+  const uri = `${baseUrl.replace(/\/+$/, "")}/api/shopify-webhook/${store._id}`;
+  const done = [];
+  for (const topic of ["ORDERS_CREATE", "ORDERS_UPDATED"]) {
+    const r = await gql(store, `mutation($t: WebhookSubscriptionTopic!, $s: WebhookSubscriptionInput!) { webhookSubscriptionCreate(topic: $t, webhookSubscription: $s) { webhookSubscription { id } userErrors { message } } }`, { t: topic, s: { uri, format: "JSON" } }).catch((e) => ({ err: e.message }));
+    const errs = r.webhookSubscriptionCreate?.userErrors || [];
+    if (r.webhookSubscriptionCreate?.webhookSubscription || errs.some((e) => /already|taken/i.test(e.message))) done.push(topic);
+  }
+  await ShopifyStore.updateOne({ _id: store._id }, { webhooks: done });
+  return done;
+}
+
+const pending = new Map();
+// A webhook arrived: sync that store's recent changes shortly (several webhooks in a burst = one sync).
+function syncSoon(store) {
+  const k = String(store._id);
+  clearTimeout(pending.get(k));
+  pending.set(
+    k,
+    setTimeout(async () => {
+      pending.delete(k);
+      const s = await ShopifyStore.findById(k);
+      if (s?.connected) await syncStore(s).catch((e) => console.error(`Shopify sync failed: ${e.message}`));
+    }, 3000).unref()
+  );
+}
+
+module.exports.registerWebhooks = registerWebhooks;
+module.exports.syncSoon = syncSoon;

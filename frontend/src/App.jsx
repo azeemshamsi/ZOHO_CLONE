@@ -29,6 +29,8 @@ import { Currencies } from "./pages/Currencies";
 import { Import } from "./pages/Import";
 import { ShopifyOrders } from "./pages/ShopifyOrders";
 import { ShopifySettings } from "./pages/ShopifySettings";
+import { Inventory } from "./pages/Inventory";
+import { ReturnScan } from "./pages/ReturnScan";
 import { GstCompliance } from "./pages/GstCompliance";
 import { TransferList, TransferForm, TransferView } from "./pages/TransferOrders";
 import { DocForm } from "./components/SalesDoc";
@@ -92,6 +94,8 @@ export default function App() {
           <Route path="import" element={<Import />} />
           <Route path="shopify-orders" element={<ShopifyOrders />} />
           <Route path="shopify-settings" element={<ShopifySettings />} />
+          <Route path="inventory" element={<Inventory />} />
+          <Route path="returns-scan" element={<ReturnScan />} />
           <Route path="e-invoices" element={<GstCompliance tab="einvoice" />} />
           <Route path="e-way-bills" element={<GstCompliance tab="eway" />} />
           <Route path="transfer-orders" element={<TransferList />} />

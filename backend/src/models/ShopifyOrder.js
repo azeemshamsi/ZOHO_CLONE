@@ -70,7 +70,12 @@ const shopifyOrderSchema = new mongoose.Schema(
     lines: [lineSchema],
     shopifyFulfillments: [{ _id: false, company: String, number: String, url: String }],
     // MGI workflow
-    status: { type: String, enum: ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "cancelled"], default: "new" },
+    status: { type: String, enum: ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "return_created", "returned", "cancelled"], default: "new" },
+    returnStatus: String, // Shopify's
+    shopifyReturnId: String,
+    returnedAt: Date,
+    returnNote: String,
+    returnCreditNote: { type: mongoose.Schema.Types.ObjectId, ref: "CreditNote" },
     statusChangedAt: Date,
     shipment: {
       account: { type: mongoose.Schema.Types.ObjectId, ref: "CourierAccount" },

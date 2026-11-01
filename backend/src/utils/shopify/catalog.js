@@ -93,7 +93,9 @@ async function itemFor(orgId, line, store, cache = new Map()) {
   const key = line.variantId || line.sku || itemName(line);
   if (cache.has(key)) return cache.get(key);
   let item = null;
-  if (line.variantId) item = await Item.findOne({ organization: orgId, shopifyVariantId: line.variantId });
+  // A Shopify listing linked to an MGI item (e.g. 4 listings of one metal table) uses that item.
+  if (line.variantId) item = await Item.findOne({ organization: orgId, "shopifyLinks.variantId": line.variantId });
+  if (!item && line.variantId) item = await Item.findOne({ organization: orgId, shopifyVariantId: line.variantId, active: { $ne: false } });
   if (!item && line.sku) item = await Item.findOne({ organization: orgId, sku: new RegExp(`^${esc(line.sku)}$`, "i") });
   if (!item) item = await Item.findOne({ organization: orgId, name: new RegExp(`^${esc(itemName(line))}$`, "i") });
   let created = false;
@@ -110,15 +112,20 @@ async function itemFor(orgId, line, store, cache = new Map()) {
       taxRate: g.taxRate,
       rate: Math.round((incl / (1 + g.taxRate / 100)) * 100) / 100,
       description: [line.productType, g.category && g.category !== line.productType ? g.category : ""].filter(Boolean).join(" · "),
-      trackInventory: !!store.invoice?.trackInventory,
+      trackInventory: store.invoice?.trackInventory !== false,
+      category: g.category || line.productType || "",
+      image: line.image || "",
       shopifyVariantId: line.variantId || "",
       needsReview: g.review,
       reviewNote: g.notes.join("; "),
     });
     created = true;
-  } else if (line.variantId && !item.shopifyVariantId) {
+  } else if (line.variantId && !item.shopifyVariantId && !(item.shopifyLinks || []).some((l) => l.variantId === line.variantId)) {
     item.shopifyVariantId = line.variantId;
+    if (!item.image && line.image) item.image = line.image;
     await item.save();
+  } else if (!item.image && line.image) {
+    await Item.updateOne({ _id: item._id }, { image: line.image });
   }
   const out = { item, created };
   cache.set(key, out);

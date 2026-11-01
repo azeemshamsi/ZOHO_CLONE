@@ -12,6 +12,7 @@ const NAV = [
     mod: "items",
     children: [
       { to: "/items", label: "Items" },
+      { to: "/inventory", label: "Inventory" },
       { to: "/inventory-adjustments", label: "Inventory Adjustments" },
       { to: "/transfer-orders", label: "Transfer Orders" },
     ],
@@ -47,7 +48,16 @@ const NAV = [
       { to: "/vendor-credits", label: "Vendor Credits" },
     ],
   },
-  { to: "/shopify-orders", label: "Shopify Orders", icon: "bag", mod: "sales" },
+  {
+    label: "Shopify",
+    icon: "bag",
+    mod: "sales",
+    children: [
+      { to: "/shopify-orders", label: "Orders" },
+      { to: "/returns-scan", label: "Scan Returns" },
+      { to: "/shopify-settings", label: "Settings" },
+    ],
+  },
   {
     label: "Time Tracking",
     icon: "clock",
@@ -83,6 +93,8 @@ const PATH_MODULES = [
   ["/customers", "sales"],
   ["/shopify-orders", "sales"],
   ["/shopify-settings", "sales"],
+  ["/returns-scan", "sales"],
+  ["/inventory", "items"],
   ["/quotes", "sales"],
   ["/sales-orders", "sales"],
   ["/invoices", "sales"],

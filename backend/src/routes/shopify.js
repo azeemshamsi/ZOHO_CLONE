@@ -19,7 +19,7 @@ const { bookOrder, trackOrder, cancelShipment } = require("../utils/shopify/ship
 const { CARRIERS } = require("../utils/couriers");
 const { labelsPdf } = require("../utils/couriers/label");
 
-const STATUSES = ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "cancelled"];
+const STATUSES = ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "return_created", "returned", "cancelled"];
 const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const ctxOf = (req) => ({ org: req.org, user: req.user });
 
@@ -61,6 +61,11 @@ router.put(
         notifyCustomer: Joi.boolean(),
         rules: Joi.array().items(ruleJoi),
         fallbackTaxRate: Joi.number().min(0).max(100),
+        inventorySync: Joi.boolean(),
+        locationId: Joi.string().allow(""),
+        locationName: Joi.string().allow(""),
+        stockFrom: Joi.date().allow(null, ""),
+        returnCreditNote: Joi.boolean(),
       }),
       req.body
     );
@@ -76,7 +81,9 @@ router.put(
       if (s.authType === "client") s.accessToken = "";
       s.tokenExpires = null;
     }
-    for (const k of ["autoSync", "fulfillInShopify", "notifyCustomer", "fallbackTaxRate", "rules"]) if (d[k] !== undefined) s[k] = d[k];
+    for (const k of ["autoSync", "fulfillInShopify", "notifyCustomer", "fallbackTaxRate", "rules", "inventorySync", "locationId", "locationName", "returnCreditNote"]) if (d[k] !== undefined) s[k] = d[k];
+    if (d.stockFrom !== undefined) s.stockFrom = d.stockFrom || null;
+    if (d.inventorySync && !s.stockFrom) s.stockFrom = new Date(); // orders from now on reserve stock
     if (d.syncFrom !== undefined) s.syncFrom = d.syncFrom || null;
     if (d.invoice) s.invoice = { ...(s.invoice?.toObject?.() || {}), ...d.invoice, branch: d.invoice.branch || null, warehouse: d.invoice.warehouse || null };
     if (d.pkg) s.pkg = { ...(s.pkg?.toObject?.() || {}), ...d.pkg };
@@ -88,6 +95,7 @@ router.put(
         s.shop = data.shop.myshopifyDomain || s.shop;
         s.connected = true;
         if (!s.syncFrom) s.syncFrom = new Date(Date.now() - 30 * 86400000);
+        if (!s.stockFrom) s.stockFrom = new Date(); // only orders from now on reserve stock
       } catch (e) {
         s.connected = false;
         await s.save();
@@ -95,7 +103,25 @@ router.put(
       }
     }
     await s.save();
+    if (s.connected && (d.inventorySync || credsChanged)) {
+      // Real-time order webhooks (needs the public https address of this app).
+      const base = req.get("origin") || `${req.get("x-forwarded-proto") || req.protocol}://${req.get("host")}`;
+      require("../utils/shopify/sync").registerWebhooks(s, base).catch(() => {});
+    }
+    if (s.inventorySync) require("../utils/shopify/inventory").schedulePush(String(req.org), 1000);
     res.send(s);
+  })
+);
+
+router.get(
+  "/locations",
+  ah(async (req, res) => {
+    const s = await storeOf(req);
+    try {
+      res.send(await require("../utils/shopify/inventory").locations(s));
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
   })
 );
 
@@ -209,8 +235,18 @@ router.get(
 router.get(
   "/orders/:id",
   ah(async (req, res) => {
-    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.org }).populate("lines.item", "name sku hsnSac taxRate needsReview reviewNote").lean();
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.org }).populate("lines.item", "name sku hsnSac taxRate needsReview reviewNote trackInventory").lean();
     if (!o) throw new HttpError(404, "Order not found");
+    // Where to pick each item from.
+    const ids = o.lines.map((l) => l.item?._id).filter(Boolean);
+    if (ids.length) {
+      const { rows } = await require("../utils/stockview").stockView(req.org, { itemIds: ids });
+      const by = new Map(rows.map((r) => [String(r._id), r]));
+      for (const l of o.lines) {
+        const r = l.item && by.get(String(l.item._id));
+        if (r) l.stock = { onHand: r.onHand, racks: r.racks.map((x) => `${x.code} (${x.qty})`), unassigned: r.unassigned.reduce((a, u) => a + u.qty, 0) };
+      }
+    }
     res.send(o);
   })
 );
@@ -304,6 +340,44 @@ router.post(
       }
     }
     res.send({ results });
+  })
+);
+
+const R = require("../utils/shopify/returns");
+router.post(
+  "/orders/return",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ ids: idsJoi, action: Joi.string().valid("create", "close").required(), note: Joi.string().allow("").max(250) }), req.body);
+    const store = await storeOf(req, false);
+    const results = [];
+    for (const o of await ordersFor(req, d.ids)) {
+      try {
+        const r = d.action === "create" ? await R.markReturnCreated(ctxOf(req), o, store, d.note) : await R.markReturnClosed(ctxOf(req), o, store);
+        results.push({ id: o._id, name: o.name, ok: true, text: r.already ? "Already closed" : r.creditNote ? `Credit note ${r.creditNote}` : "", warning: r.warning });
+      } catch (e) {
+        results.push({ id: o._id, name: o.name, error: e.message });
+      }
+    }
+    res.send({ results });
+  })
+);
+
+// Scan an AWB or order number to close a return.
+router.post(
+  "/returns/scan",
+  ah(async (req, res) => {
+    const { code } = validate(Joi.object({ code: Joi.string().trim().required().label("AWB or order number") }), req.body);
+    const o = await R.findByCode(req.org, code);
+    if (!o) throw new HttpError(404, `No order with AWB or order number "${code}"`);
+    const store = await storeOf(req, false);
+    const summary = { _id: o._id, name: o.name, customer: o.customer?.name, awb: o.shipment?.awb, courier: o.shipment?.courierName, total: o.total, items: o.lines.filter((l) => l.quantity > 0).map((l) => `${l.quantity} × ${l.title}${l.variantTitle ? ` (${l.variantTitle})` : ""}`), image: o.lines.find((l) => l.image)?.image || "" };
+    if (o.status === "returned") return res.send({ order: summary, already: true, message: `${o.name} was already closed as returned${o.returnedAt ? ` on ${new Date(o.returnedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}` });
+    try {
+      const r = await R.markReturnClosed(ctxOf(req), o, store);
+      res.send({ order: summary, closed: true, was: r.was, creditNote: r.creditNote, warning: r.warning, message: `${o.name} return closed${r.creditNote ? ` · credit note ${r.creditNote}` : ""}` });
+    } catch (e) {
+      throw new HttpError(400, `${o.name}: ${e.message}`);
+    }
   })
 );
 

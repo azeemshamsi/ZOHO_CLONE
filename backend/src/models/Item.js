@@ -20,12 +20,29 @@ const itemSchema = new mongoose.Schema(
     openingStockDate: { type: Date },
     openingWarehouse: { type: mongoose.Schema.Types.ObjectId, ref: "Warehouse" },
     reorderLevel: { type: Number, default: 0 },
+    category: { type: String, default: "" },
+    image: { type: String, default: "" },
+    weight: { type: Number, default: 0 }, // kg
+    // Stock shown on Shopify but not held: made-to-order capacity. No effect on the books.
+    virtualStock: { type: Number, default: 0 },
+    bufferStock: { type: Number, default: 0 }, // kept back from Shopify
+    shopifySync: { type: Boolean, default: true }, // push this item's stock to Shopify
     // Created from a Shopify order: the variant it came from and any GST/HSN corrections to check.
     shopifyVariantId: { type: String, default: "" },
+    shopifyInventoryItemId: { type: String, default: "" },
+    // Other Shopify products that are really this item (e.g. 4 listings of one metal table).
+    // Their orders use this item's stock, and this item's stock is pushed to all of them.
+    shopifyLinks: {
+      type: [{ _id: false, variantId: String, inventoryItemId: String, sku: String, title: String, image: String }],
+      default: [],
+    },
+    shopifyPushed: { type: mongoose.Schema.Types.Mixed, default: {} }, // variantId → last quantity sent
     needsReview: { type: Boolean, default: false },
     reviewNote: { type: String, default: "" },
   },
   { timestamps: true }
 );
 
+itemSchema.index({ organization: 1, shopifyVariantId: 1 });
+itemSchema.index({ organization: 1, "shopifyLinks.variantId": 1 });
 module.exports = mongoose.model("Item", itemSchema);

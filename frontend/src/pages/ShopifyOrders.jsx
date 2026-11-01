@@ -13,6 +13,8 @@ const TABS = [
   ["shipped", "Shipped"],
   ["delivered", "Delivered"],
   ["rto", "RTO"],
+  ["return_created", "Returns"],
+  ["returned", "Returned"],
   ["cancelled", "Cancelled"],
   ["all", "All Orders"],
 ];
@@ -227,6 +229,16 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
               Refresh Tracking
             </button>
           )}
+          {["shipped", "delivered"].includes(o.status) && (
+            <button className="btn" disabled={busy} onClick={() => act(() => api.post("/shopify/orders/return", { ids: [o._id], action: "create", note: window.prompt("Reason for the return (optional)") || "" }), "Return created")}>
+              Mark Return Created
+            </button>
+          )}
+          {["rto", "return_created", "shipped", "delivered"].includes(o.status) && (
+            <button className="btn" disabled={busy} onClick={() => window.confirm(`Close the return for ${o.name}? Do this when the parcel is back with you.`) && act(() => api.post("/shopify/orders/return", { ids: [o._id], action: "close" }), "Return closed")}>
+              Mark Return Closed
+            </button>
+          )}
           {sh.awb && o.status === "ready_to_ship" && (
             <button className="btn btn-ghost" disabled={busy} onClick={() => window.confirm(`Cancel shipment ${sh.awb}?`) && act(() => api.post(`/shopify/orders/${o._id}/cancel-shipment`), "Shipment cancelled")}>
               Cancel Shipment
@@ -241,6 +253,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
         </div>
         <div className="muted small">{new Date(o.orderDate).toLocaleString("en-IN")}</div>
       </div>
+      {o.status === "returned" && <div className="alert alert-info">Returned{o.returnedAt ? ` on ${date(o.returnedAt)}` : ""}{o.returnNote ? ` · ${o.returnNote}` : ""}</div>}
       {o.cancelledAt && <div className="alert alert-error">Cancelled in Shopify on {date(o.cancelledAt)}{o.cancelReason ? ` (${o.cancelReason.toLowerCase()})` : ""}</div>}
       <div className="grid-2" style={{ marginTop: 12 }}>
         <div>
@@ -311,6 +324,13 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
                   <span className="muted">—</span>
                 )}
                 {l.item?.reviewNote && <div className="muted small">{l.item.reviewNote}</div>}
+                {l.stock && l.item?.trackInventory && (
+                  <div className="small">
+                    Stock {l.stock.onHand}
+                    {l.stock.racks.length > 0 && <> · pick from <b>{l.stock.racks.join(", ")}</b></>}
+                    {l.stock.unassigned > 0 && <span className="muted"> · {l.stock.unassigned} not on a rack</span>}
+                  </div>
+                )}
               </td>
               <td className="num">{l.quantity}</td>
               <td className="num">{money(l.unitPrice)}</td>
@@ -525,6 +545,9 @@ export function ShopifyOrders() {
         }}>
           Export
         </a>
+        <Link className="btn" to="/returns-scan">
+          Scan Returns
+        </Link>
         <Link className="btn" to="/shopify-settings">
           <Icon name="settings" size={16} /> Settings
         </Link>
@@ -660,6 +683,16 @@ export function ShopifyOrders() {
                   Mark RTO
                 </button>
               </>
+            )}
+            {["shipped", "delivered", "all"].includes(tab) && (
+              <button className="btn btn-sm" disabled={busy} onClick={() => bulk("/shopify/orders/return", { ids, action: "create" }, "Returns created")}>
+                Mark Return Created
+              </button>
+            )}
+            {["rto", "return_created", "shipped", "delivered", "all"].includes(tab) && (
+              <button className="btn btn-sm" disabled={busy} onClick={() => bulk("/shopify/orders/return", { ids, action: "close" }, "Returns closed")}>
+                Mark Return Closed
+              </button>
             )}
             {tab === "packed" && (
               <button className="btn btn-sm btn-ghost" disabled={busy} onClick={() => bulk("/shopify/orders/status", { ids, status: "new" }, "Move to New")}>

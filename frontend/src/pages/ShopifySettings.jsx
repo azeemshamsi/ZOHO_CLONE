@@ -75,7 +75,7 @@ function Connection({ store, onSaved }) {
         {f.authType === "client" ? (
           <>
             <div className="alert alert-info small">
-              In <strong>dev.shopify.com/dashboard</strong>: create an app → <em>Versions</em> → add scopes <code>read_orders, read_all_orders, read_products, read_customers, read_inventory</code> (and <code>write_merchant_managed_fulfillment_orders</code> to mark orders fulfilled from MGI) → Release → <em>Home → Install</em> on your store. Then copy the Client ID and secret from <em>Settings</em>. The app and the store must be in the same Shopify organization.
+              In <strong>dev.shopify.com/dashboard</strong>: create an app → <em>Versions</em> → add scopes <code>read_orders, read_all_orders, read_products, read_customers, read_inventory, write_inventory, read_locations, read_returns, write_returns, read_merchant_managed_fulfillment_orders, write_merchant_managed_fulfillment_orders</code> → Release → <em>Home → Install</em> on your store. Then copy the Client ID and secret from <em>Settings</em>. The app and the store must be in the same Shopify organization.
             </div>
             <div className="row-2">
               <Field label="Client ID" required>
@@ -195,6 +195,78 @@ function Invoicing({ store, onSaved }) {
             <input type="checkbox" checked={ful.notifyCustomer} onChange={(e) => setFul({ ...ful, notifyCustomer: e.target.checked })} /> Shopify emails the customer the tracking details
           </label>
         )}
+      </div>
+      <div className="form-footer">
+        <button className="btn btn-primary">Save</button>
+      </div>
+    </form>
+  );
+}
+
+function InventorySync({ store, onSaved }) {
+  const [f, setF] = useState({ inventorySync: !!store.inventorySync, locationId: store.locationId || "", stockFrom: store.stockFrom ? store.stockFrom.slice(0, 10) : "", returnCreditNote: store.returnCreditNote !== false });
+  const [locs, setLocs] = useState(null);
+  useEffect(() => {
+    if (store.connected) api.get("/shopify/locations").then((r) => setLocs(r.data)).catch((e) => setLocs({ error: errMsg(e) }));
+  }, [store.connected]);
+  const save = async (e) => {
+    e.preventDefault();
+    try {
+      const loc = Array.isArray(locs) ? locs.find((l) => l.id === f.locationId) : null;
+      if (f.inventorySync && !f.locationId) return toast("Choose the Shopify location to update", "error");
+      const { data } = await api.put("/shopify/store", { ...f, locationName: loc?.name || store.locationName || "", stockFrom: f.stockFrom || null });
+      onSaved(data);
+      toast(f.inventorySync ? "Inventory sync on — sending stock to Shopify" : "Saved");
+    } catch (err) {
+      toast(errMsg(err), "error");
+    }
+  };
+  const ps = store.pushStatus;
+  return (
+    <form className="card form" id="inventory" onSubmit={save} style={{ marginTop: 18 }}>
+      <h4 className="section-title" style={{ marginTop: 0 }}>
+        Inventory sync & returns
+        <span className={`pill ${store.inventorySync ? "pill-green" : ""}`}>{store.inventorySync ? "Syncing" : "Off"}</span>
+      </h4>
+      <p className="muted small">
+        MGI sends each item's Shopify quantity whenever stock changes: in stock − reserved by open Shopify orders − buffer, plus virtual (made-to-order) stock. Linked listings get their main item's quantity. Needs the <code>read_locations</code>, <code>write_inventory</code> and (for returns) <code>read_returns, write_returns</code> scopes.
+      </p>
+      <div className="form-grid">
+        <label className="switch-row">
+          <span className="toggle">
+            <input type="checkbox" checked={f.inventorySync} onChange={(e) => setF({ ...f, inventorySync: e.target.checked })} />
+            <span />
+          </span>
+          <span>Sync inventory from MGI to Shopify</span>
+        </label>
+        <div className="row-2">
+          <Field label="Shopify location to update">
+            {locs?.error ? (
+              <div className="text-red small">{locs.error}</div>
+            ) : (
+              <select value={f.locationId} onChange={(e) => setF({ ...f, locationId: e.target.value })}>
+                <option value="">Choose…</option>
+                {(Array.isArray(locs) ? locs : []).map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+          <Field label="Orders reserve stock from" hint="Shopify orders from this date hold stock until invoiced">
+            <input type="date" value={f.stockFrom} onChange={(e) => setF({ ...f, stockFrom: e.target.value })} />
+          </Field>
+        </div>
+        <label className="check">
+          <input type="checkbox" checked={f.returnCreditNote} onChange={(e) => setF({ ...f, returnCreditNote: e.target.checked })} /> When a return is closed on an invoiced order, create a credit note (puts the stock back)
+        </label>
+        {ps?.at && (
+          <p className="muted small">
+            Last sent {new Date(ps.at).toLocaleString("en-IN")}: {ps.pushed} quantities{ps.errors?.length ? <span className="text-red"> · {ps.errors.slice(0, 3).join("; ")}</span> : ""}
+          </p>
+        )}
+        {store.webhooks?.length > 0 && <p className="muted small">Real-time order updates from Shopify are on.</p>}
       </div>
       <div className="form-footer">
         <button className="btn btn-primary">Save</button>
@@ -573,7 +645,8 @@ export function ShopifySettings() {
     api.get("/shopify/store").then((r) => setStore(r.data));
   }, []);
   useEffect(() => {
-    if (store && window.location.hash === "#couriers") setTimeout(() => document.getElementById("couriers")?.scrollIntoView({ behavior: "smooth" }), 200);
+    const h = window.location.hash.slice(1);
+    if (store && h) setTimeout(() => document.getElementById(h)?.scrollIntoView({ behavior: "smooth" }), 250);
   }, [!!store]);
   if (!store) return <Spinner />;
   const saved = (d) => setStore({ ...store, ...d, carriers: store.carriers, rules: d.rules || store.rules });
@@ -582,6 +655,7 @@ export function ShopifySettings() {
       <PageHeader title="Shopify Settings" back="/shopify-orders" subtitle="Connect your store, set how orders become invoices, GST rules for new items, and couriers." />
       <Connection store={store} onSaved={saved} />
       <Invoicing store={store} onSaved={saved} />
+      <InventorySync store={store} onSaved={saved} />
       <Rules key={JSON.stringify(store.rules).length} store={store} onSaved={saved} />
       <Couriers carriers={store.carriers} />
     </>

@@ -46,7 +46,7 @@ const shopifyStoreSchema = new mongoose.Schema(
       branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
       warehouse: { type: mongoose.Schema.Types.ObjectId, ref: "Warehouse" },
       shippingSac: { type: String, default: "996812" },
-      trackInventory: { type: Boolean, default: false }, // new items track stock
+      trackInventory: { type: Boolean, default: true }, // new items track stock
     },
     // Shipping
     pkg: {
@@ -55,7 +55,16 @@ const shopifyStoreSchema = new mongoose.Schema(
       breadth: { type: Number, default: 15 },
       height: { type: Number, default: 10 },
     },
-    fulfillInShopify: { type: Boolean, default: false }, // mark fulfilled with tracking when booked
+    fulfillInShopify: { type: Boolean, default: false },
+    // Inventory sync (MGI → Shopify)
+    inventorySync: { type: Boolean, default: false },
+    locationId: { type: String, default: "" },
+    locationName: { type: String, default: "" },
+    stockFrom: { type: Date }, // Shopify orders from this date reserve stock until invoiced
+    pushStatus: { at: Date, pushed: Number, errors: [String] },
+    webhooks: { type: [String], default: [] },
+    // Returns
+    returnCreditNote: { type: Boolean, default: true }, // closing a return on an invoiced order makes a credit note // mark fulfilled with tracking when booked
     notifyCustomer: { type: Boolean, default: true },
     // GST rules
     rules: { type: [ruleSchema], default: undefined },
