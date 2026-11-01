@@ -153,6 +153,8 @@ const DOC_LINK = {
   Journal: (id) => `/journals/${id}`,
   "Vendor Credit": (id) => `/vendor-credits/${id}`,
   "Vendor Credit Refund": (id) => `/vendor-credits/${id}`,
+  "Opening Stock": (id) => `/items/${id}`,
+  "Inventory Adjustment": (id) => `/inventory-adjustments/${id}`,
 };
 export const docLink = (type, id) => (DOC_LINK[type] ? DOC_LINK[type](id) : "#");
 

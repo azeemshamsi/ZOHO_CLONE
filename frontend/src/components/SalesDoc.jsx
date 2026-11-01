@@ -462,6 +462,16 @@ export function DocForm({ kind }) {
                   <td>
                     <input type="number" step="any" min="0" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} />
                     {l.unit && <span className="muted small">{l.unit}</span>}
+                    {(() => {
+                      const it = l.item && items.find((x) => x._id === l.item);
+                      if (!it || !it.trackInventory) return null;
+                      const short = Number(l.quantity || 0) > it.stockOnHand;
+                      return (
+                        <div className={`small ${short ? "text-danger" : "muted"}`} title="Stock on hand">
+                          Stock: {it.stockOnHand} {it.unit}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td>
                     <input type="number" step="0.01" min="0" value={l.rate} onChange={(e) => setLine(i, { rate: e.target.value })} />

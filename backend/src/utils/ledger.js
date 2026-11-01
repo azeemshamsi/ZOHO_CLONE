@@ -15,6 +15,7 @@ const SYSTEM_ACCOUNTS = [
   { code: "cash", name: "Cash in Hand", group: "Cash" },
   { code: "bank", name: "Bank Account", group: "Bank" },
   { code: "ar", name: "Accounts Receivable", group: "Accounts Receivable" },
+  { code: "inventory", name: "Inventory Asset", group: "Other Current Asset" },
   { code: "input_cgst", name: "Input CGST", group: "Other Current Asset" },
   { code: "input_sgst", name: "Input SGST", group: "Other Current Asset" },
   { code: "input_igst", name: "Input IGST", group: "Other Current Asset" },
@@ -81,7 +82,9 @@ async function buildEntries(org, { to } = {}) {
 
   const live = { organization: org, status: { $nin: ["draft", "void"] } };
   const all = { organization: org };
-  const [invoices, payments, cns, bills, vps, expenses, journals, vcs] = await Promise.all([
+  const Item = require("../models/Item");
+  const InventoryAdjustment = require("../models/InventoryAdjustment");
+  const [invoices, payments, cns, bills, vps, expenses, journals, vcs, items, adjustments] = await Promise.all([
     Invoice.find(live).lean(),
     Payment.find(all).lean(),
     CreditNote.find(live).lean(),
@@ -90,7 +93,12 @@ async function buildEntries(org, { to } = {}) {
     Expense.find(all).lean(),
     Journal.find(all).lean(),
     VendorCredit.find(live).lean(),
+    Item.find({ organization: org, trackInventory: true }).lean(),
+    InventoryAdjustment.find({ organization: org, status: "adjusted" }).lean(),
   ]);
+  // Inventory value change per document (see utils/inventory.js).
+  const { docInv } = require("./inventory").computeStock({ items, invoices, creditNotes: cns, bills, vendorCredits: vcs, adjustments });
+  const inv = (type, id) => docInv[`${type}|${id}`] || 0;
 
   const entries = [];
   const add = (meta) => {
@@ -116,6 +124,8 @@ async function buildEntries(org, { to } = {}) {
         cr("output_igst", i.igst);
         cr("shipping_income", i.shippingCharge);
         dr("adjustments", -(i.adjustment || 0));
+        dr("cogs", -inv("Invoice", i._id));
+        dr("inventory", inv("Invoice", i._id));
       },
     });
   }
@@ -139,6 +149,8 @@ async function buildEntries(org, { to } = {}) {
         dr("shipping_income", c.shippingCharge);
         cr("adjustments", -(c.adjustment || 0));
         cr("ar", c.total);
+        dr("inventory", inv("Credit Note", c._id));
+        cr("cogs", inv("Credit Note", c._id));
       },
     });
     for (const r of c.refunds || []) {
@@ -155,7 +167,8 @@ async function buildEntries(org, { to } = {}) {
     add({
       date: b.date, type: "Bill", id: b._id, number: b.billNumber, party: b.vendorName,
       build: (dr, cr) => {
-        dr("cogs", b.subTotal + (b.shippingCharge || 0));
+        dr("cogs", b.subTotal + (b.shippingCharge || 0) - inv("Bill", b._id));
+        dr("inventory", inv("Bill", b._id));
         dr("input_cgst", b.cgst);
         dr("input_sgst", b.sgst);
         dr("input_igst", b.igst);
@@ -190,7 +203,8 @@ async function buildEntries(org, { to } = {}) {
       date: c.date, type: "Vendor Credit", id: c._id, number: c.number, party: c.vendorName,
       build: (dr, cr) => {
         dr("ap", c.total);
-        cr("cogs", c.subTotal + (c.shippingCharge || 0));
+        cr("cogs", c.subTotal + (c.shippingCharge || 0) + inv("Vendor Credit", c._id));
+        dr("inventory", inv("Vendor Credit", c._id));
         cr("input_cgst", c.cgst);
         cr("input_sgst", c.sgst);
         cr("input_igst", c.igst);
@@ -206,6 +220,27 @@ async function buildEntries(org, { to } = {}) {
         },
       });
     }
+  }
+  for (const it of items) {
+    const v = inv("Opening Stock", it._id);
+    if (v)
+      add({
+        date: it.openingStockDate || it.createdAt, type: "Opening Stock", id: it._id, number: it.sku || "", party: it.name,
+        build: (dr, cr) => {
+          dr("inventory", v);
+          cr("opening_equity", v);
+        },
+      });
+  }
+  for (const a of adjustments) {
+    add({
+      date: a.date, type: "Inventory Adjustment", id: a._id, number: a.reference || a.number, party: a.reason,
+      build: (dr, cr) => {
+        const v = inv("Inventory Adjustment", a._id);
+        dr("inventory", v);
+        cr(a.account || "cogs", v);
+      },
+    });
   }
   for (const j of journals) {
     add({

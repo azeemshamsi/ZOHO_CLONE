@@ -16,6 +16,7 @@ app.use("/api/auth", require("./routes/auth"));
 app.use("/api/organization", auth, require("./routes/organization"));
 app.use("/api/customers", auth, require("./routes/customers"));
 app.use("/api/items", auth, require("./routes/items"));
+app.use("/api/inventory-adjustments", auth, require("./routes/inventoryAdjustments"));
 app.use("/api/invoices", auth, require("./routes/invoices"));
 app.use("/api/quotes", auth, require("./routes/quotes"));
 app.use("/api/sales-orders", auth, require("./routes/salesOrders"));

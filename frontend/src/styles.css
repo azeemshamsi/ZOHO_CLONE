@@ -506,3 +506,12 @@ address { font-style: normal; line-height: 1.6; }
 .report-note { margin-top: 14px; }
 .report-table tr.muted td { color: var(--muted); font-style: italic; }
 @media (max-width: 900px) { .rc { grid-template-columns: 1fr; } .rc-side { position: static; } .report-horizontal { grid-template-columns: 1fr; } }
+
+/* Inventory */
+.text-danger { color: var(--red); }
+.alert-warn { background: #fff6e5; color: #8a5a00; margin-top: 12px; }
+.stats-row { display: flex; flex-wrap: wrap; gap: 28px; }
+.stat-value { font-size: 18px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.card-title.pad { margin: 0; font-size: 15px; }
+.adj-table td { vertical-align: middle; }
+.adj-table input, .adj-table select { width: 100%; }

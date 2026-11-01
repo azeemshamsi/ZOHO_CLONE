@@ -5,7 +5,7 @@ import { Spinner, Toaster } from "./components/ui";
 import { Login, Signup, ForgotPassword, ResetPassword, VerifyEmail } from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import { CustomerList, CustomerForm, CustomerDetail } from "./pages/Customers";
-import { ItemList, ItemForm } from "./pages/Items";
+import { ItemList, ItemForm, ItemDetail } from "./pages/Items";
 import { InvoiceList, InvoiceForm, InvoiceView } from "./pages/Invoices";
 import { PaymentList, PaymentForm, PaymentView } from "./pages/Payments";
 import { QuoteList, QuoteForm, QuoteView } from "./pages/Quotes";
@@ -18,6 +18,7 @@ import { ExpenseList, ExpenseForm } from "./pages/Expenses";
 import { AccountList, AccountDetail } from "./pages/Accounts";
 import { JournalList, JournalForm, JournalView } from "./pages/Journals";
 import { ReportsHome, ReportPage } from "./pages/Reports";
+import { AdjustmentList, AdjustmentForm, AdjustmentView } from "./pages/InventoryAdjustments";
 import { PurchaseOrderList, PurchaseOrderForm, PurchaseOrderView } from "./pages/PurchaseOrders";
 import { VendorCreditList, VendorCreditForm, VendorCreditView } from "./pages/VendorCredits";
 import { BankingHome, BankAccountPage } from "./pages/Banking";
@@ -57,7 +58,12 @@ export default function App() {
           <Route path="customers/:id/edit" element={<CustomerForm />} />
           <Route path="items" element={<ItemList />} />
           <Route path="items/new" element={<ItemForm />} />
+          <Route path="items/:id" element={<ItemDetail />} />
           <Route path="items/:id/edit" element={<ItemForm />} />
+          <Route path="inventory-adjustments" element={<AdjustmentList />} />
+          <Route path="inventory-adjustments/new" element={<AdjustmentForm />} />
+          <Route path="inventory-adjustments/:id" element={<AdjustmentView />} />
+          <Route path="inventory-adjustments/:id/edit" element={<AdjustmentForm />} />
           <Route path="invoices" element={<InvoiceList />} />
           <Route path="invoices/new" element={<InvoiceForm />} />
           <Route path="invoices/:id" element={<InvoiceView />} />
