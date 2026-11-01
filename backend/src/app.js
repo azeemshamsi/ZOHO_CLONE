@@ -26,6 +26,7 @@ app.use("/api/vendor-payments", auth, require("./routes/vendorPayments"));
 app.use("/api/expenses", auth, require("./routes/expenses"));
 app.use("/api/purchase-orders", auth, require("./routes/purchaseOrders"));
 app.use("/api/vendor-credits", auth, require("./routes/vendorCredits"));
+app.use("/api/bank-rules", auth, require("./routes/bankRules"));
 app.use("/api/banking", auth, require("./routes/banking"));
 app.use("/api/accounts", auth, require("./routes/accounts"));
 app.use("/api/journals", auth, require("./routes/journals"));

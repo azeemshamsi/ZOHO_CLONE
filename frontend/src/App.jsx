@@ -21,6 +21,7 @@ import { ReportsHome, ReportPage } from "./pages/Reports";
 import { PurchaseOrderList, PurchaseOrderForm, PurchaseOrderView } from "./pages/PurchaseOrders";
 import { VendorCreditList, VendorCreditForm, VendorCreditView } from "./pages/VendorCredits";
 import { BankingHome, BankAccountPage } from "./pages/Banking";
+import { BankRules } from "./pages/BankRules";
 import Settings from "./pages/Settings";
 import ComingSoon from "./pages/ComingSoon";
 
@@ -104,6 +105,7 @@ export default function App() {
           <Route path="vendor-credits/:id" element={<VendorCreditView />} />
           <Route path="vendor-credits/:id/edit" element={<VendorCreditForm />} />
           <Route path="banking" element={<BankingHome />} />
+          <Route path="banking/rules" element={<BankRules />} />
           <Route path="banking/:code" element={<BankAccountPage />} />
           <Route path="payments" element={<PaymentList />} />
           <Route path="payments/new" element={<PaymentForm />} />

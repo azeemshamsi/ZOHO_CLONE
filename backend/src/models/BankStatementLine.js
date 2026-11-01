@@ -19,6 +19,7 @@ const bankStatementLineSchema = new mongoose.Schema(
       id: { type: mongoose.Schema.Types.ObjectId },
       number: { type: String },
       key: { type: String },
+      rule: { type: String }, // name of the transaction rule that categorised it
     },
     batch: { type: String, default: "" },
   },

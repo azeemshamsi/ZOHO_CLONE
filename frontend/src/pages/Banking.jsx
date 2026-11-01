@@ -8,6 +8,7 @@ import { PageHeader, Spinner, Empty, Field, toast, Modal, Status, Confirm } from
 import { clearBankAccountCache } from "../components/BankAccountSelect";
 import { docLink } from "./Accounts";
 import Icon from "../components/Icon";
+import { AccountPicker } from "./BankRules";
 
 /* ===================== Overview ===================== */
 function AddAccountModal({ open, onClose, onSaved }) {
@@ -72,6 +73,9 @@ export function BankingHome() {
   return (
     <>
       <PageHeader title="Banking" subtitle={`Total in cash and bank: ${money(total)}`}>
+        <Link to="/banking/rules" className="btn">
+          Transaction Rules
+        </Link>
         <button className="btn btn-primary" onClick={() => setModal(true)}>
           <Icon name="plus" size={16} /> Add Bank Account
         </button>
@@ -219,7 +223,11 @@ function ImportModal({ open, account, onClose, onDone }) {
     setBusy(true);
     try {
       const { data } = await api.post(`/banking/${encodeURIComponent(account.code)}/import`, { rows: good.map(({ raw, ...x }) => x) });
-      toast(`Imported ${data.imported} lines${data.skipped ? `, skipped ${data.skipped} already imported` : ""}`);
+      toast(
+        `Imported ${data.imported} lines${data.skipped ? `, skipped ${data.skipped} already imported` : ""}${
+          data.rules?.categorized ? ` · rules categorised ${data.rules.categorized}` : ""
+        }`
+      );
       onDone();
     } catch (e) {
       toast(errMsg(e), "error");
@@ -734,6 +742,56 @@ function Reconcile({ code, acc, onChanged, openLine, version }) {
   );
 }
 
+function BulkCategorise({ open, lines, accounts, bankCode, busy, onClose, onSave }) {
+  const [f, setF] = useState({ account: "", taxRate: 0, notes: "" });
+  useEffect(() => {
+    if (open) setF({ account: "", taxRate: 0, notes: "" });
+  }, [open]);
+  const target = accounts.find((a) => a.code === f.account);
+  const hasOut = lines.some((l) => l.withdrawal);
+  const total = lines.reduce((s, l) => s + (l.deposit || 0) - (l.withdrawal || 0), 0);
+  return (
+    <Modal open={open} onClose={onClose} title={`Categorise ${lines.length} line${lines.length === 1 ? "" : "s"}`}>
+      <form
+        className="stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSave(f);
+        }}
+      >
+        <p className="muted small">
+          Net {money(total)}. Each line is recorded separately on its own date — spending in an expense account becomes an expense, anything else a journal.
+        </p>
+        <Field label="Account" required>
+          <AccountPicker accounts={accounts} value={f.account} onChange={(v) => setF({ ...f, account: v })} exclude={[bankCode]} />
+        </Field>
+        {hasOut && target?.type === "expense" && (
+          <Field label="GST included in withdrawals">
+            <select value={f.taxRate} onChange={(e) => setF({ ...f, taxRate: Number(e.target.value) })}>
+              {[0, 5, 12, 18, 28].map((r) => (
+                <option key={r} value={r}>
+                  {r ? `${r}%` : "None"}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        <Field label="Notes" hint="Optional; each line's bank description is used if blank">
+          <input value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} />
+        </Field>
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" disabled={busy || !f.account}>
+            Categorise {lines.length}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 /* ===================== Account statement page ===================== */
 const STATUS_TABS = [
   ["unmatched", "To Do"],
@@ -758,9 +816,13 @@ export function BankAccountPage() {
   const loadLines = () =>
     tab === "reconcile" ? Promise.resolve() : api.get(`/banking/${encodeURIComponent(code)}/lines`, { params: { status: tab } }).then((r) => setLines(r.data));
   const [version, setVersion] = useState(0);
+  const [selected, setSelected] = useState(new Set());
+  const [bulkCat, setBulkCat] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const reload = () => {
     loadAcc();
     loadLines();
+    setSelected(new Set());
     setVersion((v) => v + 1);
   };
   useEffect(() => {
@@ -769,6 +831,7 @@ export function BankAccountPage() {
   }, [code]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setLines(null);
+    setSelected(new Set());
     loadLines();
   }, [code, tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -785,9 +848,63 @@ export function BankAccountPage() {
     }
   };
 
+  const toggleOne = (id) =>
+    setSelected((s0) => {
+      const s1 = new Set(s0);
+      s1.has(id) ? s1.delete(id) : s1.add(id);
+      return s1;
+    });
+  const allIds = (lines || []).map((l) => l._id);
+  const allOn = allIds.length > 0 && allIds.every((id) => selected.has(id));
+  const pickedLines = (lines || []).filter((l) => selected.has(l._id));
+  const pickedUnmatched = pickedLines.filter((l) => l.status === "unmatched");
+  const pickedDone = pickedLines.filter((l) => l.status !== "unmatched");
+
+  const bulk = async (action, extra = {}, ids = pickedUnmatched.map((l) => l._id)) => {
+    if (!ids.length) return;
+    setBulkBusy(true);
+    try {
+      const { data } = await api.post("/banking/lines/bulk", { ids, action, ...extra });
+      const verb = { categorize: "categorised", exclude: "excluded", automatch: "matched", undo: "undone" }[action];
+      toast(
+        `${data.done} line${data.done === 1 ? "" : "s"} ${verb}${data.skipped ? ` · ${data.skipped} skipped${action === "automatch" ? " (no matching transaction in MGI)" : ""}` : ""}`,
+        data.done ? "success" : "error"
+      );
+      if (data.errors?.length) toast(data.errors[0], "error");
+      setBulkCat(false);
+      reload();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+  const runRules = async (ids = []) => {
+    try {
+      const { data } = await api.post(`/banking/${encodeURIComponent(code)}/apply-rules`, { ids });
+      toast(
+        data.categorized
+          ? `Rules categorised ${data.categorized} line${data.categorized === 1 ? "" : "s"}${data.skippedHasMatch ? ` · ${data.skippedHasMatch} left to match (already in MGI)` : ""}`
+          : "No lines matched your rules",
+        data.categorized ? "success" : "error"
+      );
+      reload();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+
   return (
     <>
       <PageHeader title={acc.name} subtitle={`${acc.group}${acc.accountCode ? ` · ••${acc.accountCode.slice(-4)}` : ""}`} back="/banking">
+        <Link to="/banking/rules" className="btn">
+          Transaction Rules
+        </Link>
+        {acc.statement.unmatched > 0 && (
+          <button className="btn" onClick={() => runRules()}>
+            Apply Rules
+          </button>
+        )}
         <Link to={`/chart-of-accounts/${encodeURIComponent(code)}`} className="btn">
           Transactions in MGI
         </Link>
@@ -850,9 +967,41 @@ export function BankAccountPage() {
               the imported file between those dates — import that period again.
             </div>
           )}
+          {selected.size > 0 && (
+            <div className="bulk-bar">
+              <strong>{selected.size} selected</strong>
+              {pickedUnmatched.length > 0 && (
+                <>
+                  <button className="btn btn-sm btn-primary" disabled={bulkBusy} onClick={() => setBulkCat(true)}>
+                    Categorise
+                  </button>
+                  <button className="btn btn-sm" disabled={bulkBusy} onClick={() => bulk("automatch")}>
+                    Auto-match
+                  </button>
+                  <button className="btn btn-sm" disabled={bulkBusy} onClick={() => runRules(pickedUnmatched.map((l) => l._id))}>
+                    Apply Rules
+                  </button>
+                  <button className="btn btn-sm" disabled={bulkBusy} onClick={() => bulk("exclude")}>
+                    Exclude
+                  </button>
+                </>
+              )}
+              {pickedDone.length > 0 && (
+                <button className="btn btn-sm" disabled={bulkBusy} onClick={() => bulk("undo", {}, pickedDone.map((l) => l._id))}>
+                  Undo {pickedDone.length}
+                </button>
+              )}
+              <button className="link-btn" onClick={() => setSelected(new Set())}>
+                Clear
+              </button>
+            </div>
+          )}
           <table className="table">
             <thead>
               <tr>
+                <th style={{ width: 36 }}>
+                  <input type="checkbox" aria-label="Select all" checked={allOn} onChange={() => setSelected(allOn ? new Set() : new Set(allIds))} />
+                </th>
                 <th>Date</th>
                 <th>Description</th>
                 <th>Reference</th>
@@ -865,8 +1014,11 @@ export function BankAccountPage() {
             </thead>
             <tbody>
               {lines.map((l) => (
-                <tr key={l._id}>
-                  <td>{date(l.date)}</td>
+                <tr key={l._id} className={selected.has(l._id) ? "row-selected" : ""}>
+                  <td>
+                    <input type="checkbox" aria-label="Select line" checked={selected.has(l._id)} onChange={() => toggleOne(l._id)} />
+                  </td>
+                  <td className="nowrap">{date(l.date)}</td>
                   <td className="clamp">{l.description}</td>
                   <td className="mono small">{l.reference}</td>
                   <td className="num text-paid">{l.deposit ? money(l.deposit) : ""}</td>
@@ -887,6 +1039,7 @@ export function BankAccountPage() {
                     ) : l.match?.id ? (
                       <Link to={docLink(l.match.type, l.match.id)} className="small">
                         <Status value={l.status} /> {l.match.type} {l.match.number}
+                        {l.match.rule && <span className="tag">Rule: {l.match.rule}</span>}
                       </Link>
                     ) : (
                       <Status value={l.status} />
@@ -915,6 +1068,15 @@ export function BankAccountPage() {
         </div>
       )}
 
+      <BulkCategorise
+        open={bulkCat}
+        lines={pickedUnmatched}
+        accounts={accounts}
+        bankCode={code}
+        busy={bulkBusy}
+        onClose={() => setBulkCat(false)}
+        onSave={(v) => bulk("categorize", v)}
+      />
       <ImportModal open={importOpen} account={acc} onClose={() => setImportOpen(false)} onDone={() => (setImportOpen(false), setTab("unmatched"), reload())} />
       <MatchModal line={matchLine} accounts={accounts} bankCode={code} onClose={() => setMatchLine(null)} onDone={() => (setMatchLine(null), reload())} />
       <Confirm

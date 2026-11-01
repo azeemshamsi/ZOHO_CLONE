@@ -9,6 +9,7 @@ const Organization = require("../models/Organization");
 const { nextNumber } = require("../models/Counter");
 const { ah, validate, HttpError, round2 } = require("../utils/http");
 const { chartOfAccounts, buildEntries, movements, naturalBalance } = require("../utils/ledger");
+const { entryKey, usedKeys, candidatesFor, matchLine, context, categorizeLine, undoLine, applyRules } = require("../utils/bankActions");
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -22,8 +23,6 @@ async function findBankAccount(req, code) {
   return acc;
 }
 
-// A unique key for one posting to a bank account (a credit note can have several refunds).
-const entryKey = (e, l) => `${e.type}|${e.id}|${new Date(e.date).toISOString().slice(0, 10)}|${l.debit}|${l.credit}`;
 
 router.get(
   "/accounts",
@@ -205,8 +204,10 @@ router.post(
       });
     }
     const skipped = skip.size;
-    if (docs.length) await BankStatementLine.insertMany(docs);
-    res.status(201).send({ imported: docs.length, skipped, ignored });
+    const inserted = docs.length ? await BankStatementLine.insertMany(docs) : [];
+    // Transaction rules categorise matching lines straight away.
+    const rules = await applyRules(req.org, inserted);
+    res.status(201).send({ imported: docs.length, skipped, ignored, rules });
   })
 );
 
@@ -342,25 +343,8 @@ router.get(
   "/lines/:id/suggestions",
   ah(async (req, res) => {
     const line = await findLine(req);
-    const [entries, taken] = await Promise.all([
-      buildEntries(req.org),
-      BankStatementLine.find({ organization: req.org, account: line.account, "match.key": { $exists: true } }, { "match.key": 1 }).lean(),
-    ]);
-    const used = new Set(taken.map((t) => t.match && t.match.key).filter(Boolean));
-    const out = [];
-    for (const e of entries) {
-      for (const l of e.lines) {
-        if (l.account !== line.account) continue;
-        const fits = line.deposit ? l.debit === line.deposit : l.credit === line.withdrawal;
-        if (!fits) continue;
-        const key = entryKey(e, l);
-        if (used.has(key)) continue;
-        const days = Math.round(Math.abs(new Date(e.date) - new Date(line.date)) / DAY);
-        out.push({ key, type: e.type, id: e.id, number: e.number, party: e.party, date: e.date, amount: l.debit || l.credit, days });
-      }
-    }
-    out.sort((a, b) => a.days - b.days);
-    res.send(out.slice(0, 10));
+    const [entries, used] = await Promise.all([buildEntries(req.org), usedKeys(req.org, line.account)]);
+    res.send(candidatesFor(line, entries, used).slice(0, 10));
   })
 );
 
@@ -370,89 +354,29 @@ router.post(
     const { key } = validate(Joi.object({ key: Joi.string().required() }), req.body);
     const line = await findLine(req);
     if (line.status !== "unmatched") throw new HttpError(400, "This line is already matched or categorised");
-    const entries = await buildEntries(req.org);
-    let found = null;
-    for (const e of entries) for (const l of e.lines) if (l.account === line.account && entryKey(e, l) === key) found = e;
+    const [entries, used] = await Promise.all([buildEntries(req.org), usedKeys(req.org, line.account)]);
+    if (used.has(key)) throw new HttpError(400, "That transaction is already matched to another statement line");
+    const found = candidatesFor(line, entries, used).find((c) => c.key === key);
     if (!found) throw new HttpError(400, "That transaction no longer exists");
-    if (await BankStatementLine.exists({ organization: req.org, "match.key": key })) throw new HttpError(400, "That transaction is already matched to another statement line");
-    line.status = "matched";
-    line.match = { type: found.type, id: found.id, number: found.number, key };
+    matchLine(line, found);
     await line.save();
     res.send(line);
   })
 );
 
 // Record a new transaction straight from the statement line.
+const categorizeSchema = Joi.object({
+  account: Joi.string().required().label("Account"),
+  notes: Joi.string().allow(""),
+  taxRate: Joi.number().min(0).max(100).default(0),
+});
+
 router.post(
   "/lines/:id/categorize",
   ah(async (req, res) => {
-    const data = validate(
-      Joi.object({
-        account: Joi.string().required().label("Account"),
-        notes: Joi.string().allow(""),
-        taxRate: Joi.number().min(0).max(100).default(0),
-      }),
-      req.body
-    );
+    const data = validate(categorizeSchema, req.body);
     const line = await findLine(req);
-    if (line.status !== "unmatched") throw new HttpError(400, "This line is already matched or categorised");
-    const accounts = await chartOfAccounts(req.org);
-    const target = accounts.find((a) => a.code === data.account);
-    if (!target) throw new HttpError(400, "Pick an account");
-    if (["ar", "ap", line.account].includes(target.code)) {
-      throw new HttpError(400, "Use Record Payment / Payments Made for customers and vendors, then match the line");
-    }
-    const description = data.notes || line.description;
-    let match;
-    if (line.withdrawal && target.type === "expense") {
-      // Spending → an expense (GST included in the amount if a rate is given).
-      const org = await Organization.findById(req.org);
-      const rate = Number(data.taxRate) || 0;
-      const base = round2(line.withdrawal / (1 + rate / 100));
-      const tax = round2(line.withdrawal - base);
-      const exp = await Expense.create({
-        organization: req.org,
-        date: line.date,
-        category: target.name,
-        account: target.code,
-        amount: base,
-        taxRate: rate,
-        placeOfSupply: org.state,
-        isInterState: false,
-        cgst: round2(tax / 2),
-        sgst: round2(tax - round2(tax / 2)),
-        igst: 0,
-        total: line.withdrawal,
-        paidThrough: line.account === "cash" ? "cash" : "bank_transfer",
-        bankAccount: line.account,
-        reference: line.reference,
-        notes: description,
-      });
-      match = { type: "Expense", id: exp._id, number: line.reference || target.name };
-    } else {
-      // Anything else → a journal between the bank and the chosen account.
-      const org = await Organization.findById(req.org);
-      const amt = line.deposit || line.withdrawal;
-      const lines = line.deposit
-        ? [{ account: line.account, debit: amt, credit: 0, description }, { account: target.code, debit: 0, credit: amt, description }]
-        : [{ account: target.code, debit: amt, credit: 0, description }, { account: line.account, debit: 0, credit: amt, description }];
-      const j = await Journal.create({
-        organization: req.org,
-        number: await nextNumber(req.org, "journal", org.journalPrefix || "MJ-"),
-        date: line.date,
-        reference: line.reference,
-        notes: `Bank: ${description}`,
-        lines,
-        total: amt,
-      });
-      match = { type: "Journal", id: j._id, number: j.number };
-    }
-    const dateStr = new Date(line.date).toISOString().slice(0, 10);
-    match.key = `${match.type}|${match.id}|${dateStr}|${line.deposit ? line.deposit : 0}|${line.withdrawal ? line.withdrawal : 0}`;
-    line.status = "categorized";
-    line.match = match;
-    await line.save();
-    res.send(line);
+    res.send(await categorizeLine(req.org, line, data, await context(req.org)));
   })
 );
 
@@ -470,16 +394,100 @@ router.post(
 // Undo a match, categorisation or exclusion. A transaction created by categorising is deleted.
 router.post(
   "/lines/:id/undo",
+  ah(async (req, res) => res.send(await undoLine(req.org, await findLine(req))))
+);
+
+// Run transaction rules on this account's unmatched lines (or just the ones picked).
+router.post(
+  "/:code/apply-rules",
   ah(async (req, res) => {
-    const line = await findLine(req);
-    if (line.status === "categorized" && line.match?.id) {
-      if (line.match.type === "Expense") await Expense.deleteOne({ _id: line.match.id, organization: req.org });
-      if (line.match.type === "Journal") await Journal.deleteOne({ _id: line.match.id, organization: req.org });
+    await findBankAccount(req, req.params.code);
+    const { ids } = validate(Joi.object({ ids: Joi.array().items(Joi.string()).default([]) }), req.body);
+    const filter = { organization: req.org, account: req.params.code, status: "unmatched" };
+    if (ids.length) filter._id = { $in: ids };
+    const lines = await BankStatementLine.find(filter).sort({ date: 1, seq: 1 });
+    res.send(await applyRules(req.org, lines));
+  })
+);
+
+/**
+ * Bulk actions on ticked lines.
+ *  categorize: record each against one account   exclude: ignore them
+ *  automatch: match each to the closest MGI transaction with the same amount (within 7 days)
+ *  undo: undo matches/categorisations/exclusions
+ */
+router.post(
+  "/lines/bulk",
+  ah(async (req, res) => {
+    const data = validate(
+      Joi.object({
+        ids: Joi.array().items(Joi.string()).min(1).max(1000).required().label("Lines"),
+        action: Joi.string().valid("categorize", "exclude", "automatch", "undo").required(),
+        account: Joi.string().allow(""),
+        taxRate: Joi.number().min(0).max(100).default(0),
+        notes: Joi.string().allow(""),
+      }),
+      req.body
+    );
+    const lines = await BankStatementLine.find({ organization: req.org, _id: { $in: data.ids } }).sort({ date: 1, seq: 1 });
+    const out = { done: 0, skipped: 0, errors: [] };
+    if (data.action === "categorize") {
+      if (!data.account) throw new HttpError(400, "Pick an account");
+      const ctx = await context(req.org);
+      for (const l of lines) {
+        if (l.status !== "unmatched") {
+          out.skipped++;
+          continue;
+        }
+        try {
+          await categorizeLine(req.org, l, { account: data.account, taxRate: l.withdrawal ? data.taxRate : 0, notes: data.notes }, ctx);
+          out.done++;
+        } catch (e) {
+          out.errors.push(e.message);
+          out.skipped++;
+        }
+      }
+    } else if (data.action === "exclude") {
+      for (const l of lines) {
+        if (l.status !== "unmatched") {
+          out.skipped++;
+          continue;
+        }
+        l.status = "excluded";
+        await l.save();
+        out.done++;
+      }
+    } else if (data.action === "automatch") {
+      const entries = await buildEntries(req.org);
+      const usedBy = {};
+      for (const l of lines) {
+        if (l.status !== "unmatched") {
+          out.skipped++;
+          continue;
+        }
+        usedBy[l.account] = usedBy[l.account] || (await usedKeys(req.org, l.account));
+        const best = candidatesFor(l, entries, usedBy[l.account]).find((c) => c.days <= 7);
+        if (!best) {
+          out.skipped++;
+          continue;
+        }
+        matchLine(l, best);
+        usedBy[l.account].add(best.key);
+        await l.save();
+        out.done++;
+      }
+    } else {
+      for (const l of lines) {
+        if (l.status === "unmatched") {
+          out.skipped++;
+          continue;
+        }
+        await undoLine(req.org, l);
+        out.done++;
+      }
     }
-    line.status = "unmatched";
-    line.match = undefined;
-    await line.save();
-    res.send(line);
+    out.errors = [...new Set(out.errors)];
+    res.send(out);
   })
 );
 
