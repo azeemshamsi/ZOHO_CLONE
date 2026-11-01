@@ -20,6 +20,7 @@ import { JournalList, JournalForm, JournalView } from "./pages/Journals";
 import { ReportsHome, ReportPage } from "./pages/Reports";
 import { AdjustmentList, AdjustmentForm, AdjustmentView } from "./pages/InventoryAdjustments";
 import { RecurringList, RecurringView } from "./pages/Recurring";
+import { UsersPage, AcceptInvite } from "./pages/Users";
 import { DocForm } from "./components/SalesDoc";
 import { KINDS } from "./lib/docKinds";
 import { PurchaseOrderList, PurchaseOrderForm, PurchaseOrderView } from "./pages/PurchaseOrders";
@@ -52,6 +53,7 @@ export default function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password/:id/:token" element={<ResetPassword />} />
         <Route path="/verify/:id/:token" element={<VerifyEmail />} />
+        <Route path="/invite/:id/:token" element={<AcceptInvite />} />
 
         <Route element={<Private><Layout /></Private>}>
           <Route index element={<Dashboard />} />
@@ -132,6 +134,7 @@ export default function App() {
           <Route path="payments/new" element={<PaymentForm />} />
           <Route path="payments/:id" element={<PaymentView />} />
           <Route path="settings" element={<Settings />} />
+          <Route path="users" element={<UsersPage />} />
           {SOON.map((p) => (
             <Route key={p} path={p.slice(1)} element={<ComingSoon />} />
           ))}

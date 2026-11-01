@@ -515,3 +515,13 @@ address { font-style: normal; line-height: 1.6; }
 .card-title.pad { margin: 0; font-size: 15px; }
 .adj-table td { vertical-align: middle; }
 .adj-table input, .adj-table select { width: 100%; }
+
+/* Roles */
+.readonly .page-header .btn-primary:not(.keep), .readonly .form-footer, .readonly .page-header .icon-btn, .readonly .bulk-bar { display: none !important; }
+.readonly-banner { background: #eef0ff; color: var(--brand-600); margin-bottom: 14px; }
+.no-access { padding: 48px 20px; max-width: 520px; margin: 40px auto; }
+.role-card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; display: flex; gap: 10px; align-items: flex-start; }
+.role-card.on { border-color: var(--brand); background: var(--brand-50); }
+.role-grid { display: grid; gap: 8px; }
+.perm-table td, .perm-table th { text-align: center; }
+.perm-table td:first-child, .perm-table th:first-child { text-align: left; }

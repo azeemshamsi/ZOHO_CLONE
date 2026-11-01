@@ -9,6 +9,7 @@ const NAV = [
   {
     label: "Items",
     icon: "box",
+    mod: "items",
     children: [
       { to: "/items", label: "Items" },
       { to: "/inventory-adjustments", label: "Inventory Adjustments" },
@@ -17,6 +18,7 @@ const NAV = [
   {
     label: "Sales",
     icon: "sales",
+    mod: "sales",
     children: [
       { to: "/customers", label: "Customers" },
       { to: "/quotes", label: "Quotes" },
@@ -30,6 +32,7 @@ const NAV = [
   {
     label: "Purchases",
     icon: "cart",
+    mod: "purchases",
     children: [
       { to: "/vendors", label: "Vendors" },
       { to: "/expenses", label: "Expenses" },
@@ -41,17 +44,50 @@ const NAV = [
       { to: "/vendor-credits", label: "Vendor Credits" },
     ],
   },
-  { to: "/banking", label: "Banking", icon: "bank" },
+  { to: "/banking", label: "Banking", icon: "bank", mod: "banking" },
   {
     label: "Accountant",
     icon: "book",
+    mod: "accountant",
     children: [
       { to: "/journals", label: "Manual Journals" },
       { to: "/chart-of-accounts", label: "Chart of Accounts" },
     ],
   },
-  { to: "/reports", label: "Reports", icon: "chart" },
+  { to: "/reports", label: "Reports", icon: "chart", mod: "reports" },
 ];
+
+// Which permission module a page belongs to.
+const PATH_MODULES = [
+  ["/items", "items"],
+  ["/inventory-adjustments", "items"],
+  ["/customers", "sales"],
+  ["/quotes", "sales"],
+  ["/sales-orders", "sales"],
+  ["/invoices", "sales"],
+  ["/recurring-invoices", "sales"],
+  ["/payments", "sales"],
+  ["/credit-notes", "sales"],
+  ["/vendors", "purchases"],
+  ["/expenses", "purchases"],
+  ["/recurring-expenses", "purchases"],
+  ["/purchase-orders", "purchases"],
+  ["/bills", "purchases"],
+  ["/recurring-bills", "purchases"],
+  ["/payments-made", "purchases"],
+  ["/vendor-credits", "purchases"],
+  ["/banking", "banking"],
+  ["/journals", "accountant"],
+  ["/chart-of-accounts", "accountant"],
+  ["/reports", "reports"],
+  ["/settings", "settings"],
+  ["/users", "settings"],
+];
+export const moduleOf = (path) => (PATH_MODULES.find(([p]) => path === p || path.startsWith(p + "/")) || [])[1];
+export const can = (user, mod, need = "view") => {
+  const lvl = user?.permissions?.[mod] || "none";
+  return need === "full" ? lvl === "full" : lvl !== "none";
+};
 
 function Soon() {
   return <span className="soon">Soon</span>;
@@ -88,6 +124,10 @@ export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const close = () => setMenuOpen(false);
+  const location = useLocation();
+  const mod = moduleOf(location.pathname);
+  const level = mod ? user?.permissions?.[mod] || "none" : "full";
+  const nav = NAV.filter((n) => !n.mod || can(user, n.mod));
 
   return (
     <div className={`app ${menuOpen ? "menu-open" : ""}`}>
@@ -96,7 +136,7 @@ export default function Layout() {
           <Logo size={30} light tagline />
         </div>
         <nav className="nav">
-          {NAV.map((n) =>
+          {nav.map((n) =>
             n.children ? (
               <Group key={n.label} group={n} onNavigate={close} />
             ) : (
@@ -108,10 +148,18 @@ export default function Layout() {
             )
           )}
         </nav>
-        <NavLink to="/settings" className="nav-item nav-settings" onClick={close}>
-          <Icon name="settings" />
-          <span>Settings</span>
-        </NavLink>
+        {can(user, "settings") && (
+          <>
+            <NavLink to="/users" className="nav-item nav-settings" onClick={close}>
+              <Icon name="users" />
+              <span>Users & Roles</span>
+            </NavLink>
+            <NavLink to="/settings" className="nav-item" onClick={close}>
+              <Icon name="settings" />
+              <span>Settings</span>
+            </NavLink>
+          </>
+        )}
       </aside>
       <div className="sidebar-scrim" onClick={close} />
 
@@ -122,9 +170,11 @@ export default function Layout() {
           </button>
           <div className="topbar-org">{organization?.name}</div>
           <div className="topbar-right">
-            <button className="btn btn-primary btn-sm" onClick={() => navigate("/invoices/new")}>
-              <Icon name="plus" size={16} /> New Invoice
-            </button>
+            {can(user, "sales", "full") && (
+              <button className="btn btn-primary btn-sm keep" onClick={() => navigate("/invoices/new")}>
+                <Icon name="plus" size={16} /> New Invoice
+              </button>
+            )}
             <div className="profile">
               <button className="avatar" onClick={() => setProfileOpen(!profileOpen)} aria-label="Account">
                 {(user?.name || "?").slice(0, 1).toUpperCase()}
@@ -156,8 +206,18 @@ export default function Layout() {
             </div>
           </div>
         </header>
-        <main className="content">
-          <Outlet />
+        <main className={`content ${level === "view" ? "readonly" : ""}`}>
+          {level === "none" ? (
+            <div className="card center no-access">
+              <h3>You don't have access to this page</h3>
+              <p className="muted">Your role is {user?.role}. Ask an admin if you need access.</p>
+            </div>
+          ) : (
+            <>
+              {level === "view" && <div className="alert readonly-banner">View only — your role can see this but not change it.</div>}
+              <Outlet />
+            </>
+          )}
         </main>
       </div>
     </div>

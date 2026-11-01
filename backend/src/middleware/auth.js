@@ -9,7 +9,7 @@ module.exports = async function auth(req, res, next) {
   try {
     const payload = jwt.verify(token, env.JWT_SECRET);
     const user = await User.findById(payload._id);
-    if (!user) return res.status(401).send({ message: "Please log in" });
+    if (!user || user.status !== "active") return res.status(401).send({ message: "Please log in" });
     req.user = user;
     req.org = user.organization;
     next();

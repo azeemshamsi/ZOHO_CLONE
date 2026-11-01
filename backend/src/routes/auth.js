@@ -79,14 +79,49 @@ router.post(
       req.body
     );
     const user = await User.findOne({ email: data.email.toLowerCase() });
-    if (!user || !(await bcrypt.compare(data.password, user.password))) {
+    if (!user || !user.password || !(await bcrypt.compare(data.password, user.password))) {
       throw new HttpError(401, "Invalid email or password");
     }
+    if (user.status === "inactive") throw new HttpError(403, "Your access to this organization has been turned off. Contact your admin.");
     if (!user.verified) {
       const t = await createToken(user._id, "verify");
       await sendEmail(user.email, "Verify your MGI account", `Verify your email: ${env.APP_URL}/verify/${user._id}/${t.token}`);
       throw new HttpError(403, "Please verify your email. We sent you a new link.");
     }
+    user.lastLogin = new Date();
+    await user.save();
+    res.send(await sessionPayload(user));
+  })
+);
+
+async function findInvite({ id, token }) {
+  const user = await User.findById(id).catch(() => null);
+  if (!user || user.status !== "invited" || !user.inviteToken || user.inviteToken !== token) throw new HttpError(400, "This invitation is invalid or has already been used");
+  if (user.inviteExpires && user.inviteExpires < new Date()) throw new HttpError(400, "This invitation has expired. Ask your admin to resend it.");
+  return user;
+}
+
+// Invited user: look up the invite, then set a password to join.
+router.get(
+  "/invite/:id/:token",
+  ah(async (req, res) => {
+    const user = await findInvite(req.params);
+    const org = await Organization.findById(user.organization);
+    res.send({ name: user.name, email: user.email, organization: org?.name, role: user.role });
+  })
+);
+router.post(
+  "/invite/:id/:token",
+  ah(async (req, res) => {
+    const data = validate(Joi.object({ password, name: Joi.string().trim().min(2).max(100) }), req.body);
+    const user = await findInvite(req.params);
+    user.password = await bcrypt.hash(data.password, 10);
+    if (data.name) user.name = data.name;
+    user.status = "active";
+    user.verified = true;
+    user.lastLogin = new Date();
+    user.inviteToken = "";
+    await user.save();
     res.send(await sessionPayload(user));
   })
 );

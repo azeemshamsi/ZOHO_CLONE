@@ -6,7 +6,7 @@ import { STATES } from "../lib/constants";
 import Logo from "../components/Logo";
 import { Field } from "../components/ui";
 
-function AuthShell({ title, subtitle, children, footer }) {
+export function AuthShell({ title, subtitle, children, footer }) {
   return (
     <div className="auth">
       <div className="auth-side">

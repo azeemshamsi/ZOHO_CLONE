@@ -6,9 +6,14 @@ const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    password: { type: String, required: true },
+    password: { type: String, default: "" }, // empty until an invited user accepts
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true },
-    role: { type: String, enum: ["admin", "staff"], default: "admin" },
+    role: { type: String, enum: ["admin", "accountant", "staff", "sales", "viewer"], default: "admin" },
+    status: { type: String, enum: ["active", "invited", "inactive"], default: "active" },
+    invitedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    lastLogin: { type: Date },
+    inviteToken: { type: String, default: "" },
+    inviteExpires: { type: Date },
     verified: { type: Boolean, default: false },
   },
   { timestamps: true }
@@ -24,7 +29,9 @@ userSchema.methods.toPublic = function () {
     name: this.name,
     email: this.email,
     role: this.role,
+    status: this.status,
     organization: this.organization,
+    permissions: require("../utils/roles").permsOf(this.role),
   };
 };
 
