@@ -108,7 +108,7 @@ npm test   # GST calculation tests
 
 ## Reports Center
 
-The Reports Center (Reports in the sidebar) works like Zoho's. It has a category sidebar, search, starred favourites and a "last visited" time for each report. It holds 43 reports:
+The Reports Center (Reports in the sidebar) works like Zoho's. It has a category sidebar, search, starred favourites and a "last visited" time for each report. It holds 55 reports:
 
 - **Business Overview:** Profit and Loss (standard, Schedule III and horizontal), Cash Flow Statement (indirect method), Balance Sheet (standard, Schedule III and horizontal), Business Performance Ratios, Movement of Equity
 - **Sales:** by customer, by item, monthly summary
@@ -118,6 +118,46 @@ The Reports Center (Reports in the sidebar) works like Zoho's. It has a category
 - **Purchases and Expenses:** by vendor, by item and by category, expenses by vendor, expense details
 - **Taxes:** GSTR-1, GSTR-3B, tax summary by rate
 - **Banking:** reconciliation status
+- **Inventory:** inventory summary, inventory valuation (FIFO), FIFO cost lot tracking, stock movement, product sales with margin, committed stock, reorder report
+- **Projects and Timesheet:** project summary, timesheet details, unbilled time
+- **Recurring:** recurring profiles
+- **Activity:** emails sent
 - **Accountant:** account transactions, account type summary, general ledger and detailed general ledger, journal report, day book, trial balance
 
 Every report has date filters, CSV export and print/PDF. The new reports live in `backend/src/utils/reportCatalog.js` and are served at `GET /api/reports/:key`.
+
+## Inventory
+
+To track stock for an item, switch on **Track inventory** on the item and enter its opening stock and reorder level.
+
+- **Stock in:** bills and sales returns (credit notes).
+- **Stock out:** invoices and returns to vendors (vendor credits).
+- **Adjustments:** Items → Inventory Adjustments records stocktakes, damage and revaluations.
+- **Costing:** stock is costed FIFO. The **Inventory Asset** account always equals the stock value, and the cost of what's sold moves to Cost of Goods Sold.
+
+The engine is `backend/src/utils/inventory.js`.
+
+## Recurring invoices, bills and expenses
+
+A recurring profile repeats daily, weekly, monthly or yearly, every N periods, with an optional end date. Documents can be created as drafts or as final (sent or open).
+
+An hourly scheduler creates whatever is due. On hosts that sleep, such as Render's free plan, anything missed is caught up when the app wakes or a recurring list is opened.
+
+## Users and roles
+
+From Users & Roles you can invite people by link or email as Admin, Accountant, Staff, Sales Staff or View Only. Every API route checks the role (`backend/src/utils/roles.js`).
+
+## Email
+
+Documents are emailed as PDFs made on the server, sent from the organization's own mailbox (Settings → Email: Gmail app password, Zoho Mail, Outlook or SMTP). Automatic payment reminders can be switched on under Settings → Payment Reminders.
+
+## Projects and timesheets
+
+Projects can be billed four ways:
+
+- a fixed fee
+- a project hourly rate
+- a rate per task
+- a rate per person
+
+Log time by hand or with the timer, then **Invoice Project** to turn unbilled time into a draft invoice.

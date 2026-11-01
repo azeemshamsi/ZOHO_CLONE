@@ -14,7 +14,7 @@ const { round2 } = require("./http");
 const ORDER = { opening: 0, bill: 1, adjIn: 2, creditNote: 3, invoice: 4, vendorCredit: 5, adjOut: 6, adjValue: 7 };
 const live = (d) => !["draft", "void"].includes(d.status);
 
-function computeStock({ items, invoices = [], creditNotes = [], bills = [], vendorCredits = [], adjustments = [] }) {
+function computeStock({ items, invoices = [], creditNotes = [], bills = [], vendorCredits = [], adjustments = [], to = null }) {
   const tracked = new Map(items.filter((i) => i.trackInventory).map((i) => [String(i._id), i]));
   const events = [];
   const push = (e) => tracked.has(e.item) && events.push(e);
@@ -41,6 +41,10 @@ function computeStock({ items, invoices = [], creditNotes = [], bills = [], vend
       else if (l.quantityAdjusted < 0) push({ kind: "adjOut", item: String(l.item), date: a.date, seq: a.createdAt, qty: -l.quantityAdjusted, doc });
     });
 
+  if (to) {
+    const end = new Date(to);
+    for (let i = events.length - 1; i >= 0; i--) if (new Date(events[i].date) > end) events.splice(i, 1);
+  }
   events.sort((a, b) => new Date(a.date) - new Date(b.date) || ORDER[a.kind] - ORDER[b.kind] || new Date(a.seq || 0) - new Date(b.seq || 0));
 
   const state = {};
@@ -132,12 +136,12 @@ function computeStock({ items, invoices = [], creditNotes = [], bills = [], vend
   }
 
   const summary = {};
-  for (const [id, s] of Object.entries(state)) summary[id] = { item: s.item, qty: qtyOf(s), value: valOf(s), moves: s.moves, avgCost: round2(avg(s)) };
+  for (const [id, s] of Object.entries(state)) summary[id] = { item: s.item, qty: qtyOf(s), value: valOf(s), moves: s.moves, avgCost: round2(avg(s)), layers: s.layers.map((l) => ({ qty: l.qty, unit: round2(l.unit) })) };
   return { items: summary, docInv, docCost };
 }
 
 // Load everything the engine needs for an organization.
-async function loadStock(org) {
+async function loadStock(org, { to } = {}) {
   const Item = require("../models/Item");
   const InventoryAdjustment = require("../models/InventoryAdjustment");
   const Invoice = require("../models/Invoice");
@@ -153,7 +157,7 @@ async function loadStock(org) {
     VendorCredit.find(live).lean(),
     InventoryAdjustment.find({ organization: org, status: "adjusted" }).lean(),
   ]);
-  return computeStock({ items, invoices, creditNotes, bills, vendorCredits, adjustments });
+  return computeStock({ items, invoices, creditNotes, bills, vendorCredits, adjustments, to });
 }
 
 // Quantity committed to confirmed sales orders not yet invoiced, per item.

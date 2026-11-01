@@ -92,6 +92,22 @@ export const REPORTS = [
   R("gstr1", "GSTR-1 Summary", "Taxes", "range", "Outward supplies: B2B, B2C large & small, credit notes, HSN summary.", { period: "last_month" }),
   R("gstr3b", "GSTR-3B Summary", "Taxes", "range", "Tax on sales, input tax credit and net GST payable.", { period: "last_month" }),
   R("tax-summary", "Tax Summary", "Taxes", "range", "Output and input GST by tax rate."),
+  // Inventory
+  R("inventory-summary", "Inventory Summary", "Inventory", "range", "Opening, in, out, on hand, committed and available stock per item."),
+  R("inventory-valuation", "Inventory Valuation Summary", "Inventory", "asof", "Stock on hand and its FIFO value on a date."),
+  R("fifo-cost-lots", "FIFO Cost Lot Tracking", "Inventory", "asof", "Each lot of stock still on hand, with its cost."),
+  R("stock-movement", "Stock Movement", "Inventory", "range", "Every stock in and out, item by item."),
+  R("product-sales", "Product Sales Report", "Inventory", "range", "Quantity sold, sales, cost and margin per item."),
+  R("committed-stock", "Committed Stock Details", "Inventory", "none", "Stock promised on confirmed sales orders."),
+  R("reorder-report", "Reorder Report", "Inventory", "none", "Items at or below their reorder level."),
+  // Projects and Timesheet
+  R("project-summary", "Project Summary", "Projects and Timesheet", "none", "Budget vs logged hours, billed and unbilled per project."),
+  R("timesheet-details", "Timesheet Details", "Projects and Timesheet", "range", "Every time entry with its status and billable amount."),
+  R("unbilled-time", "Unbilled Time", "Projects and Timesheet", "none", "Billable time not yet invoiced, by customer."),
+  // Recurring
+  R("recurring-profiles", "Recurring Profiles", "Recurring", "none", "Recurring invoices, bills and expenses with their schedules."),
+  // Activity
+  R("email-log", "Emails Sent", "Activity", "range", "Documents and reminders emailed from MGI."),
   // Banking
   R("reconciliation-status", "Reconciliation Status", "Banking", "none", "Books vs bank balance and lines still to match, per account."),
   // Accountant
@@ -864,7 +880,12 @@ function HorizontalReport({ d, range }) {
 function GenericReport(p) {
   if (p.d.kind === "statement") return <StatementReport {...p} />;
   if (p.d.kind === "horizontal") return <HorizontalReport {...p} />;
-  return <TableReport {...p} />;
+  return (
+    <>
+      <TableReport {...p} />
+      {p.d.note && <p className="muted small report-note">{p.d.note}</p>}
+    </>
+  );
 }
 
 const BODIES = {

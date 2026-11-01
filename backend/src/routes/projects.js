@@ -219,3 +219,4 @@ router.post(
 module.exports = router;
 module.exports.rateOf = rateOf;
 module.exports.billedState = billedState;
+module.exports.summaryOf = summary;

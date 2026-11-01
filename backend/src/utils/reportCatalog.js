@@ -289,10 +289,11 @@ const REPORTS = {
         ...items(b.fixed),
         L.sub("Total non-current assets", b.fixed.total),
         L.section("(2) Current assets"),
+        L.item("Inventories", (b.otherCA.rows.find((r) => r.code === "inventory") || { amount: 0 }).amount, "inventory"),
         L.item("Trade receivables", b.receivables.total, "ar"),
         L.item("Cash and cash equivalents", b.cash.total),
         ...items(b.cash, 2),
-        ...items(b.otherCA),
+        ...items({ rows: b.otherCA.rows.filter((r) => r.code !== "inventory") }),
         L.sub("Total current assets", b.currentAssets),
         L.grand("TOTAL", b.totalAssets),
       ],
@@ -852,5 +853,341 @@ const REPORTS = {
     };
   },
 };
+
+
+/* ================= Inventory, projects, recurring and activity ================= */
+const DAYMS = 86400000;
+const itemHref = (id) => `/items/${id}`;
+const tracked = async (org) => (await require("../models/Item").find({ organization: org, trackInventory: true }).sort({ name: 1 }).lean());
+
+Object.assign(REPORTS, {
+  "inventory-summary": async (req, q) => {
+    const { from, to } = parseRange(q);
+    const { loadStock, committedStock } = require("./inventory");
+    const [stock, committed, items] = await Promise.all([loadStock(req.org, { to }), committedStock(req.org), tracked(req.org)]);
+    const rows = items.map((it) => {
+      const st = stock.items[String(it._id)] || { moves: [], qty: 0 };
+      const before = st.moves.filter((m) => new Date(m.date) < from);
+      const inRange = st.moves.filter((m) => new Date(m.date) >= from);
+      const opening = before.length ? before[before.length - 1].qty : 0;
+      const qin = sum(inRange, (m) => m.qtyIn);
+      const qout = sum(inRange, (m) => m.qtyOut);
+      const c = committed[String(it._id)] || 0;
+      return { name: it.name, href: itemHref(it._id), sku: it.sku, unit: it.unit, opening, qin, qout, closing: st.qty, committed: c, available: round2(st.qty - c), reorder: it.reorderLevel || 0 };
+    });
+    return {
+      kind: "table",
+      columns: [
+        col("name", "Item", "text", { link: "href" }),
+        col("sku", "SKU"),
+        col("opening", "Opening Stock", "number", { sum: true }),
+        col("qin", "Quantity In", "number", { sum: true }),
+        col("qout", "Quantity Out", "number", { sum: true }),
+        col("closing", "Stock on Hand", "number", { sum: true }),
+        col("committed", "Committed", "number", { sum: true }),
+        col("available", "Available for Sale", "number", { sum: true }),
+        col("reorder", "Reorder Level", "number"),
+      ],
+      rows,
+    };
+  },
+
+  "inventory-valuation": async (req, q) => {
+    const to = asOfDate(q);
+    const { loadStock } = require("./inventory");
+    const [stock, items] = await Promise.all([loadStock(req.org, { to }), tracked(req.org)]);
+    const rows = items.map((it) => {
+      const st = stock.items[String(it._id)] || { qty: 0, value: 0, avgCost: it.purchaseRate };
+      return { name: it.name, href: itemHref(it._id), sku: it.sku, qty: st.qty, unit: it.unit, avg: st.qty > 0 ? round2(st.value / st.qty) : 0, value: st.value, retail: round2(st.qty * (it.rate || 0)) };
+    });
+    return {
+      kind: "table",
+      note: "FIFO cost. The total equals the Inventory Asset account on the balance sheet.",
+      columns: [
+        col("name", "Item", "text", { link: "href" }),
+        col("sku", "SKU"),
+        col("qty", "Stock on Hand", "number", { sum: true }),
+        col("unit", "Unit"),
+        col("avg", "Average Cost", "money"),
+        col("value", "Inventory Value", "money", { sum: true }),
+        col("retail", "Value at Selling Price", "money", { sum: true }),
+      ],
+      rows,
+    };
+  },
+
+  "fifo-cost-lots": async (req, q) => {
+    const to = asOfDate(q);
+    const { loadStock } = require("./inventory");
+    const [stock, items] = await Promise.all([loadStock(req.org, { to }), tracked(req.org)]);
+    const rows = [];
+    for (const it of items) {
+      const st = stock.items[String(it._id)];
+      if (!st) continue;
+      // Each remaining lot came from the most recent stock-ins, newest last.
+      const ins = st.moves.filter((m) => m.qtyIn > 0);
+      let k = ins.length - 1;
+      const lots = [...st.layers].reverse().map((l) => {
+        const src = l.qty > 0 ? ins[k--] : null;
+        return { item: it.name, date: src?.date || null, source: l.qty < 0 ? "Oversold (awaiting stock)" : src ? `${src.type} ${src.number || ""}`.trim() : "", qty: l.qty, unit: l.unit, value: round2(l.qty * l.unit) };
+      });
+      rows.push(...lots.reverse());
+    }
+    return {
+      kind: "table",
+      groupBy: "item",
+      note: "Stock still on hand, lot by lot, in the order it will be used up (first in, first out).",
+      columns: [col("date", "Received", "date"), col("source", "From"), col("qty", "Quantity Left", "number", { sum: true }), col("unit", "Unit Cost", "money"), col("value", "Value", "money", { sum: true })],
+      rows,
+    };
+  },
+
+  "stock-movement": async (req, q) => {
+    const { from, to } = parseRange(q);
+    const { loadStock } = require("./inventory");
+    const [stock, items] = await Promise.all([loadStock(req.org, { to }), tracked(req.org)]);
+    const rows = [];
+    for (const it of items) {
+      const st = stock.items[String(it._id)];
+      if (!st) continue;
+      for (const m of st.moves.filter((m) => new Date(m.date) >= from))
+        rows.push({ item: it.name, date: m.date, type: m.type, number: m.number, party: m.party, qin: m.qtyIn || null, qout: m.qtyOut || null, unitCost: m.unitCost || null, value: m.value, qty: m.qty, ref: m.type === "Opening Stock" ? null : { type: m.type, id: m.id } });
+    }
+    return {
+      kind: "table",
+      groupBy: "item",
+      columns: [
+        col("date", "Date", "date"),
+        col("type", "Transaction"),
+        col("number", "Number", "doc"),
+        col("party", "Party / Reason"),
+        col("qin", "In", "number", { sum: true }),
+        col("qout", "Out", "number", { sum: true }),
+        col("unitCost", "Unit Cost", "money"),
+        col("value", "Value Change", "money", { sum: true }),
+        col("qty", "Stock After", "number"),
+      ],
+      rows,
+    };
+  },
+
+  "product-sales": async (req, q) => {
+    const { from, to } = parseRange(q);
+    const { loadStock } = require("./inventory");
+    const [stock, invoices] = await Promise.all([loadStock(req.org, { to }), Invoice.find({ organization: req.org, status: live, date: inRangeQ(from, to) }).lean()]);
+    const map = {};
+    for (const i of invoices)
+      for (const l of i.lineItems) {
+        const k = l.item ? String(l.item) : `n:${l.name}`;
+        map[k] = map[k] || { name: l.name, href: l.item ? itemHref(l.item) : undefined, qty: 0, sales: 0, cost: 0, tracked: false };
+        map[k].qty = round2(map[k].qty + l.quantity);
+        map[k].sales = round2(map[k].sales + l.amount);
+      }
+    // Cost of what was sold, from the FIFO engine (tracked items only).
+    for (const [id, st] of Object.entries(stock.items)) {
+      if (!map[id]) continue;
+      map[id].tracked = true;
+      map[id].cost = round2(-sum(st.moves.filter((m) => m.type === "Invoice" && new Date(m.date) >= from), (m) => m.value));
+    }
+    const rows = Object.values(map)
+      .map((r) => ({ ...r, profit: r.tracked ? round2(r.sales - r.cost) : null, margin: r.tracked && r.sales ? `${round2(((r.sales - r.cost) / r.sales) * 100)}%` : "—", cost: r.tracked ? r.cost : null }))
+      .sort((a, b) => b.sales - a.sales);
+    return {
+      kind: "table",
+      note: "Cost and margin are shown for items that track inventory.",
+      columns: [col("name", "Item", "text", { link: "href" }), col("qty", "Quantity Sold", "number", { sum: true }), col("sales", "Sales", "money", { sum: true }), col("cost", "Cost of Goods Sold", "money", { sum: true }), col("profit", "Gross Profit", "money", { sum: true }), col("margin", "Margin", "text", { align: "right" })],
+      rows,
+    };
+  },
+
+  "committed-stock": async (req) => {
+    const SO = require("../models/SalesOrder");
+    const orders = await SO.find({ organization: req.org, status: "confirmed" }).sort({ date: 1 }).lean();
+    const items = await tracked(req.org);
+    const ids = new Set(items.map((i) => String(i._id)));
+    const rows = [];
+    for (const o of orders) for (const l of o.lineItems) if (l.item && ids.has(String(l.item))) rows.push({ item: l.name, date: o.date, number: o.number, href: `/sales-orders/${o._id}`, customer: o.customerName, shipment: o.shipmentDate, qty: l.quantity, amount: l.amount });
+    return {
+      kind: "table",
+      groupBy: "item",
+      columns: [col("date", "Order Date", "date"), col("number", "Sales Order#", "text", { link: "href" }), col("customer", "Customer"), col("shipment", "Expected Shipment", "date"), col("qty", "Quantity Committed", "number", { sum: true }), col("amount", "Amount", "money", { sum: true })],
+      rows,
+    };
+  },
+
+  "reorder-report": async (req) => {
+    const { loadStock, committedStock } = require("./inventory");
+    const [stock, committed, items] = await Promise.all([loadStock(req.org), committedStock(req.org), tracked(req.org)]);
+    const rows = items
+      .map((it) => {
+        const st = stock.items[String(it._id)] || { qty: 0 };
+        const avail = round2(st.qty - (committed[String(it._id)] || 0));
+        return { name: it.name, href: itemHref(it._id), sku: it.sku, qty: st.qty, available: avail, reorder: it.reorderLevel || 0, short: round2(Math.max(0, (it.reorderLevel || 0) - avail)), cost: it.purchaseRate };
+      })
+      .filter((r) => r.available <= r.reorder)
+      .map((r) => ({ ...r, estimate: round2(r.short * (r.cost || 0)) }));
+    return {
+      kind: "table",
+      note: "Items whose available stock (on hand minus committed) is at or below the reorder level.",
+      columns: [col("name", "Item", "text", { link: "href" }), col("sku", "SKU"), col("qty", "Stock on Hand", "number"), col("available", "Available", "number"), col("reorder", "Reorder Level", "number"), col("short", "Short By", "number", { sum: true }), col("estimate", "Cost to Top Up", "money", { sum: true })],
+      rows,
+    };
+  },
+
+  /* ---------- Projects & timesheets ---------- */
+  "timesheet-details": async (req, q) => {
+    const { from, to } = parseRange(q);
+    const TimeEntry = require("../models/TimeEntry");
+    const Project = require("../models/Project");
+    const { rateOf, billedState } = require("../routes/projects");
+    const [entries, projects] = await Promise.all([TimeEntry.find({ organization: req.org, timerStartedAt: null, date: inRangeQ(from, to) }).sort({ date: 1 }).lean(), Project.find({ organization: req.org }).lean()]);
+    const isBilled = await billedState(req.org, entries);
+    const rows = entries.map((e) => {
+      const p = projects.find((x) => String(x._id) === String(e.project));
+      const rate = p && p.billingMethod !== "fixed" && e.billable ? rateOf(p, e) : 0;
+      return {
+        project: p ? `${p.name} (${p.customerName})` : "",
+        date: e.date,
+        task: p?.tasks.find((t) => String(t._id) === String(e.task))?.name || "",
+        user: e.userName,
+        notes: e.notes,
+        status: isBilled(e) ? "Invoiced" : e.billable ? "Unbilled" : "Non-billable",
+        hours: round2(e.minutes / 60),
+        amount: round2((e.minutes / 60) * rate),
+      };
+    });
+    return {
+      kind: "table",
+      groupBy: "project",
+      columns: [col("date", "Date", "date"), col("task", "Task"), col("user", "User"), col("notes", "Notes"), col("status", "Status"), col("hours", "Hours", "number", { sum: true }), col("amount", "Billable Amount", "money", { sum: true })],
+      rows,
+    };
+  },
+
+  "project-summary": async (req) => {
+    const Project = require("../models/Project");
+    const projects = await Project.find({ organization: req.org }).sort({ name: 1 }).lean();
+    const rows = [];
+    for (const p of projects) {
+      const r = await require("../routes/projects").summaryOf(req.org, p);
+      rows.push({
+        name: p.name,
+        href: `/projects/${p._id}`,
+        customer: p.customerName,
+        method: { fixed: "Fixed", project_hours: "Project hours", task_hours: "Task hours", staff_hours: "Staff hours" }[p.billingMethod],
+        budget: p.budgetHours || null,
+        logged: r.loggedHours,
+        used: p.budgetHours ? `${Math.round((r.loggedHours / p.budgetHours) * 100)}%` : "—",
+        billed: r.billedHours,
+        unbilled: r.unbilledHours,
+        unbilledAmount: p.billingMethod === "fixed" ? r.fixedRemaining : r.unbilledAmount,
+        invoiced: r.invoicedAmount,
+        status: p.status === "active" ? "Active" : "Inactive",
+      });
+    }
+    return {
+      kind: "table",
+      columns: [
+        col("name", "Project", "text", { link: "href" }),
+        col("customer", "Customer"),
+        col("method", "Billing"),
+        col("budget", "Budget Hours", "number", { sum: true }),
+        col("logged", "Logged Hours", "number", { sum: true }),
+        col("used", "Budget Used", "text", { align: "right" }),
+        col("unbilled", "Unbilled Hours", "number", { sum: true }),
+        col("unbilledAmount", "Unbilled Amount", "money", { sum: true }),
+        col("invoiced", "Invoiced (before GST)", "money", { sum: true }),
+        col("status", "Status"),
+      ],
+      rows,
+    };
+  },
+
+  "unbilled-time": async (req) => {
+    const TimeEntry = require("../models/TimeEntry");
+    const Project = require("../models/Project");
+    const { rateOf, billedState } = require("../routes/projects");
+    const [entries, projects] = await Promise.all([TimeEntry.find({ organization: req.org, timerStartedAt: null, billable: true }).lean(), Project.find({ organization: req.org }).lean()]);
+    const isBilled = await billedState(req.org, entries);
+    const map = {};
+    for (const e of entries.filter((e) => !isBilled(e))) {
+      const p = projects.find((x) => String(x._id) === String(e.project));
+      if (!p || p.billingMethod === "fixed") continue;
+      const k = String(p._id);
+      map[k] = map[k] || { customer: p.customerName, project: p.name, href: `/projects/${p._id}`, oldest: e.date, entries: 0, hours: 0, amount: 0 };
+      map[k].entries += 1;
+      map[k].hours = round2(map[k].hours + e.minutes / 60);
+      map[k].amount = round2(map[k].amount + (e.minutes / 60) * rateOf(p, e));
+      if (new Date(e.date) < new Date(map[k].oldest)) map[k].oldest = e.date;
+    }
+    return {
+      kind: "table",
+      groupBy: "customer",
+      columns: [col("project", "Project", "text", { link: "href" }), col("oldest", "Oldest Entry", "date"), col("entries", "Entries", "number", { sum: true }), col("hours", "Unbilled Hours", "number", { sum: true }), col("amount", "Unbilled Amount", "money", { sum: true })],
+      rows: Object.values(map).sort((a, b) => a.customer.localeCompare(b.customer)),
+    };
+  },
+
+  /* ---------- Recurring ---------- */
+  "recurring-profiles": async (req) => {
+    const RP = require("../models/RecurringProfile");
+    const ps = await RP.find({ organization: req.org }, { history: 0 }).sort({ kind: 1, name: 1 }).lean();
+    const unit = { day: "Day", week: "Week", month: "Month", year: "Year" };
+    const perYear = { day: 365, week: 52, month: 12, year: 1 };
+    const rows = ps.map((p) => ({
+      kind: { invoice: "Recurring Invoices", bill: "Recurring Bills", expense: "Recurring Expenses" }[p.kind],
+      name: p.name,
+      href: `/recurring-${p.kind}s/${p._id}`,
+      party: p.partyName,
+      freq: p.every === 1 ? `Every ${unit[p.unit].toLowerCase()}` : `Every ${p.every} ${unit[p.unit].toLowerCase()}s`,
+      start: p.startDate,
+      end: p.endDate,
+      next: p.status === "active" ? p.nextDate : null,
+      count: p.occurrences,
+      status: { active: "Active", stopped: "Stopped", expired: "Expired" }[p.status],
+      amount: p.amount,
+      yearly: p.status === "active" ? round2((p.amount * perYear[p.unit]) / p.every) : 0,
+    }));
+    return {
+      kind: "table",
+      groupBy: "kind",
+      columns: [
+        col("name", "Profile", "text", { link: "href" }),
+        col("party", "Customer / Vendor"),
+        col("freq", "Frequency"),
+        col("start", "Start", "date"),
+        col("end", "End", "date"),
+        col("next", "Next Date", "date"),
+        col("count", "Created", "number", { sum: true }),
+        col("status", "Status"),
+        col("amount", "Amount", "money", { sum: true }),
+        col("yearly", "Yearly Value (active)", "money", { sum: true }),
+      ],
+      rows,
+    };
+  },
+
+  /* ---------- Activity ---------- */
+  "email-log": async (req, q) => {
+    const { from, to } = parseRange(q);
+    const EmailLog = require("../models/EmailLog");
+    const { DOCS } = require("./documents");
+    const logs = await EmailLog.find({ organization: req.org, createdAt: inRangeQ(from, to) }).sort({ createdAt: -1 }).lean();
+    const ROUTES = { invoice: "invoices", quote: "quotes", salesOrder: "sales-orders", creditNote: "credit-notes", purchaseOrder: "purchase-orders", vendorCredit: "vendor-credits", payment: "payments", vendorPayment: "payments-made" };
+    return {
+      kind: "table",
+      columns: [col("date", "Sent On", "date"), col("doc", "Document", "text", { link: "href" }), col("type", "Type"), col("to", "To"), col("subject", "Subject"), col("by", "Sent By")],
+      rows: logs.map((l) => ({
+        date: l.createdAt,
+        doc: DOCS[l.kind]?.label || l.kind,
+        href: ROUTES[l.kind] ? `/${ROUTES[l.kind]}/${l.docId}` : undefined,
+        type: l.type === "reminder" ? (l.reminderDay !== undefined && l.reminderDay !== null ? `Reminder (+${l.reminderDay} days)` : "Reminder") : l.type === "receipt" ? "Receipt" : "Document",
+        to: [...(l.to || []), ...(l.cc || []).map((c) => `cc ${c}`)].join(", "),
+        subject: l.subject,
+        by: l.sentBy,
+      })),
+    };
+  },
+});
 
 module.exports = { REPORTS };
