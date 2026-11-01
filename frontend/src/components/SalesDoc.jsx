@@ -7,6 +7,7 @@ import { CREDIT_REASONS, VENDOR_CREDIT_REASONS } from "../lib/docKinds";
 import { money, amount, date, isoDate, addDays, round2, inWords } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Status } from "./ui";
 import Icon from "./Icon";
+import { useLocations } from "../lib/locations";
 import { LogoMark } from "./Logo";
 
 /* ======================= List ======================= */
@@ -132,6 +133,8 @@ export function DocForm({ kind, recurring = false }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [autoNumber, setAutoNumber] = useState("");
+  const { branches, warehouses } = useLocations();
+  const stockKind = ["invoice", "bill", "creditNote", "vendorCredit", "salesOrder", "purchaseOrder"].includes(kind.key);
   // Credit notes (customers) and vendor credits (vendors) can point at an invoice / bill.
   const isCN = kind.key === "creditNote" || kind.key === "vendorCredit";
   const second = kind.second;
@@ -160,6 +163,8 @@ export function DocForm({ kind, recurring = false }) {
           second: "",
           placeOfSupply: t.placeOfSupply || "",
           lineItems: (t.lineItems || []).map(cleanLine),
+          branch: t.branch || "",
+          warehouse: t.warehouse || "",
           shippingCharge: t.shippingCharge || 0,
           adjustment: t.adjustment || 0,
           customerNotes: t.customerNotes || "",
@@ -190,6 +195,8 @@ export function DocForm({ kind, recurring = false }) {
           status: data.status,
           invoice: data.invoice || data.bill || "",
           reason: data.reason || "",
+          branch: data.branch || "",
+          warehouse: data.warehouse || "",
         };
         setForm(f);
       });
@@ -215,6 +222,8 @@ export function DocForm({ kind, recurring = false }) {
       invoice: "",
       reason: isCN ? (isVendor ? "Purchase Return" : "Sales Return") : "",
       purchaseOrder: "",
+      branch: "",
+      warehouse: "",
       sched: recurring ? { name: "", every: 1, unit: "month", startDate: today, endDate: "", never: true, createAs: "final" } : null,
     };
     const fromInvoice = isCN && params.get(linkKey);
@@ -266,8 +275,12 @@ export function DocForm({ kind, recurring = false }) {
   }, [isCN, form?.customer, linkApi, party]);
 
   const totals = useMemo(
-    () => (form ? calc(form.lineItems, organization?.state, form.placeOfSupply || organization?.state, form.shippingCharge, form.adjustment) : null),
-    [form, organization]
+    () => {
+      if (!form) return null;
+      const home = branches.find((b) => b._id === form.branch)?.state || organization?.state; // GST from the branch's state
+      return calc(form.lineItems, home, form.placeOfSupply || home, form.shippingCharge, form.adjustment);
+    },
+    [form, organization, branches]
   );
 
   if (!form) return <Spinner />;
@@ -310,6 +323,8 @@ export function DocForm({ kind, recurring = false }) {
         adjustment: Number(form.adjustment || 0),
         customerNotes: form.customerNotes,
         terms: form.terms,
+        branch: form.branch || null,
+        warehouse: form.warehouse || null,
         status,
         lineItems: form.lineItems
           .filter((l) => l.name.trim())
@@ -395,6 +410,38 @@ export function DocForm({ kind, recurring = false }) {
               ))}
             </select>
           </Field>
+          {(branches.some((b) => b.active) || (stockKind && warehouses.length > 1)) && (
+            <div className="row-2">
+              {branches.some((b) => b.active) && (
+                <Field label="Branch" hint="GST is worked out from the branch's state">
+                  <select value={form.branch || ""} onChange={set("branch")}>
+                    <option value="">Head Office</option>
+                    {branches
+                      .filter((b) => b.active || b._id === form.branch)
+                      .map((b) => (
+                        <option key={b._id} value={b._id}>
+                          {b.name}
+                        </option>
+                      ))}
+                  </select>
+                </Field>
+              )}
+              {stockKind && warehouses.length > 1 && (
+                <Field label="Warehouse">
+                  <select value={form.warehouse || ""} onChange={set("warehouse")}>
+                    <option value="">{warehouses.find((w) => w.primary)?.name || "Primary"} (primary)</option>
+                    {warehouses
+                      .filter((w) => !w.primary && (w.active || w._id === form.warehouse))
+                      .map((w) => (
+                        <option key={w._id} value={w._id}>
+                          {w.name}
+                        </option>
+                      ))}
+                  </select>
+                </Field>
+              )}
+            </div>
+          )}
           {isCN && (
             <div className="row-2">
               <Field label={isVendor ? "Bill#" : "Invoice#"} hint={`The ${linkKey} this credit is for (optional)`}>
@@ -574,10 +621,14 @@ export function DocForm({ kind, recurring = false }) {
                     {(() => {
                       const it = l.item && items.find((x) => x._id === l.item);
                       if (!it || !it.trackInventory) return null;
-                      const short = Number(l.quantity || 0) > it.stockOnHand;
+                      const pw = warehouses.find((w) => w.primary)?._id;
+                      const wid = form.warehouse || pw;
+                      const here = warehouses.length > 1 && wid ? it.byWarehouse?.[wid] ?? 0 : it.stockOnHand;
+                      const short = Number(l.quantity || 0) > here;
                       return (
                         <div className={`small ${short ? "text-danger" : "muted"}`} title="Stock on hand">
-                          Stock: {it.stockOnHand} {it.unit}
+                          Stock: {here} {it.unit}
+                          {warehouses.length > 1 && " here"}
                         </div>
                       );
                     })()}
@@ -697,7 +748,10 @@ function Addr({ a = {} }) {
   return lines.map((l, i) => <div key={i}>{l}</div>);
 }
 
-export function DocPaper({ doc, org, title, number, meta = [], ribbon, balance, extraTotals = [], extraInfo = [], partyLabel = "Bill To" }) {
+export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, balance, extraTotals = [], extraInfo = [], partyLabel = "Bill To" }) {
+  const { branches } = useLocations();
+  const br = doc.branch && branches.find((b) => b._id === doc.branch);
+  const org = br ? { ...baseOrg, gstin: br.gstin || baseOrg.gstin, address: br.address, phone: br.phone || baseOrg.phone, email: br.email || baseOrg.email } : baseOrg;
   const taxRows = {};
   doc.lineItems.forEach((l) => {
     if (!l.taxRate) return;

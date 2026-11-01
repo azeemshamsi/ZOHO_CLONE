@@ -7,6 +7,7 @@ import { money, date, isoDate, round2 } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
 import { ScheduleFields } from "../components/Schedule";
+import { useLocations } from "../lib/locations";
 import BankAccountSelect from "../components/BankAccountSelect";
 
 
@@ -107,6 +108,7 @@ export function ExpenseForm({ recurring = false }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const { branches } = useLocations();
 
   useEffect(() => {
     api.get("/expenses/categories").then((r) => setCats(r.data));
@@ -125,6 +127,7 @@ export function ExpenseForm({ recurring = false }) {
           taxRate: t.taxRate || 0,
           placeOfSupply: t.placeOfSupply || organization?.state || "",
           vendor: t.vendor || "",
+          branch: t.branch || "",
           paidThrough: t.paidThrough || "upi",
           bankAccount: t.bankAccount || "",
           reference: t.reference || "",
@@ -142,6 +145,7 @@ export function ExpenseForm({ recurring = false }) {
           taxRate: data.taxRate,
           placeOfSupply: data.placeOfSupply,
           vendor: data.vendor || "",
+          branch: data.branch || "",
           paidThrough: data.paidThrough,
           bankAccount: data.bankAccount || "",
           reference: data.reference,
@@ -157,6 +161,7 @@ export function ExpenseForm({ recurring = false }) {
         taxRate: 0,
         placeOfSupply: organization?.state || "",
         vendor: params.get("vendor") || "",
+        branch: "",
         paidThrough: "upi",
         bankAccount: "",
         reference: "",
@@ -186,7 +191,7 @@ export function ExpenseForm({ recurring = false }) {
     setBusy(true);
     setError("");
     try {
-      const body = { ...form, amount: Number(form.amount), taxRate: Number(form.taxRate), vendor: form.vendor || null };
+      const body = { ...form, amount: Number(form.amount), taxRate: Number(form.taxRate), vendor: form.vendor || null, branch: form.branch || null };
       if (recurring) {
         const sc = form.sched;
         const template = { ...body };
@@ -292,6 +297,18 @@ export function ExpenseForm({ recurring = false }) {
             <BankAccountSelect label="Paid From" value={form.bankAccount} mode={form.paidThrough} onChange={(v) => setForm({ ...form, bankAccount: v })} />
           </div>
           <div className="row-2">
+            {branches.some((b) => b.active) && (
+              <Field label="Branch">
+                <select value={form.branch || ""} onChange={set("branch")}>
+                  <option value="">Head Office</option>
+                  {branches.map((b) => (
+                    <option key={b._id} value={b._id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
             <Field label="Vendor" hint="Optional">
               <select value={form.vendor} onChange={pickVendor}>
                 <option value="">None</option>

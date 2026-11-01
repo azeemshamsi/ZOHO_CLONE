@@ -24,10 +24,12 @@ const schema = Joi.object({
   openingStockRate: Joi.number().min(0),
   openingStockDate: Joi.date().allow(null, ""),
   reorderLevel: Joi.number().min(0),
+  openingWarehouse: Joi.string().allow(null, ""),
 });
 
 // Services never carry stock.
 const clean = (data) => {
+  if (!data.openingWarehouse) data.openingWarehouse = null;
   if (data.type === "service") data.trackInventory = false;
   if (data.openingStockDate === "") data.openingStockDate = null;
   return data;
@@ -42,7 +44,7 @@ async function withStock(org, items) {
     if (!o.trackInventory) return o;
     const st = stock.items[String(o._id)] || { qty: 0, value: 0, avgCost: 0 };
     const c = committed[String(o._id)] || 0;
-    return { ...o, stockOnHand: st.qty, stockValue: st.value, avgCost: st.avgCost, committed: c, available: Math.round((st.qty - c) * 100) / 100 };
+    return { ...o, stockOnHand: st.qty, stockValue: st.value, avgCost: st.avgCost, committed: c, available: Math.round((st.qty - c) * 100) / 100, byWarehouse: st.byWarehouse || {} };
   });
 }
 

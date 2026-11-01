@@ -62,6 +62,7 @@ router.post(
       paymentNumber: await nextNumber(req.org, "vendorPayment", org.vendorPaymentPrefix || "PM-"),
       allocations: bills.map(([b, amount]) => ({ bill: b._id, billNumber: b.billNumber, amount })),
       unusedAmount: round2(data.amount - allocated),
+      branch: bills[0]?.[0].branch || null,
     });
     for (const [bill, amount] of bills) {
       bill.amountPaid = round2(bill.amountPaid + amount);

@@ -27,7 +27,24 @@ const baseDocJoi = {
   adjustment: Joi.number(),
   customerNotes: Joi.string().allow(""),
   terms: Joi.string().allow(""),
+  branch: Joi.string().allow(null, ""),
+  warehouse: Joi.string().allow(null, ""),
 };
+
+// Check the branch / warehouse ids on a document belong to this organization.
+async function resolveLocation(req, data) {
+  let branch = null;
+  let warehouse = null;
+  if (data.branch) {
+    branch = await require("../models/Branch").findOne({ _id: data.branch, organization: req.org });
+    if (!branch) throw new HttpError(400, "Choose a valid branch");
+  }
+  if (data.warehouse) {
+    warehouse = await require("../models/Warehouse").findOne({ _id: data.warehouse, organization: req.org });
+    if (!warehouse) throw new HttpError(400, "Choose a valid warehouse");
+  }
+  return { branch, warehouse };
+}
 
 // Look up the customer (or vendor) + org, work out GST and totals.
 async function prepareDoc(req, data, party = "customer") {
@@ -37,10 +54,12 @@ async function prepareDoc(req, data, party = "customer") {
     Organization.findById(req.org),
   ]);
   if (!customer) throw new HttpError(400, `Choose a valid ${party}`);
-  const placeOfSupply = data.placeOfSupply || customer.placeOfSupply || org.state;
+  const { branch, warehouse } = await resolveLocation(req, data);
+  const homeState = branch?.state || org.state; // GST is worked out from the branch's state
+  const placeOfSupply = data.placeOfSupply || customer.placeOfSupply || homeState;
   const totals = computeTotals({
     lineItems: data.lineItems.map((l) => ({ ...l, item: l.item || undefined })),
-    orgState: org.state,
+    orgState: homeState,
     placeOfSupply,
     shippingCharge: data.shippingCharge,
     adjustment: data.adjustment,
@@ -51,6 +70,8 @@ async function prepareDoc(req, data, party = "customer") {
     fields: {
       ...data,
       ...totals,
+      branch: branch ? branch._id : null,
+      warehouse: warehouse ? warehouse._id : null,
       placeOfSupply,
       [`${party}Name`]: customer.displayName,
       [`${party}Gstin`]: customer.gstin,
@@ -152,6 +173,7 @@ const escapeRx = (s) => new RegExp(String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$
 module.exports = {
   lineItemJoi,
   baseDocJoi,
+  resolveLocation,
   prepareDoc,
   peekNumber,
   settleInvoice,

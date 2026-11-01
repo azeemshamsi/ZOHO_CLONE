@@ -24,6 +24,8 @@ import { UsersPage, AcceptInvite } from "./pages/Users";
 import { ProjectList, ProjectForm, ProjectView, Timesheet } from "./pages/Projects";
 import { BudgetList, BudgetForm, BudgetView } from "./pages/Budgets";
 import { AssetList, AssetForm, AssetView } from "./pages/FixedAssets";
+import { Locations } from "./pages/Locations";
+import { TransferList, TransferForm, TransferView } from "./pages/TransferOrders";
 import { DocForm } from "./components/SalesDoc";
 import { KINDS } from "./lib/docKinds";
 import { PurchaseOrderList, PurchaseOrderForm, PurchaseOrderView } from "./pages/PurchaseOrders";
@@ -80,6 +82,11 @@ export default function App() {
           <Route path="recurring-expenses/new" element={<ExpenseForm recurring key="rec-exp" />} />
           <Route path="recurring-expenses/:id" element={<RecurringView kind="expense" />} />
           <Route path="recurring-expenses/:id/edit" element={<ExpenseForm recurring key="rec-exp" />} />
+          <Route path="locations" element={<Locations />} />
+          <Route path="transfer-orders" element={<TransferList />} />
+          <Route path="transfer-orders/new" element={<TransferForm />} />
+          <Route path="transfer-orders/:id" element={<TransferView />} />
+          <Route path="transfer-orders/:id/edit" element={<TransferForm />} />
           <Route path="fixed-assets" element={<AssetList />} />
           <Route path="fixed-assets/new" element={<AssetForm />} />
           <Route path="fixed-assets/:id" element={<AssetView />} />

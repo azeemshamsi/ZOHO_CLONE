@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const fixedAssetSchema = new mongoose.Schema(
   {
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true },
+    branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
     number: { type: String, required: true },
     name: { type: String, required: true, trim: true },
     assetType: { type: String, default: "" }, // Furniture, Computers, Vehicles…

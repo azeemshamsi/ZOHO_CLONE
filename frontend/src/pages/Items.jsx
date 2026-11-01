@@ -4,6 +4,7 @@ import api, { errMsg } from "../lib/api";
 import { GST_RATES, UNITS } from "../lib/constants";
 import { money, date, isoDate } from "../lib/format";
 import { docLink } from "./Accounts";
+import { useLocations } from "../lib/locations";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
 
@@ -99,12 +100,13 @@ export function ItemForm() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const { warehouses } = useLocations();
 
   useEffect(() => {
     if (id) {
       api.get(`/items/${id}`).then(({ data }) => {
         const { type, name, sku, unit, hsnSac, rate, purchaseRate, taxRate, description, active, trackInventory, openingStock, openingStockRate, openingStockDate, reorderLevel } = data;
-        setForm({ type, name, sku, unit, hsnSac, rate, purchaseRate, taxRate, description, active, trackInventory: !!trackInventory, openingStock: openingStock || "", openingStockRate: openingStockRate || "", openingStockDate: openingStockDate ? openingStockDate.slice(0, 10) : "", reorderLevel: reorderLevel || "" });
+        setForm({ type, name, sku, unit, hsnSac, rate, purchaseRate, taxRate, description, active, trackInventory: !!trackInventory, openingStock: openingStock || "", openingStockRate: openingStockRate || "", openingStockDate: openingStockDate ? openingStockDate.slice(0, 10) : "", reorderLevel: reorderLevel || "", openingWarehouse: data.openingWarehouse || "" });
       });
     } else {
       setForm({ type: "goods", name: "", sku: "", unit: "pcs", hsnSac: "", rate: "", purchaseRate: "", taxRate: 18, description: "", active: true, trackInventory: true, openingStock: "", openingStockRate: "", openingStockDate: isoDate(), reorderLevel: "" });
@@ -125,6 +127,7 @@ export function ItemForm() {
         purchaseRate: Number(form.purchaseRate || 0),
         taxRate: Number(form.taxRate),
         openingStock: Number(form.openingStock || 0),
+        openingWarehouse: form.openingWarehouse || null,
         openingStockRate: Number(form.openingStockRate || 0),
         reorderLevel: Number(form.reorderLevel || 0),
       };
@@ -246,6 +249,20 @@ export function ItemForm() {
                       <input type="number" step="any" min="0" value={form.reorderLevel} onChange={set("reorderLevel")} />
                     </Field>
                   </div>
+                  {warehouses.length > 1 && (
+                    <Field label="Opening Stock Warehouse">
+                      <select value={form.openingWarehouse || ""} onChange={set("openingWarehouse")}>
+                        <option value="">{warehouses.find((w) => w.primary)?.name} (primary)</option>
+                        {warehouses
+                          .filter((w) => !w.primary)
+                          .map((w) => (
+                            <option key={w._id} value={w._id}>
+                              {w.name}
+                            </option>
+                          ))}
+                      </select>
+                    </Field>
+                  )}
                 </>
               )}
             </div>
@@ -268,6 +285,7 @@ export function ItemForm() {
 
 export function ItemDetail() {
   const { id } = useParams();
+  const { warehouses } = useLocations();
   const [item, setItem] = useState(null);
   const [stock, setStock] = useState(null);
   useEffect(() => {
@@ -310,6 +328,28 @@ export function ItemDetail() {
           )}
         </div>
         {low && <div className="alert alert-warn">Stock is at or below the reorder level.</div>}
+        {item.trackInventory && warehouses.length > 1 && (
+          <table className="table" style={{ marginTop: 14, maxWidth: 520 }}>
+            <thead>
+              <tr>
+                <th>Warehouse</th>
+                <th className="num">Stock on Hand</th>
+              </tr>
+            </thead>
+            <tbody>
+              {warehouses.map((w) => (
+                <tr key={w._id}>
+                  <td>
+                    {w.name} {w.primary && <span className="muted small">(primary)</span>}
+                  </td>
+                  <td className="num">
+                    {item.byWarehouse?.[w._id] ?? 0} {item.unit}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
       {item.trackInventory &&
         (!stock ? (
@@ -337,8 +377,8 @@ export function ItemDetail() {
                   <tr key={i}>
                     <td>{date(m.date)}</td>
                     <td>{m.type}</td>
-                    <td>{m.type === "Opening Stock" ? "" : <Link to={m.type === "Inventory Adjustment" ? `/inventory-adjustments/${m.id}` : docLink(m.type, m.id)}>{m.number}</Link>}</td>
-                    <td>{m.party}</td>
+                    <td>{m.type === "Opening Stock" ? "" : <Link to={m.type === "Inventory Adjustment" ? `/inventory-adjustments/${m.id}` : m.type === "Transfer Order" ? `/transfer-orders/${m.id}` : docLink(m.type, m.id)}>{m.number}</Link>}</td>
+                    <td>{m.type === "Transfer Order" ? `${warehouses.find((w) => w._id === m.from)?.name || "?"} → ${warehouses.find((w) => w._id === m.to)?.name || "?"} (${m.transfer})` : m.party}</td>
                     <td className="num">{m.qtyIn || ""}</td>
                     <td className="num">{m.qtyOut || ""}</td>
                     <td className="num">{m.unitCost ? money(m.unitCost) : ""}</td>

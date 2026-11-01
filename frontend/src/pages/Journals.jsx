@@ -4,6 +4,7 @@ import api, { errMsg } from "../lib/api";
 import { money, amount, date, isoDate, round2 } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, toast, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
+import { useLocations } from "../lib/locations";
 
 export function JournalList() {
   const [rows, setRows] = useState(null);
@@ -64,6 +65,7 @@ export function JournalList() {
 const blank = () => ({ account: "", description: "", debit: "", credit: "" });
 
 export function JournalForm() {
+  const { branches } = useLocations();
   const { id } = useParams();
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState([]);
@@ -80,13 +82,14 @@ export function JournalForm() {
           number: data.number,
           date: isoDate(data.date),
           reference: data.reference,
+          branch: data.branch || "",
           notes: data.notes,
           lines: data.lines.map((l) => ({ account: l.account, description: l.description, debit: l.debit || "", credit: l.credit || "" })),
         })
       );
     } else {
       api.get("/journals/next-number").then((r) => setAuto(r.data.number));
-      setForm({ number: "", date: isoDate(), reference: "", notes: "", lines: [blank(), blank()] });
+      setForm({ number: "", date: isoDate(), reference: "", branch: "", notes: "", lines: [blank(), blank()] });
     }
   }, [id]);
 
@@ -106,6 +109,7 @@ export function JournalForm() {
     try {
       const body = {
         ...form,
+        branch: form.branch || null,
         lines: form.lines
           .filter((l) => l.account && (Number(l.debit) || Number(l.credit)))
           .map((l) => ({ ...l, debit: Number(l.debit) || 0, credit: Number(l.credit) || 0 })),
@@ -135,6 +139,18 @@ export function JournalForm() {
               <input value={form.reference} onChange={set("reference")} />
             </Field>
           </div>
+          {branches.some((b) => b.active) && (
+            <Field label="Branch">
+              <select value={form.branch || ""} onChange={set("branch")}>
+                <option value="">Head Office</option>
+                {branches.map((b) => (
+                  <option key={b._id} value={b._id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="Notes" required>
             <textarea rows={2} required value={form.notes} onChange={set("notes")} placeholder="e.g. Capital introduced by owner" />
           </Field>

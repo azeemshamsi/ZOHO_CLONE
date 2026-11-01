@@ -66,6 +66,7 @@ router.post(
       paymentNumber: await nextNumber(req.org, "payment", org.paymentPrefix),
       allocations: invoices.map(([inv, amount]) => ({ invoice: inv._id, invoiceNumber: inv.invoiceNumber, amount })),
       unusedAmount: round2(data.amount - allocated),
+      branch: invoices[0]?.[0].branch || null, // follows the branch of the invoices it pays
     });
 
     for (const [inv, amount] of invoices) {

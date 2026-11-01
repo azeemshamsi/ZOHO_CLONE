@@ -24,6 +24,7 @@ const schema = Joi.object({
   reference: Joi.string().allow(""),
   bankAccount: Joi.string().allow(""),
   notes: Joi.string().allow(""),
+  branch: Joi.string().allow(null, ""),
 });
 
 async function build(req, data) {
@@ -34,8 +35,10 @@ async function build(req, data) {
     vendor = await Vendor.findOne({ _id: data.vendor, organization: req.org });
     if (!vendor) throw new HttpError(400, "Choose a valid vendor");
   }
-  const placeOfSupply = data.placeOfSupply || vendor?.placeOfSupply || org.state;
-  const isInterState = placeOfSupply !== org.state;
+  const { branch } = await require("../utils/salesDoc").resolveLocation(req, data);
+  const homeState = branch?.state || org.state;
+  const placeOfSupply = data.placeOfSupply || vendor?.placeOfSupply || homeState;
+  const isInterState = placeOfSupply !== homeState;
   const rate = Number(data.taxRate) || 0;
   // If the amount includes GST, work back to the amount before tax.
   const base = data.taxInclusive ? round2(data.amount / (1 + rate / 100)) : round2(data.amount);
@@ -47,6 +50,7 @@ async function build(req, data) {
     account: acc ? acc.code : expCode("Other Expenses"),
     vendor: vendor ? vendor._id : undefined,
     vendorName: vendor ? vendor.displayName : "",
+    branch: branch ? branch._id : null,
     placeOfSupply,
     isInterState,
     amount: base,

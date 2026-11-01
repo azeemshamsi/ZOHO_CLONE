@@ -13,6 +13,7 @@ const NAV = [
     children: [
       { to: "/items", label: "Items" },
       { to: "/inventory-adjustments", label: "Inventory Adjustments" },
+      { to: "/transfer-orders", label: "Transfer Orders" },
     ],
   },
   {
@@ -72,6 +73,8 @@ const NAV = [
 const PATH_MODULES = [
   ["/items", "items"],
   ["/inventory-adjustments", "items"],
+  ["/transfer-orders", "items"],
+  ["/locations", "settings"],
   ["/customers", "sales"],
   ["/quotes", "sales"],
   ["/sales-orders", "sales"],
@@ -168,6 +171,10 @@ export default function Layout() {
             <NavLink to="/users" className="nav-item nav-settings" onClick={close}>
               <Icon name="users" />
               <span>Users & Roles</span>
+            </NavLink>
+            <NavLink to="/locations" className="nav-item" onClick={close}>
+              <Icon name="bank" />
+              <span>Branches & Warehouses</span>
             </NavLink>
             <NavLink to="/settings" className="nav-item" onClick={close}>
               <Icon name="settings" />

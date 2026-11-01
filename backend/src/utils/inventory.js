@@ -11,36 +11,41 @@
  */
 const { round2 } = require("./http");
 
-const ORDER = { opening: 0, bill: 1, adjIn: 2, creditNote: 3, invoice: 4, vendorCredit: 5, adjOut: 6, adjValue: 7 };
+const ORDER = { opening: 0, bill: 1, adjIn: 2, creditNote: 3, transfer: 4, invoice: 5, vendorCredit: 6, adjOut: 7, adjValue: 8 };
 const live = (d) => !["draft", "void"].includes(d.status);
 
-function computeStock({ items, invoices = [], creditNotes = [], bills = [], vendorCredits = [], adjustments = [], to = null }) {
+function computeStock({ items, invoices = [], creditNotes = [], bills = [], vendorCredits = [], adjustments = [], transfers = [], primary = null, to = null }) {
+  // Quantities are also tracked per warehouse; no warehouse = the primary warehouse.
+  const W = (w) => (w ? String(w) : primary ? String(primary) : "primary");
   const tracked = new Map(items.filter((i) => i.trackInventory).map((i) => [String(i._id), i]));
   const events = [];
   const push = (e) => tracked.has(e.item) && events.push(e);
 
   for (const it of tracked.values()) {
     if (it.openingStock)
-      events.push({ kind: "opening", item: String(it._id), date: it.openingStockDate || it.createdAt, seq: 0, qty: it.openingStock, cost: round2(it.openingStock * (it.openingStockRate || 0)), doc: { type: "Opening Stock", id: it._id, number: "", party: "" } });
+      events.push({ kind: "opening", item: String(it._id), wh: W(it.openingWarehouse), date: it.openingStockDate || it.createdAt, seq: 0, qty: it.openingStock, cost: round2(it.openingStock * (it.openingStockRate || 0)), doc: { type: "Opening Stock", id: it._id, number: "", party: "" } });
   }
   const lines = (d, cb) => (d.lineItems || []).forEach((l, i) => l.item && cb(String(l.item), l, i));
   const meta = (type, d, number, party) => ({ type, id: d._id, number, party });
   for (const b of bills.filter(live))
-    lines(b, (item, l) => push({ kind: "bill", item, date: b.date, seq: b.createdAt, qty: l.quantity, cost: l.amount, doc: meta("Bill", b, b.billNumber, b.vendorName) }));
+    lines(b, (item, l) => push({ kind: "bill", item, wh: W(b.warehouse), date: b.date, seq: b.createdAt, qty: l.quantity, cost: l.amount, doc: meta("Bill", b, b.billNumber, b.vendorName) }));
   for (const c of creditNotes.filter(live))
-    lines(c, (item, l) => push({ kind: "creditNote", item, date: c.date, seq: c.createdAt, qty: l.quantity, doc: meta("Credit Note", c, c.number, c.customerName) }));
+    lines(c, (item, l) => push({ kind: "creditNote", item, wh: W(c.warehouse), date: c.date, seq: c.createdAt, qty: l.quantity, doc: meta("Credit Note", c, c.number, c.customerName) }));
   for (const i of invoices.filter(live))
-    lines(i, (item, l) => push({ kind: "invoice", item, date: i.date, seq: i.createdAt, qty: l.quantity, doc: meta("Invoice", i, i.invoiceNumber, i.customerName) }));
+    lines(i, (item, l) => push({ kind: "invoice", item, wh: W(i.warehouse), date: i.date, seq: i.createdAt, qty: l.quantity, doc: meta("Invoice", i, i.invoiceNumber, i.customerName) }));
   for (const v of vendorCredits.filter(live))
-    lines(v, (item, l) => push({ kind: "vendorCredit", item, date: v.date, seq: v.createdAt, qty: l.quantity, doc: meta("Vendor Credit", v, v.number, v.vendorName) }));
+    lines(v, (item, l) => push({ kind: "vendorCredit", item, wh: W(v.warehouse), date: v.date, seq: v.createdAt, qty: l.quantity, doc: meta("Vendor Credit", v, v.number, v.vendorName) }));
   for (const a of adjustments.filter((a) => a.status === "adjusted"))
     a.lines.forEach((l) => {
       const doc = meta("Inventory Adjustment", a, a.reference || a.number, a.reason);
-      if (a.mode === "value") push({ kind: "adjValue", item: String(l.item), date: a.date, seq: a.createdAt, qty: 0, value: l.valueAdjusted || 0, doc });
-      else if (l.quantityAdjusted > 0) push({ kind: "adjIn", item: String(l.item), date: a.date, seq: a.createdAt, qty: l.quantityAdjusted, rate: l.costPrice, doc });
-      else if (l.quantityAdjusted < 0) push({ kind: "adjOut", item: String(l.item), date: a.date, seq: a.createdAt, qty: -l.quantityAdjusted, doc });
+      const wh = W(a.warehouse);
+      if (a.mode === "value") push({ kind: "adjValue", item: String(l.item), wh, date: a.date, seq: a.createdAt, qty: 0, value: l.valueAdjusted || 0, doc });
+      else if (l.quantityAdjusted > 0) push({ kind: "adjIn", item: String(l.item), wh, date: a.date, seq: a.createdAt, qty: l.quantityAdjusted, rate: l.costPrice, doc });
+      else if (l.quantityAdjusted < 0) push({ kind: "adjOut", item: String(l.item), wh, date: a.date, seq: a.createdAt, qty: -l.quantityAdjusted, doc });
     });
 
+  for (const t of transfers.filter((t) => t.status === "transferred"))
+    t.lines.forEach((l) => push({ kind: "transfer", item: String(l.item), from: W(t.from), wh: W(t.to), date: t.date, seq: t.createdAt, qty: l.quantity, doc: { type: "Transfer Order", id: t._id, number: t.number, party: "" } }));
   if (to) {
     const end = new Date(to);
     for (let i = events.length - 1; i >= 0; i--) if (new Date(events[i].date) > end) events.splice(i, 1);
@@ -50,7 +55,7 @@ function computeStock({ items, invoices = [], creditNotes = [], bills = [], vend
   const state = {};
   const docInv = {}; // "Type|id" -> inventory value change
   const docCost = {}; // "Type|id" -> cost of goods for that doc (invoices: COGS; vendor credits: cost removed)
-  for (const it of tracked.values()) state[String(it._id)] = { item: it, layers: [], lastCost: it.purchaseRate || 0, lastOutCost: null, moves: [] };
+  for (const it of tracked.values()) state[String(it._id)] = { item: it, layers: [], lastCost: it.purchaseRate || 0, lastOutCost: null, moves: [], wh: {} };
 
   const qtyOf = (s) => round2(s.layers.reduce((t, l) => t + l.qty, 0));
   const valOf = (s) => round2(s.layers.reduce((t, l) => t + l.qty * l.unit, 0));
@@ -99,6 +104,13 @@ function computeStock({ items, invoices = [], creditNotes = [], bills = [], vend
 
   for (const e of events) {
     const s = state[e.item];
+    const bump = (w, q) => (s.wh[w] = round2((s.wh[w] || 0) + q));
+    if (e.kind === "transfer") {
+      bump(e.from, -e.qty);
+      bump(e.wh, e.qty);
+      s.moves.push({ date: e.date, ...e.doc, party: `${e.from} → ${e.wh}`, from: e.from, to: e.wh, qtyIn: 0, qtyOut: 0, transfer: e.qty, value: 0, unitCost: 0, qty: qtyOf(s), stockValue: valOf(s), warehouse: e.wh });
+      continue;
+    }
     const before = valOf(s);
     let unitCost = 0;
     if (e.kind === "opening" || e.kind === "bill") {
@@ -123,6 +135,7 @@ function computeStock({ items, invoices = [], creditNotes = [], bills = [], vend
     docInv[key] = round2((docInv[key] || 0) + change);
     if (e.kind === "invoice" || e.kind === "vendorCredit" || e.kind === "adjOut") docCost[key] = round2((docCost[key] || 0) - change);
     const isIn = ["opening", "bill", "adjIn", "creditNote"].includes(e.kind);
+    if (e.kind !== "adjValue") bump(e.wh, isIn ? e.qty : -e.qty);
     s.moves.push({
       date: e.date,
       ...e.doc,
@@ -132,11 +145,12 @@ function computeStock({ items, invoices = [], creditNotes = [], bills = [], vend
       unitCost: round2(unitCost),
       qty: qtyOf(s),
       stockValue: valOf(s),
+      warehouse: e.wh,
     });
   }
 
   const summary = {};
-  for (const [id, s] of Object.entries(state)) summary[id] = { item: s.item, qty: qtyOf(s), value: valOf(s), moves: s.moves, avgCost: round2(avg(s)), layers: s.layers.map((l) => ({ qty: l.qty, unit: round2(l.unit) })) };
+  for (const [id, s] of Object.entries(state)) summary[id] = { item: s.item, qty: qtyOf(s), value: valOf(s), moves: s.moves, avgCost: round2(avg(s)), byWarehouse: s.wh, layers: s.layers.map((l) => ({ qty: l.qty, unit: round2(l.unit) })) };
   return { items: summary, docInv, docCost };
 }
 
@@ -149,15 +163,19 @@ async function loadStock(org, { to } = {}) {
   const Bill = require("../models/Bill");
   const VendorCredit = require("../models/VendorCredit");
   const live = { organization: org, status: { $nin: ["draft", "void"] } };
-  const [items, invoices, creditNotes, bills, vendorCredits, adjustments] = await Promise.all([
+  const TransferOrder = require("../models/TransferOrder");
+  const Warehouse = require("../models/Warehouse");
+  const [items, invoices, creditNotes, bills, vendorCredits, adjustments, transfers, primaryWh] = await Promise.all([
     Item.find({ organization: org }).lean(),
     Invoice.find(live).lean(),
     CreditNote.find(live).lean(),
     Bill.find(live).lean(),
     VendorCredit.find(live).lean(),
     InventoryAdjustment.find({ organization: org, status: "adjusted" }).lean(),
+    TransferOrder.find({ organization: org, status: "transferred" }).lean(),
+    Warehouse.findOne({ organization: org, primary: true }).lean(),
   ]);
-  return computeStock({ items, invoices, creditNotes, bills, vendorCredits, adjustments, to });
+  return computeStock({ items, invoices, creditNotes, bills, vendorCredits, adjustments, transfers, primary: primaryWh?._id, to });
 }
 
 // Quantity committed to confirmed sales orders not yet invoiced, per item.

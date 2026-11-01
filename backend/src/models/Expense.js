@@ -23,6 +23,7 @@ const EXPENSE_CATEGORIES = [
 const expenseSchema = new mongoose.Schema(
   {
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true },
+    branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
     date: { type: Date, required: true },
     category: { type: String, required: true }, // account name shown to the user
     account: { type: String, default: "" }, // account code it posts to

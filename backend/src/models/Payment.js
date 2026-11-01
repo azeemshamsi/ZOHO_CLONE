@@ -12,6 +12,7 @@ const allocationSchema = new mongoose.Schema(
 const paymentSchema = new mongoose.Schema(
   {
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true },
+    branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
     customer: { type: mongoose.Schema.Types.ObjectId, ref: "Customer", required: true, index: true },
     customerName: { type: String, required: true },
     paymentNumber: { type: String, required: true },

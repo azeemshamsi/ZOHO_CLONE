@@ -1248,4 +1248,28 @@ Object.assign(REPORTS, {
   },
 });
 
+Object.assign(REPORTS, {
+  "warehouse-stock": async (req, q) => {
+    const to = asOfDate(q);
+    const { loadStock } = require("./inventory");
+    const Warehouse = require("../models/Warehouse");
+    const [stock, items, whs] = await Promise.all([loadStock(req.org, { to }), tracked(req.org), Warehouse.find({ organization: req.org }).sort({ primary: -1, name: 1 }).lean()]);
+    const prim = whs.find((w) => w.primary);
+    const rows = [];
+    for (const w of whs.length ? whs : [{ _id: "primary", name: "All stock" }])
+      for (const it of items) {
+        const st = stock.items[String(it._id)];
+        const qty = st?.byWarehouse?.[String(w._id)] ?? (w._id === "primary" ? st?.qty : 0) ?? 0;
+        if (qty) rows.push({ warehouse: `${w.name}${w.primary ? " (primary)" : ""}`, name: it.name, href: itemHref(it._id), sku: it.sku, qty, value: round2(qty * (st?.avgCost || 0)) });
+      }
+    return {
+      kind: "table",
+      groupBy: "warehouse",
+      note: prim ? "Value uses each item's average FIFO cost." : "Add warehouses in Branches & Warehouses to see stock by location.",
+      columns: [col("name", "Item", "text", { link: "href" }), col("sku", "SKU"), col("qty", "Stock on Hand", "number", { sum: true }), col("value", "Value (avg cost)", "money", { sum: true })],
+      rows,
+    };
+  },
+});
+
 module.exports = { REPORTS };

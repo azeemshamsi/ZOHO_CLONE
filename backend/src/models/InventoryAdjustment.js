@@ -16,6 +16,7 @@ const adjustmentSchema = new mongoose.Schema(
   {
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true },
     number: { type: String, required: true },
+    warehouse: { type: mongoose.Schema.Types.ObjectId, ref: "Warehouse" },
     mode: { type: String, enum: ["quantity", "value"], default: "quantity" },
     date: { type: Date, required: true },
     reference: { type: String, default: "" },

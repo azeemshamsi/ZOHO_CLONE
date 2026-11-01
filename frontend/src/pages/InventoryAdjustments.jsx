@@ -4,6 +4,7 @@ import api, { errMsg } from "../lib/api";
 import { money, date, isoDate } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, toast, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
+import { useLocations } from "../lib/locations";
 
 const accountName = (accounts, code) => (accounts.find((a) => a.code === code) || { name: code }).name;
 
@@ -79,6 +80,7 @@ export function AdjustmentForm() {
   const [form, setForm] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const { warehouses } = useLocations();
 
   useEffect(() => {
     Promise.all([api.get("/items", { params: { inventory: "tracked", status: "active" } }), api.get("/inventory-adjustments/reasons"), api.get("/accounts")]).then(async ([i, r, a]) => {
@@ -87,7 +89,7 @@ export function AdjustmentForm() {
       setAccounts(a.data.filter((x) => ["expense", "income", "equity"].includes(x.type) || x.code === "cogs"));
       if (id) {
         const { data } = await api.get(`/inventory-adjustments/${id}`);
-        setForm({ ...data, date: data.date.slice(0, 10), lines: data.lines.map((l) => ({ ...l, item: String(l.item), quantityAdjusted: l.quantityAdjusted || "", costPrice: l.costPrice || "", valueAdjusted: l.valueAdjusted || "" })) });
+        setForm({ ...data, warehouse: data.warehouse || "", date: data.date.slice(0, 10), lines: data.lines.map((l) => ({ ...l, item: String(l.item), quantityAdjusted: l.quantityAdjusted || "", costPrice: l.costPrice || "", valueAdjusted: l.valueAdjusted || "" })) });
       } else {
         const pre = params.get("item");
         setForm({ mode: "quantity", date: isoDate(), reference: "", reason: r.data[0], account: "cogs", description: "", lines: [{ item: pre || "", quantityAdjusted: "", costPrice: "", valueAdjusted: "" }] });
@@ -111,6 +113,7 @@ export function AdjustmentForm() {
         reason: form.reason,
         account: form.account,
         description: form.description,
+        warehouse: form.warehouse || null,
         status,
         lines: form.lines
           .filter((l) => l.item)
@@ -174,6 +177,20 @@ export function AdjustmentForm() {
               </select>
             </Field>
           </div>
+          {warehouses.length > 1 && (
+            <Field label="Warehouse">
+              <select value={form.warehouse || ""} onChange={set("warehouse")}>
+                <option value="">{warehouses.find((w) => w.primary)?.name} (primary)</option>
+                {warehouses
+                  .filter((w) => !w.primary)
+                  .map((w) => (
+                    <option key={w._id} value={w._id}>
+                      {w.name}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+          )}
           <Field label="Description">
             <textarea rows={2} value={form.description} onChange={set("description")} />
           </Field>

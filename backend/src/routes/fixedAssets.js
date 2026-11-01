@@ -24,6 +24,7 @@ const schema = Joi.object({
   usefulLifeYears: Joi.number().min(0).max(100).default(5),
   rate: Joi.number().min(0).max(100).default(0),
   depreciationStart: Joi.date().allow(null, ""),
+  branch: Joi.string().allow(null, ""),
 });
 
 async function prepare(req, data) {
@@ -35,6 +36,7 @@ async function prepare(req, data) {
   if (data.method === "slm" && !(data.usefulLifeYears > 0)) throw new HttpError(400, "Enter the useful life in years");
   if (data.method === "wdv" && !(data.rate > 0)) throw new HttpError(400, "Enter the depreciation rate");
   if (!data.depreciationStart) data.depreciationStart = null;
+  data.branch = (await require("../utils/salesDoc").resolveLocation(req, data)).branch?._id || null;
   return data;
 }
 

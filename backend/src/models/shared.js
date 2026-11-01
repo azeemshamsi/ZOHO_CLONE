@@ -26,6 +26,8 @@ const salesDocFields = (party = "customer") => ({
   organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true },
   [party]: { type: mongoose.Schema.Types.ObjectId, ref: party === "vendor" ? "Vendor" : "Customer", required: true, index: true },
   [`${party}Name`]: { type: String, required: true },
+  branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
+  warehouse: { type: mongoose.Schema.Types.ObjectId, ref: "Warehouse" },
   [`${party}Gstin`]: { type: String, default: "" },
   billingAddress: { type: addressSchema, default: () => ({}) },
   date: { type: Date, required: true },

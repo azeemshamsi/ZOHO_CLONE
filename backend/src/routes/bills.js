@@ -22,6 +22,8 @@ const schema = Joi.object({
   terms: Joi.string().allow(""),
   status: Joi.string().valid("draft", "open"),
   purchaseOrder: Joi.string().allow(null, ""),
+  branch: Joi.string().allow(null, ""),
+  warehouse: Joi.string().allow(null, ""),
 });
 
 async function build(req, data) {

@@ -68,6 +68,11 @@ async function load(org, kind, id) {
 
 async function pdfFor(org, kind, d) {
   const cfg = DOCS[kind];
+  if (d.branch) {
+    // Branch documents carry the branch's GSTIN, address and contacts.
+    const b = await require("../models/Branch").findById(d.branch).lean();
+    if (b) org = { ...(org.toObject ? org.toObject() : org), gstin: b.gstin || org.gstin, address: b.address, phone: b.phone || org.phone, email: b.email || org.email };
+  }
   if (cfg.receipt) {
     return receiptPdf(org, d, { title: cfg.title, partyLabel: cfg.partyLabel || "Received From", party: d[`${cfg.party}Name`], appliedLabel: cfg.appliedLabel, applied: cfg.applied(d) });
   }

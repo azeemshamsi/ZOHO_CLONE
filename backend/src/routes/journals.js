@@ -12,6 +12,7 @@ const schema = Joi.object({
   date: Joi.date().required().label("Date"),
   reference: Joi.string().allow(""),
   notes: Joi.string().allow(""),
+  branch: Joi.string().allow(null, ""),
   lines: Joi.array()
     .items(
       Joi.object({
@@ -71,6 +72,7 @@ router.post(
   "/",
   ah(async (req, res) => {
     const data = validate(schema, req.body);
+    data.branch = (await require("../utils/salesDoc").resolveLocation(req, data)).branch?._id || null;
     const { lines, total } = await check(req, data);
     const org = await Organization.findById(req.org);
     const number = data.number || (await nextNumber(req.org, "journal", prefix(org)));
@@ -95,6 +97,7 @@ router.put(
     const j = await Journal.findOne({ _id: req.params.id, organization: req.org });
     if (!j) throw new HttpError(404, "Journal not found");
     const data = validate(schema, req.body);
+    data.branch = (await require("../utils/salesDoc").resolveLocation(req, data)).branch?._id || null;
     const { lines, total } = await check(req, data);
     j.set({ ...data, number: data.number || j.number, lines, total });
     await j.save();

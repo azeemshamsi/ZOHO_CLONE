@@ -18,6 +18,7 @@ const itemSchema = new mongoose.Schema(
     openingStock: { type: Number, default: 0 },
     openingStockRate: { type: Number, default: 0 }, // cost per unit of the opening stock
     openingStockDate: { type: Date },
+    openingWarehouse: { type: mongoose.Schema.Types.ObjectId, ref: "Warehouse" },
     reorderLevel: { type: Number, default: 0 },
   },
   { timestamps: true }

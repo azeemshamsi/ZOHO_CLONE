@@ -7,6 +7,7 @@ import { stateName } from "../lib/constants";
 import { PERIODS, periodRange, fmtRange, exportCsv } from "../lib/period";
 import { PageHeader, Spinner, Status } from "../components/ui";
 import { docLink } from "./Accounts";
+import { useLocations } from "../lib/locations";
 import Icon from "../components/Icon";
 
 /* ---------------- Period pickers ---------------- */
@@ -98,6 +99,7 @@ export const REPORTS = [
   R("fifo-cost-lots", "FIFO Cost Lot Tracking", "Inventory", "asof", "Each lot of stock still on hand, with its cost."),
   R("stock-movement", "Stock Movement", "Inventory", "range", "Every stock in and out, item by item."),
   R("product-sales", "Product Sales Report", "Inventory", "range", "Quantity sold, sales, cost and margin per item."),
+  R("warehouse-stock", "Warehouse Stock Summary", "Inventory", "asof", "Stock on hand in each warehouse."),
   R("committed-stock", "Committed Stock Details", "Inventory", "none", "Stock promised on confirmed sales orders."),
   R("reorder-report", "Reorder Report", "Inventory", "none", "Items at or below their reorder level."),
   // Projects and Timesheet
@@ -236,6 +238,8 @@ export function ReportPage() {
   const { organization } = useAuth();
   const [range, setRange] = useState(() => ({ key: meta?.period || "this_fy", ...periodRange(meta?.period || "this_fy") }));
   const [asOf, setAsOf] = useState(isoDate());
+  const { branches } = useLocations();
+  const [branch, setBranch] = useState("");
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const paper = useRef(null);
@@ -253,11 +257,12 @@ export function ReportPage() {
     setData(null);
     setError("");
     const params = meta.mode === "range" ? { from: range.from, to: range.to } : meta.mode === "asof" ? { to: asOf } : {};
+    if (branch) params.branch = branch;
     api
       .get(`/reports/${key}`, { params })
       .then((r) => setData(r.data))
       .catch((e) => setError(errMsg(e)));
-  }, [key, meta, range.from, range.to, asOf]);
+  }, [key, meta, range.from, range.to, asOf, branch]);
 
   if (!meta) return <p>Report not found.</p>;
   const subtitle = meta.mode === "range" ? fmtRange(range.from, range.to) : meta.mode === "asof" ? `As of ${date(asOf)}` : `As of ${date(new Date())}`;
@@ -268,6 +273,17 @@ export function ReportPage() {
       <PageHeader title={meta.title} back="/reports">
         {meta.mode === "range" && <PeriodPicker value={range} onChange={setRange} />}
         {meta.mode === "asof" && <AsOfPicker value={asOf} onChange={setAsOf} />}
+        {branches.length > 0 && (
+          <select className="select-inline" value={branch} onChange={(e) => setBranch(e.target.value)} title="Branch">
+            <option value="">All Branches</option>
+            <option value="head">Head Office</option>
+            {branches.map((b) => (
+              <option key={b._id} value={b._id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        )}
         <button className="btn" onClick={() => paper.current && exportCsv(paper.current, `${meta.title} ${subtitle}`)}>
           Export CSV
         </button>
@@ -283,7 +299,10 @@ export function ReportPage() {
           <div className="report-head">
             <div className="muted">{organization?.name}</div>
             <h2>{meta.title}</h2>
-            <div className="muted small">{subtitle}</div>
+            <div className="muted small">
+              {subtitle}
+              {branch && ` · ${branch === "head" ? "Head Office" : branches.find((b) => b._id === branch)?.name}`}
+            </div>
           </div>
           <Body d={data} range={meta.mode === "range" ? range : { from: "2000-01-01", to: asOf }} />
         </div>

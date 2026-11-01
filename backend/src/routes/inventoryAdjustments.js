@@ -15,6 +15,7 @@ const schema = Joi.object({
   account: Joi.string().default("cogs"),
   description: Joi.string().allow(""),
   status: Joi.string().valid("draft", "adjusted").default("adjusted"),
+  warehouse: Joi.string().allow(null, ""),
   lines: Joi.array()
     .min(1)
     .items(
@@ -30,6 +31,7 @@ const schema = Joi.object({
 });
 
 async function prepare(req, data) {
+  data.warehouse = (await require("../utils/salesDoc").resolveLocation(req, data)).warehouse?._id || null;
   const ids = data.lines.map((l) => l.item);
   const items = await Item.find({ organization: req.org, _id: { $in: ids } }).lean();
   const byId = Object.fromEntries(items.map((i) => [String(i._id), i]));
