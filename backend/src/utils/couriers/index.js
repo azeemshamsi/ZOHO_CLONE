@@ -330,7 +330,11 @@ const dtdc = {
     };
     const { status, data } = await request(`${this.base(acc)}/api/customer/integration/consignment/softdata`, { method: "POST", headers: { "api-key": acc.credentials.apiKey }, json: { consignments: [consignment] } });
     const r = data.data?.[0];
-    if (!r?.success || !r.reference_number) throw new Error(`DTDC didn't book the shipment (${status}): ${r?.message || data.error?.message || data.message || short(data)}`);
+    if (!r?.success || !r.reference_number) {
+      const why = r?.message || r?.reason || data.error?.message || data.message || short(data);
+      if (/NO_SERIES_AVAILABLE/i.test(why)) throw new Error(`DTDC has no AWB numbers left for customer code ${acc.options.customerCode} with service "${consignment.service_type_id}" (NO_SERIES_AVAILABLE). Try another service type in the courier settings, or ask DTDC to allot an AWB series for API bookings on this service.`);
+      throw new Error(`DTDC didn't book the shipment (${status}): ${why}`);
+    }
     return { awb: String(r.reference_number), courierName: "DTDC", trackingUrl: `https://www.dtdc.in/trace.asp?strCnno=${r.reference_number}`, refs: {} };
   },
   async track(acc, sh) {
