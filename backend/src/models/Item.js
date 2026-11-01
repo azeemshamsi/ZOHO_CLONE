@@ -20,6 +20,10 @@ const itemSchema = new mongoose.Schema(
     openingStockDate: { type: Date },
     openingWarehouse: { type: mongoose.Schema.Types.ObjectId, ref: "Warehouse" },
     reorderLevel: { type: Number, default: 0 },
+    // Created from a Shopify order: the variant it came from and any GST/HSN corrections to check.
+    shopifyVariantId: { type: String, default: "" },
+    needsReview: { type: Boolean, default: false },
+    reviewNote: { type: String, default: "" },
   },
   { timestamps: true }
 );

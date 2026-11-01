@@ -1,0 +1,202 @@
+/**
+ * Pull orders from Shopify into ShopifyOrder. First run: from the store's "sync from" date.
+ * After that: orders updated since the last sync (a few minutes' overlap).
+ */
+const ShopifyStore = require("../../models/ShopifyStore");
+const ShopifyOrder = require("../../models/ShopifyOrder");
+const { gql } = require("./client");
+const { stateCode } = require("../import/common");
+
+const MONEY = "shopMoney { amount }";
+const ADDR = "name company address1 address2 city province provinceCode zip country countryCodeV2 phone";
+const ORDERS_QUERY = `query Orders($first: Int!, $after: String, $query: String) {
+  orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id name number createdAt updatedAt processedAt cancelledAt cancelReason
+      displayFinancialStatus displayFulfillmentStatus
+      email phone note tags paymentGatewayNames currencyCode
+      customer { displayName email phone }
+      shippingAddress { ${ADDR} }
+      billingAddress { ${ADDR} }
+      subtotalPriceSet { ${MONEY} }
+      totalDiscountsSet { ${MONEY} }
+      totalShippingPriceSet { ${MONEY} }
+      totalTaxSet { ${MONEY} }
+      currentTotalPriceSet { ${MONEY} }
+      totalOutstandingSet { ${MONEY} }
+      fulfillments(first: 5) { trackingInfo(first: 1) { company number url } }
+      lineItems(first: 50) {
+        nodes {
+          id title variantTitle sku quantity currentQuantity vendor
+          originalUnitPriceSet { ${MONEY} }
+          discountAllocations { allocatedAmountSet { ${MONEY} } }
+          taxLines { ratePercentage }
+          product { id productType tags category { fullName } }
+          variant { id sku inventoryItem { harmonizedSystemCode } }
+        }
+      }
+    }
+  }
+}`;
+
+const amt = (s) => Number(s?.shopMoney?.amount) || 0;
+const r2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+function address(a) {
+  if (!a) return {};
+  const india = !a.countryCodeV2 || a.countryCodeV2 === "IN";
+  return {
+    name: a.name || "",
+    company: a.company || "",
+    address1: a.address1 || "",
+    address2: a.address2 || "",
+    city: a.city || "",
+    province: a.province || "",
+    state: india ? stateCode(a.provinceCode || a.province) || stateCode(a.province) || "" : "",
+    zip: (a.zip || "").replace(/\s/g, ""),
+    country: a.country || "",
+    phone: a.phone || "",
+  };
+}
+
+const isCod = (o) => (o.paymentGatewayNames || []).some((g) => /cod|cash on delivery|cash_on_delivery/i.test(g));
+
+function normalise(o) {
+  const lines = (o.lineItems?.nodes || []).map((l) => {
+    const qty = l.currentQuantity ?? l.quantity;
+    const unit = amt(l.originalUnitPriceSet);
+    const disc = (l.discountAllocations || []).reduce((s, d) => s + amt(d.allocatedAmountSet), 0);
+    // Discounts on removed units: scale to the remaining quantity.
+    const discount = l.quantity ? r2((disc * qty) / l.quantity) : 0;
+    return {
+      lineId: l.id,
+      productId: l.product?.id || "",
+      variantId: l.variant?.id || "",
+      title: l.title,
+      variantTitle: l.variantTitle && l.variantTitle !== "Default Title" ? l.variantTitle : "",
+      sku: (l.sku || l.variant?.sku || "").trim(),
+      vendor: l.vendor || "",
+      productType: l.product?.productType || "",
+      category: l.product?.category?.fullName || "",
+      tags: l.product?.tags || [],
+      hsn: (l.variant?.inventoryItem?.harmonizedSystemCode || "").replace(/\D/g, ""),
+      shopifyTaxRate: r2((l.taxLines || []).reduce((s, t) => s + (Number(t.ratePercentage) || 0), 0)),
+      quantity: qty,
+      unitPrice: unit,
+      discount,
+      total: r2(unit * qty - discount),
+    };
+  });
+  const ship = address(o.shippingAddress);
+  return {
+    shopifyId: o.id,
+    name: o.name,
+    orderNumber: o.number,
+    orderDate: new Date(o.processedAt || o.createdAt),
+    shopifyUpdatedAt: new Date(o.updatedAt),
+    customer: {
+      name: o.customer?.displayName || ship.name || o.billingAddress?.name || "",
+      email: o.email || o.customer?.email || "",
+      phone: o.phone || o.customer?.phone || ship.phone || o.billingAddress?.phone || "",
+    },
+    shippingAddress: ship,
+    billingAddress: address(o.billingAddress),
+    financialStatus: o.displayFinancialStatus || "",
+    fulfillmentStatus: o.displayFulfillmentStatus || "",
+    cancelledAt: o.cancelledAt ? new Date(o.cancelledAt) : null,
+    cancelReason: o.cancelReason || "",
+    paymentMode: isCod(o) ? "cod" : "prepaid",
+    gateways: o.paymentGatewayNames || [],
+    tags: o.tags || [],
+    note: o.note || "",
+    currency: o.currencyCode || "INR",
+    subtotal: amt(o.subtotalPriceSet),
+    discount: amt(o.totalDiscountsSet),
+    shippingTotal: amt(o.totalShippingPriceSet),
+    tax: amt(o.totalTaxSet),
+    total: amt(o.currentTotalPriceSet),
+    outstanding: amt(o.totalOutstandingSet),
+    lines,
+    shopifyFulfillments: (o.fulfillments || []).flatMap((f) => f.trackingInfo || []).map((t) => ({ company: t.company || "", number: t.number || "", url: t.url || "" })),
+  };
+}
+
+// Save one order; MGI's own workflow status is kept, except for cancellations and fulfilments done in Shopify.
+async function upsert(orgId, n) {
+  const existing = await ShopifyOrder.findOne({ organization: orgId, shopifyId: n.shopifyId });
+  if (!existing) {
+    let status = "new";
+    if (n.cancelledAt) status = "cancelled";
+    else if (n.fulfillmentStatus === "FULFILLED") status = "shipped";
+    const doc = { ...n, organization: orgId, status, statusChangedAt: new Date() };
+    if (status === "shipped" && n.shopifyFulfillments[0]) {
+      const f = n.shopifyFulfillments[0];
+      doc.shipment = { carrier: "shopify", courierName: f.company, awb: f.number, trackingUrl: f.url };
+    }
+    await ShopifyOrder.create(doc);
+    return "created";
+  }
+  if (existing.shopifyUpdatedAt && n.shopifyUpdatedAt <= existing.shopifyUpdatedAt) return "same";
+  Object.assign(existing, n);
+  if (n.cancelledAt && existing.status !== "cancelled" && !["shipped", "delivered", "rto"].includes(existing.status)) {
+    existing.status = "cancelled";
+    existing.statusChangedAt = new Date();
+  } else if (!n.cancelledAt && existing.status === "cancelled") {
+    existing.status = "new"; // un-cancelled (rare)
+  } else if (n.fulfillmentStatus === "FULFILLED" && ["new", "packed"].includes(existing.status)) {
+    existing.status = "shipped";
+    existing.statusChangedAt = new Date();
+    const f = n.shopifyFulfillments[0];
+    if (f && !existing.shipment?.awb) existing.shipment = { ...(existing.shipment || {}), carrier: "shopify", courierName: f.company, awb: f.number, trackingUrl: f.url };
+  }
+  await existing.save();
+  return "updated";
+}
+
+async function syncStore(store, { full = false } = {}) {
+  if (store.sync?.running && store.sync.startedAt > new Date(Date.now() - 30 * 60000)) return store.sync;
+  const startedAt = new Date();
+  await ShopifyStore.updateOne({ _id: store._id }, { sync: { running: true, startedAt, fetched: 0, created: 0, updated: 0, error: "" } });
+  const counts = { fetched: 0, created: 0, updated: 0 };
+  let since = !full && store.lastSyncAt ? new Date(store.lastSyncAt.getTime() - 10 * 60000) : store.syncFrom || new Date(Date.now() - 60 * 86400000);
+  const query = `updated_at:>='${since.toISOString()}'`;
+  try {
+    let after = null;
+    for (let page = 0; page < 1000; page++) {
+      const data = await gql(store, ORDERS_QUERY, { first: 25, after, query });
+      for (const o of data.orders.nodes) {
+        const n = normalise(o);
+        if (store.syncFrom && n.orderDate < store.syncFrom) continue;
+        const r = await upsert(store.organization, n);
+        counts.fetched++;
+        if (r === "created") counts.created++;
+        if (r === "updated") counts.updated++;
+      }
+      await ShopifyStore.updateOne({ _id: store._id }, { "sync.fetched": counts.fetched, "sync.created": counts.created, "sync.updated": counts.updated });
+      if (!data.orders.pageInfo.hasNextPage) break;
+      after = data.orders.pageInfo.endCursor;
+    }
+    // New orders' products become MGI items straight away (HSN and GST checked).
+    const { ensureItems } = require("./invoice");
+    const cache = new Map();
+    for (const o of await ShopifyOrder.find({ organization: store.organization, "lines.item": { $exists: false } }).limit(5000)) {
+      await ensureItems(store.organization, o, store, cache);
+      await o.save();
+    }
+    await ShopifyStore.updateOne({ _id: store._id }, { lastSyncAt: startedAt, connected: true, sync: { running: false, startedAt, finishedAt: new Date(), ...counts, error: "" } });
+  } catch (e) {
+    await ShopifyStore.updateOne({ _id: store._id }, { sync: { running: false, startedAt, finishedAt: new Date(), ...counts, error: e.message } });
+    throw e;
+  }
+  return counts;
+}
+
+// Every 15 minutes: stores with auto-sync on.
+async function autoSyncAll() {
+  for (const s of await ShopifyStore.find({ connected: true, autoSync: true })) {
+    await syncStore(s).catch((e) => console.error(`Shopify sync (${s.shop}) failed: ${e.message}`));
+  }
+}
+
+module.exports = { syncStore, autoSyncAll, normalise, upsert, ORDERS_QUERY };

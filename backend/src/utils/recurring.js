@@ -87,6 +87,11 @@ function startScheduler() {
   };
   setTimeout(tick, 5000);
   setInterval(tick, 60 * 60 * 1000).unref();
+  // Shopify: new orders every 15 minutes, courier tracking every 2 hours.
+  const shopify = () => require("./shopify/sync").autoSyncAll().catch((e) => console.error("Shopify sync failed:", e.message));
+  setTimeout(shopify, 20000);
+  setInterval(shopify, 15 * 60 * 1000).unref();
+  setInterval(() => require("./shopify/ship").trackAll().catch((e) => console.error("Courier tracking failed:", e.message)), 2 * 60 * 60 * 1000).unref();
 }
 
 module.exports = { occurrence, refreshNext, runProfile, runDue, startScheduler, round2 };

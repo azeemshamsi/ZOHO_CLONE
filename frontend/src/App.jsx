@@ -27,6 +27,8 @@ import { AssetList, AssetForm, AssetView } from "./pages/FixedAssets";
 import { Locations } from "./pages/Locations";
 import { Currencies } from "./pages/Currencies";
 import { Import } from "./pages/Import";
+import { ShopifyOrders } from "./pages/ShopifyOrders";
+import { ShopifySettings } from "./pages/ShopifySettings";
 import { GstCompliance } from "./pages/GstCompliance";
 import { TransferList, TransferForm, TransferView } from "./pages/TransferOrders";
 import { DocForm } from "./components/SalesDoc";
@@ -88,6 +90,8 @@ export default function App() {
           <Route path="locations" element={<Locations />} />
           <Route path="currencies" element={<Currencies />} />
           <Route path="import" element={<Import />} />
+          <Route path="shopify-orders" element={<ShopifyOrders />} />
+          <Route path="shopify-settings" element={<ShopifySettings />} />
           <Route path="e-invoices" element={<GstCompliance tab="einvoice" />} />
           <Route path="e-way-bills" element={<GstCompliance tab="eway" />} />
           <Route path="transfer-orders" element={<TransferList />} />

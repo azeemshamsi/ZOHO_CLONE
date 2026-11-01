@@ -47,6 +47,7 @@ const NAV = [
       { to: "/vendor-credits", label: "Vendor Credits" },
     ],
   },
+  { to: "/shopify-orders", label: "Shopify Orders", icon: "bag", mod: "sales" },
   {
     label: "Time Tracking",
     icon: "clock",
@@ -80,6 +81,8 @@ const PATH_MODULES = [
   ["/currencies", "settings"],
   ["/import", "settings"],
   ["/customers", "sales"],
+  ["/shopify-orders", "sales"],
+  ["/shopify-settings", "sales"],
   ["/quotes", "sales"],
   ["/sales-orders", "sales"],
   ["/invoices", "sales"],

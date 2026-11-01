@@ -48,6 +48,7 @@ app.use("/api/branches", auth, permit("settings", { readAll: true }), require(".
 app.use("/api/warehouses", auth, permit("items", { readAll: true }), require("./routes/warehouses"));
 app.use("/api/transfer-orders", auth, permit("items"), require("./routes/transferOrders"));
 app.use("/api/currencies", auth, permit("settings", { readAll: true }), require("./routes/currencies"));
+app.use("/api/shopify", auth, permit("sales"), require("./routes/shopify"));
 app.use("/api/import", auth, permit("settings"), require("./routes/import"));
 app.use("/api/users", auth, permit("settings"), require("./routes/users"));
 app.use("/api/dashboard", auth, permit(null), require("./config/baseCurrency").inBase, require("./routes/dashboard"));
