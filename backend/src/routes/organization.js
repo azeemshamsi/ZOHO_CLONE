@@ -110,9 +110,21 @@ router.put(
     const org = await Organization.findById(req.org);
     const old = org.ai || {};
     const key = d.remove ? "" : (d.geminiKey || "").replace(/\s+/g, "") || old.geminiKey || "";
-    if (key && d.geminiKey) await require("../utils/aiBill").testKey(key, d.model);
-    org.ai = { geminiKey: key, model: d.remove ? "" : d.model ?? old.model ?? "" };
+    const model = d.remove ? "" : d.model ?? old.model ?? "";
+    let resolvedModel = old.resolvedModel || "";
+    let warning = "";
+    if (key && (d.geminiKey || d.model !== undefined)) {
+      try {
+        resolvedModel = await require("../utils/aiBill").testKey(key, model);
+      } catch (e) {
+        if (!e.unreachable) throw e;
+        // Google didn't answer in time: keep the key anyway; reading bills will try again.
+        warning = `${e.message}. The key was saved; use Test to check it again.`;
+      }
+    }
+    org.ai = { geminiKey: key, model, resolvedModel: key ? resolvedModel : "" };
     await org.save();
+    if (warning) return res.send({ ...org.toJSON(), warning });
     res.send(org);
   })
 );
@@ -124,6 +136,11 @@ router.post(
     const key = org.ai?.geminiKey || process.env.GEMINI_API_KEY;
     if (!key) throw new HttpError(400, "Add a Gemini API key first");
     const model = await require("../utils/aiBill").testKey(key, org.ai?.model);
+    if (org.ai?.geminiKey && org.ai.resolvedModel !== model) {
+      org.ai.resolvedModel = model;
+      org.markModified("ai");
+      await org.save();
+    }
     res.send({ message: `Gemini is connected (model ${model})` });
   })
 );

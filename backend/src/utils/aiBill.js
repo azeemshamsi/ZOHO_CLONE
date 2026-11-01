@@ -86,18 +86,20 @@ async function callGemini({ key, model, mime, data }) {
   let last;
   for (const m of models) {
     let res;
-    try {
-      res = await fetch(`${BASE()}/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ inline_data: { mime_type: mime, data } }, { text: PROMPT }] }],
-          generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: SCHEMA },
-        }),
-        signal: AbortSignal.timeout(90000),
-      });
-    } catch (e) {
-      throw new HttpError(502, `Couldn't reach Google Gemini: ${e.name === "TimeoutError" ? "it took too long" : e.message}`);
+    for (let attempt = 0; attempt < 2 && !res; attempt++) {
+      try {
+        res = await fetch(`${BASE()}/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ inline_data: { mime_type: mime, data } }, { text: PROMPT }] }],
+            generationConfig: { temperature: 0, responseMimeType: "application/json", responseSchema: SCHEMA },
+          }),
+          signal: AbortSignal.timeout(120000),
+        });
+      } catch (e) {
+        if (attempt === 1 || e.name !== "TimeoutError") throw new HttpError(504, `Couldn't reach Google Gemini: ${e.name === "TimeoutError" ? "it didn't answer within 2 minutes. Try again in a moment" : e.message}`);
+      }
     }
     const body = await res.json().catch(() => ({}));
     if (res.ok) {
@@ -126,7 +128,7 @@ async function callGemini({ key, model, mime, data }) {
 async function readBillWithAI(org, buf, mime, { ownGstins = [] } = {}) {
   const key = org.ai?.geminiKey || process.env.GEMINI_API_KEY || "";
   if (!key) return null;
-  const { out: o, model } = await callGemini({ key, model: org.ai?.model || process.env.GEMINI_MODEL || "", mime, data: buf.toString("base64") });
+  const { out: o, model } = await callGemini({ key, model: org.ai?.model || org.ai?.resolvedModel || process.env.GEMINI_MODEL || "", mime, data: buf.toString("base64") });
   const notes = [];
   if (o.isBill === false) notes.push("This doesn't look like a bill — check every field");
   let supplierGstin = cleanGstin(o.supplierGstin);
@@ -182,24 +184,33 @@ async function readBillWithAI(org, buf, mime, { ownGstins = [] } = {}) {
   };
 }
 
-// A tiny call to check a key works (Settings → Test).
-async function testKey(key, model) {
-  const models = model ? [model, ...DEFAULT_MODELS] : DEFAULT_MODELS;
-  for (const m of models) {
-    const res = await fetch(`${BASE()}/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Reply with the word OK." }] }] }),
-      signal: AbortSignal.timeout(30000),
-    }).catch((e) => {
-      throw new HttpError(502, `Couldn't reach Google Gemini: ${e.message}`);
-    });
-    if (res.ok) return m;
-    const body = await res.json().catch(() => ({}));
-    if (res.status === 404) continue;
-    throw new HttpError(400, `Gemini said: ${body.error?.message || `HTTP ${res.status}`}`);
+// Check a key by listing its models (instant, no generation) and pick the model to use.
+async function testKey(key, wanted) {
+  let res;
+  try {
+    res = await fetch(`${BASE()}/v1beta/models?pageSize=1000`, { headers: { "x-goog-api-key": key }, signal: AbortSignal.timeout(20000) });
+  } catch (e) {
+    const err = new HttpError(504, `Couldn't reach Google Gemini: ${e.name === "TimeoutError" ? "no answer within 20 seconds" : e.message}`);
+    err.unreachable = true;
+    throw err;
   }
-  throw new HttpError(400, "None of the Gemini models are available for this key");
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new HttpError(400, `Gemini rejected the key: ${body.error?.message || `HTTP ${res.status}`}`);
+  const names = (body.models || []).filter((m) => (m.supportedGenerationMethods || []).includes("generateContent")).map((m) => m.name.replace(/^models\//, ""));
+  if (wanted) {
+    if (names.length && !names.includes(wanted)) throw new HttpError(400, `This key can't use the model "${wanted}". Leave Model blank to pick automatically.`);
+    return wanted;
+  }
+  return pickModel(names);
+}
+// Prefer the "latest" Flash alias, then the newest stable Flash (not lite, preview, live, TTS or image models).
+function pickModel(names) {
+  if (!names.length) return DEFAULT_MODELS[0];
+  if (names.includes("gemini-flash-latest")) return "gemini-flash-latest";
+  const flash = names
+    .filter((n) => /^gemini-\d+(\.\d+)?-flash$/.test(n))
+    .sort((a, b) => parseFloat(b.slice(7)) - parseFloat(a.slice(7)));
+  return flash[0] || names.find((n) => /flash/.test(n) && !/lite|live|tts|image|audio|preview|exp/.test(n)) || DEFAULT_MODELS[0];
 }
 
 module.exports = { readBillWithAI, testKey };

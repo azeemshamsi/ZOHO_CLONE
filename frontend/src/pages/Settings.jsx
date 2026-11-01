@@ -340,9 +340,11 @@ function AiSettings() {
     setBusy(true);
     try {
       const { data } = await api.put("/organization/ai", { geminiKey: key, model, remove });
-      setOrganization(data);
+      const { warning, ...org } = data;
+      setOrganization(org);
       setKey("");
-      toast(remove ? "Gemini key removed" : "Gemini connected — scanned bills and photos will now be read automatically");
+      if (warning) toast(warning, "error");
+      else toast(remove ? "Gemini key removed" : `Gemini connected${org.ai?.resolvedModel ? ` (${org.ai.resolvedModel})` : ""} — scanned bills and photos will now be read automatically`);
     } catch (err) {
       toast(errMsg(err), "error");
     }
@@ -360,7 +362,7 @@ function AiSettings() {
     <form className="card form" id="integrations" onSubmit={save} style={{ marginTop: 18 }}>
       <h4 className="section-title" style={{ marginTop: 0 }}>
         Integrations · Google Gemini
-        <span className="muted small">{ai.hasGeminiKey ? "Connected" : "Not connected"}</span>
+        <span className="muted small">{ai.hasGeminiKey ? `Connected${ai.model || ai.resolvedModel ? ` · ${ai.model || ai.resolvedModel}` : ""}` : "Not connected"}</span>
       </h4>
       <p className="muted small">
         Reads scanned bills and phone photos in “From bill PDF”. Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a> (sign in with your
