@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import CompanySwitcher from "./CompanySwitcher";
 import Logo from "./Logo";
 import Icon from "./Icon";
 import { useAuth } from "../lib/auth";
@@ -9,10 +10,10 @@ const NAV = [
   {
     label: "Items",
     icon: "box",
-    mod: "items",
+    mod: ["items", "inventory"],
     children: [
       { to: "/items", label: "Items" },
-      { to: "/inventory", label: "Inventory" },
+      { to: "/inventory", label: "Inventory", mod: "inventory" },
       { to: "/inventory-adjustments", label: "Inventory Adjustments" },
       { to: "/transfer-orders", label: "Transfer Orders" },
     ],
@@ -29,8 +30,6 @@ const NAV = [
       { to: "/recurring-invoices", label: "Recurring Invoices" },
       { to: "/payments", label: "Payments Received" },
       { to: "/credit-notes", label: "Credit Notes" },
-      { to: "/e-invoices", label: "e-Invoices" },
-      { to: "/e-way-bills", label: "e-Way Bills" },
     ],
   },
   {
@@ -49,13 +48,13 @@ const NAV = [
     ],
   },
   {
-    label: "Shopify",
+    label: "Store",
     icon: "bag",
-    mod: "sales",
+    mod: ["store_orders", "store_shipping", "store_returns", "store_settings"],
     children: [
-      { to: "/shopify-orders", label: "Orders" },
-      { to: "/returns-scan", label: "Scan Returns" },
-      { to: "/shopify-settings", label: "Settings" },
+      { to: "/shopify-orders", label: "Orders", mod: ["store_orders", "store_shipping"] },
+      { to: "/returns-scan", label: "Scan Returns", mod: "store_returns" },
+      { to: "/shopify-settings", label: "Settings", mod: "store_settings" },
     ],
   },
   {
@@ -79,8 +78,20 @@ const NAV = [
       { to: "/budgets", label: "Budgets" },
     ],
   },
+  {
+    label: "GST",
+    icon: "doc",
+    mod: "gst",
+    children: [
+      { to: "/gst", label: "GST Returns" },
+      { to: "/gst/reconcile", label: "GSTR-2B Reconciliation" },
+      { to: "/e-invoices", label: "e-Invoices" },
+      { to: "/e-way-bills", label: "e-Way Bills" },
+    ],
+  },
   { to: "/reports", label: "Reports", icon: "chart", mod: "reports" },
 ];
+const HOME_MODS = ["sales", "purchases", "reports", "accountant", "banking"];
 
 // Which permission module a page belongs to.
 const PATH_MODULES = [
@@ -91,18 +102,19 @@ const PATH_MODULES = [
   ["/currencies", "settings"],
   ["/import", "settings"],
   ["/customers", "sales"],
-  ["/shopify-orders", "sales"],
-  ["/shopify-settings", "sales"],
-  ["/returns-scan", "sales"],
-  ["/inventory", "items"],
+  ["/shopify-orders", ["store_orders", "store_shipping"]],
+  ["/shopify-settings", ["store_settings", "store_orders"]],
+  ["/returns-scan", "store_returns"],
+  ["/inventory", "inventory"],
+  ["/gst", "gst"],
   ["/quotes", "sales"],
   ["/sales-orders", "sales"],
   ["/invoices", "sales"],
   ["/recurring-invoices", "sales"],
   ["/payments", "sales"],
   ["/credit-notes", "sales"],
-  ["/e-invoices", "sales"],
-  ["/e-way-bills", "sales"],
+  ["/e-invoices", "gst"],
+  ["/e-way-bills", "gst"],
   ["/projects", "sales"],
   ["/timesheet", "sales"],
   ["/vendors", "purchases"],
@@ -123,9 +135,24 @@ const PATH_MODULES = [
   ["/users", "settings"],
 ];
 export const moduleOf = (path) => (PATH_MODULES.find(([p]) => path === p || path.startsWith(p + "/")) || [])[1];
+const RANK = { none: 0, view: 1, full: 2 };
+// Best access across one module or several.
+export const levelOf = (user, mod) => (Array.isArray(mod) ? mod : [mod]).map((m) => user?.permissions?.[m] || "none").sort((a, b) => RANK[b] - RANK[a])[0];
 export const can = (user, mod, need = "view") => {
-  const lvl = user?.permissions?.[mod] || "none";
+  const lvl = levelOf(user, mod);
   return need === "full" ? lvl === "full" : lvl !== "none";
+};
+// Where a user lands: their role's home page, else the first page they can open.
+export const homeFor = (user) => {
+  if (user?.home) return user.home;
+  if (can(user, HOME_MODS)) return "/";
+  for (const n of NAV) {
+    if (n.children) {
+      const c = n.children.find((c) => can(user, c.mod || n.mod));
+      if (c && (!n.mod || can(user, n.mod))) return c.to;
+    } else if (n.mod && can(user, n.mod)) return n.to;
+  }
+  return "/no-access";
 };
 
 function Soon() {
@@ -133,6 +160,7 @@ function Soon() {
 }
 
 function Group({ group, onNavigate }) {
+  const { user } = useAuth();
   const location = useLocation();
   const active = group.children.some((c) => location.pathname.startsWith(c.to));
   const [open, setOpen] = useState(active || group.label === "Sales");
@@ -145,7 +173,7 @@ function Group({ group, onNavigate }) {
       </button>
       {open && (
         <div className="nav-children">
-          {group.children.map((c) => (
+          {group.children.filter((c) => !c.mod || can(user, c.mod)).map((c) => (
             <NavLink key={c.to} to={c.to} className="nav-child" onClick={onNavigate}>
               {c.label}
               {c.soon && <Soon />}
@@ -164,9 +192,11 @@ export default function Layout() {
   const [profileOpen, setProfileOpen] = useState(false);
   const close = () => setMenuOpen(false);
   const location = useLocation();
-  const mod = moduleOf(location.pathname);
-  const level = mod ? user?.permissions?.[mod] || "none" : "full";
-  const nav = NAV.filter((n) => !n.mod || can(user, n.mod));
+  const mod = location.pathname === "/" ? HOME_MODS : moduleOf(location.pathname);
+  const level = mod ? levelOf(user, mod) : "full";
+  const nav = NAV.filter((n) => (n.to === "/" ? can(user, HOME_MODS) : !n.mod || can(user, n.mod)));
+  // Roles without the dashboard (e.g. Returns Desk) go straight to their page.
+  if (location.pathname === "/" && level === "none" && homeFor(user) !== "/") return <Navigate to={homeFor(user)} replace />;
 
   return (
     <div className={`app ${menuOpen ? "menu-open" : ""}`}>
@@ -219,11 +249,11 @@ export default function Layout() {
           <button className="icon-btn menu-btn" onClick={() => setMenuOpen(true)} aria-label="Menu">
             <Icon name="menu" />
           </button>
-          <div className="topbar-org">{organization?.name}</div>
+          <CompanySwitcher />
           <div className="topbar-right">
             {can(user, "sales", "full") && (
               <button className="btn btn-primary btn-sm keep" onClick={() => navigate("/invoices/new")}>
-                <Icon name="plus" size={16} /> New Invoice
+                <Icon name="plus" size={16} /> <span className="hide-sm">New Invoice</span>
               </button>
             )}
             <div className="profile">
@@ -261,7 +291,7 @@ export default function Layout() {
           {level === "none" ? (
             <div className="card center no-access">
               <h3>You don't have access to this page</h3>
-              <p className="muted">Your role is {user?.role}. Ask an admin if you need access.</p>
+              <p className="muted">Your role is {user?.roleLabel || user?.role}. Ask an admin if you need access.</p>
             </div>
           ) : (
             <>

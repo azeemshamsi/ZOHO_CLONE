@@ -1,3 +1,5 @@
+import BillFromPdf from "../components/BillFromPdf";
+import Attachments from "../components/Attachments";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
@@ -12,9 +14,17 @@ import Icon from "../components/Icon";
 const K = KINDS.bill;
 
 export function BillList() {
+  const [fromPdf, setFromPdf] = useState(false);
   return (
+    <>
+    {fromPdf && <BillFromPdf kind="bill" onClose={() => setFromPdf(false)} />}
     <DocList
       kind={K}
+      headerExtra={
+        <button className="btn" onClick={() => setFromPdf(true)}>
+          <Icon name="upload" size={16} /> From bill PDF
+        </button>
+      }
       filters={[
         ["all", "All Bills"],
         ["draft", "Draft"],
@@ -45,6 +55,7 @@ export function BillList() {
         { label: "Balance Due", num: true, render: (r) => money(r.balance, r.currency) },
       ]}
     />
+    </>
   );
 }
 
@@ -265,6 +276,7 @@ export function BillView() {
             ["Balance Due", money(bill.balance, bill.currency), "doc-grand"],
           ].filter(Boolean)}
         />
+        <Attachments docType="bill" docId={bill._id} />
       </div>
 
       <ApplyVendorCredits bill={bill} open={applyOpen} onClose={() => setApplyOpen(false)} onDone={() => (setApplyOpen(false), load())} />

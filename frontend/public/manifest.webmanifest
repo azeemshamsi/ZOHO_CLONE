@@ -6,7 +6,34 @@
   "background_color": "#ffffff",
   "theme_color": "#062654",
   "icons": [
-    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "id": "/",
+  "scope": "/",
+  "description": "Orders, invoices, GST and stock for your business",
+  "orientation": "any",
+  "shortcuts": [
+    {
+      "name": "New Invoice",
+      "url": "/invoices/new"
+    },
+    {
+      "name": "Scan Returns",
+      "url": "/returns-scan"
+    },
+    {
+      "name": "Store Orders",
+      "url": "/shopify-orders"
+    }
   ]
 }

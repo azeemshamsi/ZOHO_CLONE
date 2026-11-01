@@ -22,7 +22,7 @@ async function findDoc(req, kind, id) {
 router.put(
   "/settings",
   ah(async (req, res) => {
-    if (require("../utils/roles").permsOf(req.user.role).settings !== "full") throw new HttpError(403, "Only admins can change GST settings");
+    if (req.perms?.settings !== "full") throw new HttpError(403, "Only admins can change GST settings");
     const d = validate(
       Joi.object({
         einvoicing: Joi.object({ enabled: Joi.boolean().required(), fromDate: Joi.date().allow(null, "") }),
@@ -246,5 +246,7 @@ router.delete(
     res.send(d);
   })
 );
+
+router.use("/returns", require("./gstReturns"));
 
 module.exports = router;

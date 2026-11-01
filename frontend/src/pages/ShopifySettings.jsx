@@ -114,6 +114,35 @@ function Connection({ store, onSaved }) {
   );
 }
 
+function Share({ store, onSaved }) {
+  const [on, setOn] = useState(store.shareable.filter((c) => c.on).map((c) => String(c._id)));
+  const save = async () => {
+    try {
+      await api.put("/shopify/store/share", { orgs: on });
+      toast(on.length ? "Store shared" : "Sharing turned off");
+      onSaved({ shareable: store.shareable.map((c) => ({ ...c, on: on.includes(String(c._id)) })) });
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  return (
+    <div className="card form" style={{ marginTop: 18 }}>
+      <h4 className="section-title" style={{ marginTop: 0 }}>Use this store in your other companies</h4>
+      <p className="muted small">The companies ticked here see the same orders and can invoice any of them; the invoice is made in whichever company you're in. Couriers, settings and inventory sync stay with this company.</p>
+      {store.shareable.map((c) => (
+        <label key={c._id} className="check">
+          <input type="checkbox" checked={on.includes(String(c._id))} onChange={(e) => setOn(e.target.checked ? [...on, String(c._id)] : on.filter((x) => x !== String(c._id)))} /> {c.name}
+        </label>
+      ))}
+      <div className="form-footer">
+        <button className="btn btn-primary" onClick={save}>
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Invoicing({ store, onSaved }) {
   const inv = store.invoice || {};
   const [f, setF] = useState({ status: inv.status || "sent", dateFrom: inv.dateFrom || "order", recordPayment: !!inv.recordPayment, paymentAccount: inv.paymentAccount || "", shippingSac: inv.shippingSac || "996812", trackInventory: !!inv.trackInventory });
@@ -649,11 +678,24 @@ export function ShopifySettings() {
     if (store && h) setTimeout(() => document.getElementById(h)?.scrollIntoView({ behavior: "smooth" }), 250);
   }, [!!store]);
   if (!store) return <Spinner />;
-  const saved = (d) => setStore({ ...store, ...d, carriers: store.carriers, rules: d.rules || store.rules });
+  const saved = (d) => setStore({ ...store, ...d, carriers: store.carriers, rules: d.rules || store.rules, shareable: d.shareable || store.shareable, shared: store.shared });
+  if (store.shared)
+    return (
+      <>
+        <PageHeader title="Store Settings" back="/shopify-orders" />
+        <div className="card">
+          <p>
+            This company uses the Shopify store <strong>{store.shopName}</strong> shared from <strong>{store.ownerName}</strong>. Orders, couriers and store settings are managed in {store.ownerName}; invoices you create here are made in this company.
+          </p>
+          <p className="muted small">To change settings or stop sharing, switch to {store.ownerName} from the company menu at the top.</p>
+        </div>
+      </>
+    );
   return (
     <>
-      <PageHeader title="Shopify Settings" back="/shopify-orders" subtitle="Connect your store, set how orders become invoices, GST rules for new items, and couriers." />
+      <PageHeader title="Store Settings" back="/shopify-orders" subtitle="Connect your store, set how orders become invoices, GST rules for new items, and couriers." />
       <Connection store={store} onSaved={saved} />
+      {store.connected && store.shareable?.length > 0 && <Share store={store} onSaved={saved} />}
       <Invoicing store={store} onSaved={saved} />
       <InventorySync store={store} onSaved={saved} />
       <Rules key={JSON.stringify(store.rules).length} store={store} onSaved={saved} />

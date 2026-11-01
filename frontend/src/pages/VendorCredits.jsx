@@ -1,3 +1,4 @@
+import Attachments from "../components/Attachments";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
@@ -341,6 +342,7 @@ export function VendorCreditView() {
             ["Credits Remaining", money(cn.balance, cn.currency), "doc-grand"],
           ].filter(Boolean)}
         />
+        <Attachments docType="vendorCredit" docId={cn._id} />
       </div>
 
       <ApplyToInvoices cn={cn} open={modal === "apply"} onClose={() => setModal(null)} onDone={() => (setModal(null), load())} />

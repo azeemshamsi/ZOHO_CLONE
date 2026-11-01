@@ -1,3 +1,4 @@
+import Attachments from "../components/Attachments";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
@@ -38,7 +39,7 @@ export function InvoiceList() {
       columns={[
         { label: "Date", render: (r) => date(r.date) },
         { label: "Invoice#", cls: "link strong", render: (r) => r.invoiceNumber },
-        { label: "Order Number", render: (r) => r.orderNumber },
+        { label: "Reference#", render: (r) => r.orderNumber },
         { label: "Customer Name", render: (r) => r.customerName },
         { label: "Status", render: (r) => <Status value={invoiceStatus(r.displayStatus)} /> },
         { label: "Due Date", render: (r) => date(r.dueDate) },
@@ -266,7 +267,7 @@ export function InvoiceView() {
             ["Invoice Date", date(inv.date)],
             ["Terms", (PAYMENT_TERMS.find((p) => p[0] === inv.paymentTerms) || [0, `Net ${inv.paymentTerms}`])[1]],
             ["Due Date", date(inv.dueDate)],
-            ["Order#", inv.orderNumber],
+            ["Reference#", inv.orderNumber],
           ]}
           extraTotals={[
             inv.amountPaid > 0 && ["Payment Made", <span className="text-paid">(-) {amount(inv.amountPaid)}</span>],
@@ -274,6 +275,7 @@ export function InvoiceView() {
             ["Balance Due", money(inv.balance, inv.currency), "doc-grand"],
           ].filter(Boolean)}
         />
+        <Attachments docType="invoice" docId={inv._id} />
       </div>
 
       <ApplyCredits inv={inv} open={applyOpen} onClose={() => setApplyOpen(false)} onDone={() => (setApplyOpen(false), load())} />

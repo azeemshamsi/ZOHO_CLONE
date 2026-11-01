@@ -48,6 +48,7 @@ const organizationSchema = new mongoose.Schema(
     fxAutoUpdate: { type: Boolean, default: false }, // fetch exchange rates daily
     einvoicing: { enabled: { type: Boolean, default: false }, fromDate: { type: Date } },
     ewayBills: { enabled: { type: Boolean, default: false }, threshold: { type: Number, default: 50000 } },
+    gstFiling: { frequency: { type: String, enum: ["monthly", "quarterly"], default: "monthly" } },
     fxUpdatedAt: { type: Date },
     reminders: {
       enabled: { type: Boolean, default: false },

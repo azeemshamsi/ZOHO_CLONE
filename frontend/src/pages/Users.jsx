@@ -7,7 +7,6 @@ import { PageHeader, Spinner, Field, Modal, Confirm, toast } from "../components
 import { AuthShell } from "./Auth";
 import Icon from "../components/Icon";
 
-const MODULE_LABELS = { sales: "Sales", purchases: "Purchases", items: "Items & Inventory", banking: "Banking", accountant: "Accountant", reports: "Reports", settings: "Settings & Users" };
 const LEVEL = { full: "✓ Full", view: "View", none: "—" };
 const statusCls = { active: "paid", invited: "sent", inactive: "void" };
 
@@ -17,10 +16,14 @@ export function UsersPage() {
   const [modal, setModal] = useState(null); // {mode:'invite'} | {mode:'edit', user}
   const [link, setLink] = useState(null);
   const [del, setDel] = useState(null);
+  const [modules, setModules] = useState([]);
+  const [roleEdit, setRoleEdit] = useState(null);
   const load = () => api.get("/users").then((r) => setUsers(r.data));
+  const loadRoles = () => api.get("/users/roles").then((r) => setRoles(r.data));
   useEffect(() => {
     load();
-    api.get("/users/roles").then((r) => setRoles(r.data));
+    loadRoles();
+    api.get("/roles/modules").then((r) => setModules(r.data));
   }, []);
   if (!users) return <Spinner />;
   const roleLabel = (k) => roles.find((r) => r.key === k)?.label || k;
@@ -98,30 +101,61 @@ export function UsersPage() {
       </div>
 
       <div className="card flush">
-        <h3 className="card-title pad">What each role can do</h3>
-        <table className="table perm-table">
-          <thead>
-            <tr>
-              <th>Module</th>
-              {roles.map((r) => (
-                <th key={r.key}>{r.label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {Object.keys(MODULE_LABELS).map((m) => (
-              <tr key={m}>
-                <td>{MODULE_LABELS[m]}</td>
+        <div className="card-head" style={{ padding: "16px 16px 0" }}>
+          <h3 className="card-title" style={{ padding: 0 }}>
+            Roles — what each can do
+          </h3>
+          <button className="btn btn-sm btn-primary" onClick={() => setRoleEdit({ name: "", desc: "", home: "", perms: Object.fromEntries(modules.map((m) => [m.key, "none"])) })}>
+            <Icon name="plus" size={14} /> New Role
+          </button>
+        </div>
+        <p className="muted small" style={{ padding: "4px 16px 0" }}>
+          Make a role for each job, e.g. a returns desk that can only scan returned parcels. People with that role see nothing else in the app.
+        </p>
+        <div style={{ overflowX: "auto" }}>
+          <table className="table perm-table">
+            <thead>
+              <tr>
+                <th>Module</th>
                 {roles.map((r) => (
-                  <td key={r.key} className={r.perms[m] === "none" ? "muted" : ""}>
-                    {LEVEL[r.perms[m]]}
-                  </td>
+                  <th key={r.key}>
+                    {r.builtIn ? (
+                      r.label
+                    ) : (
+                      <button className="link-btn" onClick={() => setRoleEdit({ _id: r._id, name: r.label, desc: r.desc, home: r.home || "", perms: { ...Object.fromEntries(modules.map((m) => [m.key, "none"])), ...r.perms } })}>
+                        {r.label} ✎
+                      </button>
+                    )}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {modules.map((m) => (
+                <tr key={m.key}>
+                  <td title={m.desc}>{m.label}</td>
+                  {roles.map((r) => (
+                    <td key={r.key} className={(r.perms[m.key] || "none") === "none" ? "muted" : ""}>
+                      {LEVEL[r.perms[m.key] || "none"]}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
+      {roleEdit && (
+        <RoleModal
+          role={roleEdit}
+          modules={modules}
+          onClose={() => setRoleEdit(null)}
+          onSaved={() => {
+            setRoleEdit(null);
+            loadRoles();
+          }}
+        />
+      )}
 
       {modal && (
         <UserModal
@@ -173,8 +207,13 @@ function UserModal({ roles, user, onClose, onSaved }) {
         onSaved();
       } else {
         const { data } = await api.post("/users", form);
-        toast("Invitation created");
-        onSaved({ ...data, email: form.email });
+        if (data.added) {
+          toast(data.message);
+          onSaved();
+        } else {
+          toast("Invitation created");
+          onSaved({ ...data, email: form.email });
+        }
       }
     } catch (e) {
       setError(errMsg(e));
@@ -218,6 +257,115 @@ function UserModal({ roles, user, onClose, onSaved }) {
           </div>
         </Field>
         {error && <div className="alert alert-error">{error}</div>}
+      </div>
+    </Modal>
+  );
+}
+
+const HOMES = [
+  ["", "Dashboard (or first page they can open)"],
+  ["/returns-scan", "Scan Returns"],
+  ["/shopify-orders", "Store orders"],
+  ["/inventory", "Inventory"],
+  ["/invoices", "Invoices"],
+  ["/bills", "Bills"],
+  ["/reports", "Reports"],
+];
+
+function RoleModal({ role, modules, onClose, onSaved }) {
+  const [f, setF] = useState(role);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      const body = { name: f.name, desc: f.desc || "", home: f.home || "", perms: f.perms };
+      if (f._id) await api.put(`/roles/${f._id}`, body);
+      else await api.post("/roles", body);
+      toast("Role saved");
+      onSaved();
+    } catch (e) {
+      toast(errMsg(e), "error");
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    try {
+      await api.delete(`/roles/${f._id}`);
+      toast("Role deleted");
+      onSaved();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  const setAll = (lvl) => setF({ ...f, perms: Object.fromEntries(modules.map((m) => [m.key, lvl])) });
+  return (
+    <Modal
+      open
+      wide
+      title={f._id ? `Edit role: ${role.name}` : "New role"}
+      onClose={onClose}
+      footer={
+        <>
+          {f._id && (
+            <button className="btn btn-ghost" onClick={remove}>
+              Delete
+            </button>
+          )}
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" disabled={busy || !f.name.trim()} onClick={save}>
+            Save Role
+          </button>
+        </>
+      }
+    >
+      <div className="form-grid">
+        <div className="row-2">
+          <Field label="Role name" required>
+            <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. Returns Desk" autoFocus />
+          </Field>
+          <Field label="Opens on">
+            <select value={f.home} onChange={(e) => setF({ ...f, home: e.target.value })}>
+              {HOMES.map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <Field label="Description">
+          <input value={f.desc} onChange={(e) => setF({ ...f, desc: e.target.value })} />
+        </Field>
+        <div className="row-actions">
+          <span className="muted small">Set all:</span>
+          {["none", "view", "full"].map((l) => (
+            <button key={l} type="button" className="btn btn-sm" onClick={() => setAll(l)}>
+              {LEVEL[l]}
+            </button>
+          ))}
+        </div>
+        <table className="table compact perm-edit">
+          <tbody>
+            {modules.map((m) => (
+              <tr key={m.key}>
+                <td>
+                  <strong>{m.label}</strong>
+                  <div className="muted small">{m.desc}</div>
+                </td>
+                <td className="seg">
+                  {["none", "view", "full"].map((l) => (
+                    <label key={l} className={`seg-btn ${f.perms[m.key] === l ? "on" : ""}`}>
+                      <input type="radio" checked={f.perms[m.key] === l} onChange={() => setF({ ...f, perms: { ...f.perms, [m.key]: l } })} />
+                      {l === "none" ? "No access" : l === "view" ? "View" : "Full"}
+                    </label>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </Modal>
   );

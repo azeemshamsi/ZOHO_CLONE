@@ -148,7 +148,36 @@ An hourly scheduler creates whatever is due. On hosts that sleep, such as Render
 
 ## Users and roles
 
-From Users & Roles you can invite people by link or email as Admin, Accountant, Staff, Sales Staff or View Only. Every API route checks the role (`backend/src/utils/roles.js`).
+From Users & Roles you can invite people by link or email. Built-in roles: Admin, Accountant, Staff, Sales Staff, Warehouse, Returns Scanner and View Only. **New Role** creates your own: for each module (Sales, Purchases, Items, Inventory, Banking, Accountant, Reports, GST, Store orders, Store shipping, Store returns, Store settings, Settings) choose No access, View or Full, and the page the user opens on. A user only sees the menu items their role allows, and every API route checks the same permissions (`backend/src/utils/roles.js`, `models/Role.js`). Example: a "Returns Scanner" role opens straight on Scan Returns and can't reach invoices, reports or anything else.
+
+## Several companies
+
+One login can belong to several companies (`models/Membership.js`), with a different role in each. Switch from the company name at the top left, or add a new company there. The chosen company is sent with every request in the `X-Org` header.
+
+A store connected in one company can be **shared** with your other companies (Store Settings → Share). Every company sharing the store sees the same orders, and an invoice made from an order is created in the company you're working in, so some orders can be billed from one company and others from another. The list shows which company invoiced each order. Shipping, courier accounts and the inventory sync stay with the company that owns the store.
+
+## Attachments and bills from PDF
+
+Every invoice, quote, sales order, credit note, bill, purchase order, vendor credit, payment, payment made, journal and expense has an **Attachments** box: upload PDFs, images, Excel or Word files (up to 10 MB each; on a phone you can take a photo). Files are stored in MongoDB GridFS, so they survive redeploys, and open from the box at any time.
+
+**From bill PDF** (Bills and Expenses lists) reads a supplier's bill and fills in a new bill or expense: supplier and GSTIN (matched to an existing vendor or created), bill number, dates, place of supply, HSN, taxable value, GST rate and total. You check the figures and save; the PDF is attached automatically. It works on PDFs with a text layer (e-invoices and system-generated bills). Scanned images are attached and you type the amounts (`utils/billparse.js`, `routes/billScan.js`).
+
+## GST returns and compliance
+
+**GST → GST Returns** (`/gst`):
+
+- **Compliance calendar** for the financial year: GSTR-1, GSTR-3B (monthly or quarterly QRMP, with the 22nd/24th due date for your state), IFF, PMT-06, GSTR-9 and 9C, TDS payments and returns, advance tax and ITR, with Overdue / Due soon / Filed status. Mark a return as filed with its ARN.
+- **GSTR-1**: B2B, B2C large, B2C small, exports, credit notes (registered and unregistered), nil-rated, HSN summary (B2B and B2C) and documents issued, with a list of problems to fix (missing HSN, invalid GSTIN, missing place of supply). **Download JSON** in the GST portal's offline-tool format.
+- **GSTR-3B**: 3.1 outward supplies, 3.2 inter-state supplies to unregistered persons, 4 eligible ITC (from the books or as per the uploaded GSTR-2B), 5 exempt inward supplies, and 6.1 payment of tax with credit set off in the legal order (IGST first; CGST and SGST never against each other), cash to pay and credit carried forward. Download JSON.
+- **GSTR-9**: annual working figures (tables 4, 5, 6–7, 9, 17 and 18 HSN) on screen and as an Excel download.
+
+**GST → GSTR-2B Reconciliation** (`/gst/reconcile`): upload the GSTR-2B JSON or Excel (or the older GSTR-2A JSON) from the portal. Each supplier document is matched against your bills, expenses and vendor credits by GSTIN and bill number (ignoring punctuation and leading zeros), or by amount and date when the number differs: Matched, Probable match, Mismatch (values differ), Not in books (record the bill in one click) and Not in GSTR-2B (ITC at risk — follow up with the supplier). Accept a difference to treat it as matched. The 2B ITC total can be used in GSTR-3B.
+
+Filing itself happens on gst.gov.in by uploading the JSON (Prepare offline → Upload), which takes a minute. Filing from inside OrdexaGo through the GST API would need a GST Suvidha Provider (GSP) licence. Code: `utils/gstReturns.js`, `routes/gstReturns.js`.
+
+## Mobile and installing the app
+
+OrdexaGo is a web app that works on phones: lists, invoices, bills and the invoice form switch to a card layout on small screens. On Android (Chrome → Add to Home screen / Install app) or iPhone (Safari → Share → Add to Home Screen) it installs like an app, with shortcuts for New Invoice, Scan Returns and Store Orders (`frontend/public/sw.js`, `manifest.webmanifest`). Data always comes live from the server.
 
 ## Email
 
@@ -217,9 +246,9 @@ Settings → **Import Data** (`/import`, needs the Settings permission) brings o
 - Documents are created through OrdexaGo's own routes (`utils/import/commit.js`), so GST, numbering and settlement are the same as when they're entered by hand. If a total differs from the source (mixed rates, round-off, freight), the difference goes into the Adjustment and a warning is shown.
 - Code: `utils/import/parse.js` (files), `sheets.js` (column detection and Zoho/spreadsheet mapping), `tally.js` (Tally XML), `commit.js`, `routes/import.js`. CSV templates are available on the page.
 
-## Shopify orders and shipping
+## Store (Shopify orders and shipping)
 
-**Shopify Orders** in the sidebar, set up under **Shopify Settings** (`/shopify-settings`).
+**Store** in the sidebar, set up under **Store Settings** (`/shopify-settings`). An invoice made from an order carries the Shopify order number in its Reference# field.
 
 - **Connection:** a Dev Dashboard app (Client ID and secret; OrdexaGo gets and renews the 24-hour token with Shopify's client credentials grant) or an older custom app's `shpat_` token. Scopes: `read_orders`, `read_all_orders`, `read_products`, `read_customers`, `read_inventory`, plus `write_merchant_managed_fulfillment_orders` to mark orders fulfilled from OrdexaGo. Orders sync through the Admin GraphQL API, on demand and every 15 minutes (`utils/shopify/sync.js`).
 - **Order tabs:** New, Packed, Ready to Ship, Shipped, Delivered, RTO, Cancelled and All, with counts. Filters: search (order number, customer, phone, email, AWB, SKU, pincode, city, invoice number), date range, COD/prepaid, payment status, state, courier, invoiced, tag and sort. The filtered list exports to CSV. Cancellations and fulfilments done in Shopify update the status.

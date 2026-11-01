@@ -15,6 +15,7 @@ app.disable("x-powered-by");
 app.use(cors());
 app.use("/api/shopify-webhook", express.raw({ type: "*/*", limit: "5mb" }), require("./routes/shopifyWebhook"));
 app.use("/api/import", express.json({ limit: "40mb" }));
+app.use(["/api/attachments", "/api/bill-scan", "/api/gst/returns/2b"], express.json({ limit: "15mb" }));
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/api/health", (req, res) => res.send({ ok: true }));
@@ -26,7 +27,7 @@ app.use("/api/inventory-adjustments", auth, permit("items"), require("./routes/i
 app.use("/api/recurring", auth, permit((req) => { const k = req.body?.kind || req.query.kind; return k === "invoice" ? "sales" : k ? "purchases" : ["sales", "purchases"]; }), require("./routes/recurring"));
 app.use("/api/projects", auth, permit("sales"), require("./routes/projects"));
 app.use("/api/time-entries", auth, permit("sales"), require("./routes/timeEntries"));
-app.use("/api/gst", auth, permit("sales"), require("./routes/gst"));
+app.use("/api/gst", auth, permit("gst"), require("./routes/gst"));
 app.use("/api/invoices", auth, permit("sales"), require("./routes/invoices"));
 app.use("/api/quotes", auth, permit("sales"), require("./routes/quotes"));
 app.use("/api/sales-orders", auth, permit("sales"), require("./routes/salesOrders"));
@@ -38,7 +39,7 @@ app.use("/api/expenses", auth, permit("purchases"), require("./routes/expenses")
 app.use("/api/purchase-orders", auth, permit("purchases"), require("./routes/purchaseOrders"));
 app.use("/api/vendor-credits", auth, permit("purchases"), require("./routes/vendorCredits"));
 app.use("/api/bank-rules", auth, permit("banking"), require("./routes/bankRules"));
-app.use("/api/banking", auth, permit((req) => (req.method === "GET" && req.path === "/accounts" ? null : "banking")), require("./routes/banking"));
+app.use("/api/banking", auth, permit((req) => (req.method === "GET" && req.path === "/accounts" ? ["sales", "purchases", "banking", "accountant", "store_orders", "settings"] : "banking")), require("./routes/banking"));
 app.use("/api/accounts", auth, permit("accountant", { readAll: true }), require("./routes/accounts"));
 app.use("/api/journals", auth, permit("accountant"), require("./routes/journals"));
 app.use("/api/budgets", auth, permit("accountant"), require("./config/baseCurrency").inBase, require("./config/branchScope").scopeByBranch, require("./routes/budgets"));
@@ -50,16 +51,22 @@ app.use("/api/branches", auth, permit("settings", { readAll: true }), require(".
 app.use("/api/warehouses", auth, permit("items", { readAll: true }), require("./routes/warehouses"));
 app.use("/api/transfer-orders", auth, permit("items"), require("./routes/transferOrders"));
 app.use("/api/currencies", auth, permit("settings", { readAll: true }), require("./routes/currencies"));
-app.use("/api/shopify", auth, permit("sales"), require("./routes/shopify"));
-app.use("/api/stock", auth, permit("items", { readAll: true }), require("./routes/stock"));
+app.use("/api/shopify", auth, permit((req) => require("./routes/shopify").moduleOf(req)), require("./routes/shopify"));
+app.use("/api/stock", auth, permit("inventory"), require("./routes/stock"));
 app.use("/api/import", auth, permit("settings"), require("./routes/import"));
 app.use("/api/users", auth, permit("settings"), require("./routes/users"));
-app.use("/api/dashboard", auth, permit(null), require("./config/baseCurrency").inBase, require("./routes/dashboard"));
+app.use("/api/roles", auth, permit("settings"), require("./routes/roles"));
+app.use("/api/companies", auth, require("./routes/companies"));
+app.use("/api/attachments", auth, require("./routes/attachments"));
+app.use("/api/bill-scan", auth, permit("purchases"), require("./routes/billScan"));
+app.use("/api/dashboard", auth, permit(["sales", "purchases", "reports", "accountant", "banking"]), require("./config/baseCurrency").inBase, require("./routes/dashboard"));
 app.use("/api", (req, res) => res.status(404).send({ message: "Not found" }));
 
 // Serve the built React app (frontend/dist) in production.
 const dist = path.join(__dirname, "..", "..", "frontend", "dist");
 if (fs.existsSync(dist)) {
+  // The service worker must always be fresh, or users would be stuck on an old version.
+  app.get("/sw.js", (req, res) => res.set("Cache-Control", "no-cache").sendFile(path.join(dist, "sw.js")));
   app.use(express.static(dist, { index: false, maxAge: "1h" }));
   app.get("*", (req, res) => res.sendFile(path.join(dist, "index.html")));
 }

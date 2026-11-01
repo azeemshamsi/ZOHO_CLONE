@@ -24,9 +24,24 @@ async function createToken(userId, purpose) {
   return Token.create({ userId, purpose, token: crypto.randomBytes(32).toString("hex") });
 }
 
-async function sessionPayload(user) {
-  const organization = await Organization.findById(user.organization);
-  return { token: user.generateAuthToken(), user: user.toPublic(), organization };
+// Companies this user can open.
+async function companiesOf(user) {
+  const Membership = require("../models/Membership");
+  const ms = await Membership.find({ user: user._id, status: "active" }).populate("organization", "name gstin state").lean();
+  const { resolveRole } = require("../utils/roles");
+  const out = [];
+  for (const m of ms) if (m.organization) out.push({ _id: m.organization._id, name: m.organization.name, gstin: m.organization.gstin, role: (await resolveRole(m.role, m.organization._id)).label });
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function sessionPayload(user, wanted) {
+  const { membershipFor } = require("../middleware/auth");
+  const m = await membershipFor(user, wanted);
+  if (!m) throw new HttpError(403, "You don't have access to any company. Contact your admin.");
+  const r = await require("../utils/roles").resolveRole(m.role, m.organization);
+  user.role = m.role;
+  const organization = await Organization.findById(m.organization);
+  return { token: user.generateAuthToken(), user: user.toPublic(r), organization, organizations: await companiesOf(user) };
 }
 
 // Sign up: creates the organization and its first (admin) user.
@@ -82,7 +97,7 @@ router.post(
     if (!user || !user.password || !(await bcrypt.compare(data.password, user.password))) {
       throw new HttpError(401, "Invalid email or password");
     }
-    if (user.status === "inactive") throw new HttpError(403, "Your access to this organization has been turned off. Contact your admin.");
+    if (user.status === "inactive" && !(await require("../models/Membership").exists({ user: user._id, status: "active" }))) throw new HttpError(403, "Your access has been turned off. Contact your admin.");
     if (!user.verified) {
       const t = await createToken(user._id, "verify");
       await sendEmail(user.email, "Verify your OrdexaGo account", `Verify your email: ${env.APP_URL}/verify/${user._id}/${t.token}`);
@@ -90,7 +105,7 @@ router.post(
     }
     user.lastLogin = new Date();
     await user.save();
-    res.send(await sessionPayload(user));
+    res.send(await sessionPayload(user, req.get("x-org")));
   })
 );
 
@@ -122,7 +137,8 @@ router.post(
     user.lastLogin = new Date();
     user.inviteToken = "";
     await user.save();
-    res.send(await sessionPayload(user));
+    await require("../models/Membership").updateMany({ user: user._id, status: "invited" }, { status: "active" });
+    res.send(await sessionPayload(user, String(user.organization)));
   })
 );
 
@@ -174,7 +190,7 @@ router.get(
   auth,
   ah(async (req, res) => {
     const organization = await Organization.findById(req.org);
-    res.send({ user: req.user.toPublic(), organization });
+    res.send({ user: req.user.toPublic(req.roleInfo), organization, organizations: await companiesOf(req.user) });
   })
 );
 

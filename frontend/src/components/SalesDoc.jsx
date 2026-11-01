@@ -11,7 +11,7 @@ import { useLocations } from "../lib/locations";
 import { QrImage } from "./GstPanel";
 
 /* ======================= List ======================= */
-export function DocList({ kind, filters, columns, emptyText, summary }) {
+export function DocList({ kind, filters, columns, emptyText, summary, headerExtra }) {
   const [rows, setRows] = useState(null);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
@@ -34,6 +34,7 @@ export function DocList({ kind, filters, columns, emptyText, summary }) {
           ))}
         </select>
         <SearchBox value={q} onChange={setQ} placeholder={`Search ${kind.plural.toLowerCase()}`} />
+        {headerExtra}
         <Link to={`${kind.route}/new`} className="btn btn-primary">
           <Icon name="plus" size={16} /> New
         </Link>
@@ -213,7 +214,7 @@ export function DocForm({ kind, recurring = false }) {
     const today = isoDate();
     const base = {
       customer: params.get(party) || "",
-      number: "",
+      number: params.get("number") || "",
       ref: "",
       date: today,
       paymentTerms: terms,
@@ -652,7 +653,7 @@ export function DocForm({ kind, recurring = false }) {
                     <input className="small-input" placeholder="Description" value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} />
                     <input className="small-input mono" placeholder="HSN/SAC" value={l.hsnSac} onChange={(e) => setLine(i, { hsnSac: e.target.value })} />
                   </td>
-                  <td>
+                  <td data-label="Quantity">
                     <input type="number" step="any" min="0" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} />
                     {l.unit && <span className="muted small">{l.unit}</span>}
                     {(() => {
@@ -670,13 +671,13 @@ export function DocForm({ kind, recurring = false }) {
                       );
                     })()}
                   </td>
-                  <td>
+                  <td data-label={`Rate (${cur})`}>
                     <input type="number" step="0.01" min="0" value={l.rate} onChange={(e) => setLine(i, { rate: e.target.value })} />
                   </td>
-                  <td>
+                  <td data-label="Discount %">
                     <input type="number" step="0.01" min="0" max="100" value={l.discount} onChange={(e) => setLine(i, { discount: e.target.value })} />
                   </td>
-                  <td>
+                  <td data-label="GST">
                     <select value={l.taxRate} onChange={(e) => setLine(i, { taxRate: e.target.value })}>
                       {GST_RATES.map((r) => (
                         <option key={r} value={r}>
@@ -685,8 +686,8 @@ export function DocForm({ kind, recurring = false }) {
                       ))}
                     </select>
                   </td>
-                  <td className="num strong">{amount(lineAmount(l))}</td>
-                  <td>
+                  <td className="num strong" data-label="Amount">{amount(lineAmount(l))}</td>
+                  <td className="line-del">
                     {form.lineItems.length > 1 && (
                       <button
                         type="button"
@@ -959,35 +960,35 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
         <tbody>
           {doc.lineItems.map((l, i) => (
             <tr key={i}>
-              <td>{i + 1}</td>
-              <td>
+              <td className="di-no">{i + 1}</td>
+              <td className="di-name">
                 <strong>{l.name}</strong>
                 {l.description && <div className="doc-small">{l.description}</div>}
                 {l.discount > 0 && <div className="doc-small">Discount {l.discount}%</div>}
               </td>
-              <td>{l.hsnSac}</td>
-              <td className="num">
+              <td data-label="HSN/SAC">{l.hsnSac}</td>
+              <td className="num" data-label="Qty">
                 {l.quantity} {l.unit}
               </td>
-              <td className="num">{amount(l.rate)}</td>
+              <td className="num" data-label="Rate">{amount(l.rate)}</td>
               {doc.isInterState ? (
-                <td className="num">
+                <td className="num" data-label="IGST">
                   {amount(l.igst)}
                   <div className="doc-small">{l.taxRate}%</div>
                 </td>
               ) : (
                 <>
-                  <td className="num">
+                  <td className="num" data-label="CGST">
                     {amount(l.cgst)}
                     <div className="doc-small">{l.taxRate / 2}%</div>
                   </td>
-                  <td className="num">
+                  <td className="num" data-label="SGST">
                     {amount(l.sgst)}
                     <div className="doc-small">{l.taxRate / 2}%</div>
                   </td>
                 </>
               )}
-              <td className="num">{amount(l.amount)}</td>
+              <td className="num di-amt" data-label="Amount">{amount(l.amount)}</td>
             </tr>
           ))}
         </tbody>

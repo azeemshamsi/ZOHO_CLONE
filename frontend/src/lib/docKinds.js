@@ -10,7 +10,7 @@ export const KINDS = {
     numberLabel: "Invoice#",
     dateLabel: "Invoice Date",
     refField: "orderNumber",
-    refLabel: "Order Number",
+    refLabel: "Reference#",
     second: { field: "dueDate", label: "Due Date", required: true, terms: true },
     docTitle: "TAX INVOICE",
     saveButtons: [

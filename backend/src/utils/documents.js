@@ -9,7 +9,7 @@ const settleInvoice = (inv) => require("./salesDoc").settleInvoice(inv);
 const DOCS = {
   invoice: {
     model: "Invoice", module: "sales", party: "customer", number: "invoiceNumber", title: "TAX INVOICE", label: "Invoice",
-    facts: (d) => [["Invoice Date", fmtDate(d.date)], ["Due Date", fmtDate(d.dueDate)], ["Terms", d.paymentTerms ? `Net ${d.paymentTerms}` : "Due on Receipt"], ["Order Number", d.orderNumber]],
+    facts: (d) => [["Invoice Date", fmtDate(d.date)], ["Due Date", fmtDate(d.dueDate)], ["Terms", d.paymentTerms ? `Net ${d.paymentTerms}` : "Due on Receipt"], ["Reference#", d.orderNumber]],
     balance: (d) => ({ paid: d.total - d.balance, balance: d.balance }),
     markSent: (d) => d.status === "draft" && ((d.status = "sent"), settleInvoice(d), true),
     body: (d, org, name) =>

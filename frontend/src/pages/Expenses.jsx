@@ -1,3 +1,5 @@
+import Attachments from "../components/Attachments";
+import BillFromPdf from "../components/BillFromPdf";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
@@ -16,6 +18,7 @@ export function ExpenseList() {
   const [cats, setCats] = useState([]);
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("all");
+  const [fromPdf, setFromPdf] = useState(false);
   const dq = useDebounced(q);
   const navigate = useNavigate();
 
@@ -38,10 +41,14 @@ export function ExpenseList() {
           ))}
         </select>
         <SearchBox value={q} onChange={setQ} placeholder="Search expenses" />
+        <button className="btn" onClick={() => setFromPdf(true)}>
+          <Icon name="upload" size={16} /> From bill PDF
+        </button>
         <Link to="/expenses/new" className="btn btn-primary">
           <Icon name="plus" size={16} /> New
         </Link>
       </PageHeader>
+      {fromPdf && <BillFromPdf kind="expense" onClose={() => setFromPdf(false)} />}
       {!rows ? (
         <Spinner />
       ) : rows.length === 0 ? (
@@ -348,6 +355,7 @@ export function ExpenseForm({ recurring = false }) {
           </button>
         </div>
       </form>
+      {id && !recurring && <Attachments docType="expense" docId={id} />}
       <Confirm open={confirm} title="Delete expense?" text="This can't be undone." onConfirm={remove} onCancel={() => setConfirm(false)} />
     </>
   );

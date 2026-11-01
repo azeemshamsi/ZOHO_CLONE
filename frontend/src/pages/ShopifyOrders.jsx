@@ -5,6 +5,7 @@ import { money, date } from "../lib/format";
 import { stateName } from "../lib/constants";
 import { PageHeader, Spinner, Empty, Modal, Field, SearchBox, useDebounced, toast } from "../components/ui";
 import Icon from "../components/Icon";
+import { useAuth } from "../lib/auth";
 
 const TABS = [
   ["new", "New"],
@@ -422,6 +423,8 @@ function ReviewItems({ items, onClose, onChanged }) {
 }
 
 export function ShopifyOrders() {
+  const { organization, organizations } = useAuth();
+  const companyName = (id) => (organizations || []).find((c) => String(c._id) === String(id))?.name || "other company";
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") || "new";
   const [filters, setFilters] = useState(EMPTY_FILTERS);
@@ -525,7 +528,7 @@ export function ShopifyOrders() {
   if (store && !store.connected && !store.shop)
     return (
       <>
-        <PageHeader title="Shopify Orders" />
+        <PageHeader title="Store" />
         <Empty icon="bag" title="Connect your Shopify store" text="Orders sync automatically, products become items with checked HSN and GST, and you can invoice and ship orders in one click." action={<Link className="btn btn-primary" to="/shopify-settings">Connect Shopify</Link>} />
       </>
     );
@@ -533,7 +536,7 @@ export function ShopifyOrders() {
   const sync_ = store?.sync || {};
   return (
     <>
-      <PageHeader title="Shopify Orders" subtitle={store?.shopName ? `${store.shopName} · ${sync_.running ? "Syncing…" : store.lastSyncAt ? `Last synced ${new Date(store.lastSyncAt).toLocaleString("en-IN")}` : "Not synced yet"}${store.autoSync ? " · syncs every 15 min" : ""}` : ""}>
+      <PageHeader title="Store" subtitle={store?.shopName ? `${store.shopName}${store.shared ? ` (shared from ${store.ownerName}) · invoices go to ${organization?.name}` : ""} · ${sync_.running ? "Syncing…" : store.lastSyncAt ? `Last synced ${new Date(store.lastSyncAt).toLocaleString("en-IN")}` : "Not synced yet"}${store.autoSync ? " · syncs every 15 min" : ""}` : ""}>
         <a className="btn" href={`/api/shopify/orders/export?${new URLSearchParams({ ...query, page: "" })}`} onClick={(e) => {
           e.preventDefault();
           api.get("/shopify/orders/export", { params: query, responseType: "blob" }).then((r) => {
@@ -786,7 +789,11 @@ export function ShopifyOrders() {
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
                       {o.invoice ? (
-                        <Link to={`/invoices/${o.invoice}`}>{o.invoiceNumber}</Link>
+                        o.invoiceOrg && String(o.invoiceOrg) !== String(organization?._id) ? (
+                          <span title="Invoiced in your other company">{o.invoiceNumber} <span className="muted small">({companyName(o.invoiceOrg)})</span></span>
+                        ) : (
+                          <Link to={`/invoices/${o.invoice}`}>{o.invoiceNumber}</Link>
+                        )
                       ) : o.status !== "cancelled" ? (
                         <button className="btn btn-sm" disabled={busy} onClick={() => bulk("/shopify/orders/invoice", { ids: [o._id] }, "Invoice")}>
                           Invoice

@@ -100,7 +100,7 @@ async function markReturnClosed(ctx, order, store) {
       out.warning = `Closed in OrdexaGo; Shopify: ${e.message}`;
     }
   if (order.invoice && store?.returnCreditNote !== false && !order.returnCreditNote) {
-    const cn = await creditNoteFor(ctx, order);
+    const cn = await creditNoteFor({ ...ctx, org: order.invoiceOrg || ctx.org }, order);
     if (cn) {
       order.returnCreditNote = cn._id;
       out.creditNote = cn.number;

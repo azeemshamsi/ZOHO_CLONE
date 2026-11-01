@@ -16,6 +16,7 @@ const ruleSchema = new mongoose.Schema(
 const shopifyStoreSchema = new mongoose.Schema(
   {
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, unique: true },
+    sharedWith: { type: [mongoose.Schema.Types.ObjectId], default: [] }, // other companies that see these orders and can invoice them
     shop: { type: String, default: "" }, // xxx.myshopify.com
     shopName: { type: String, default: "" },
     authType: { type: String, enum: ["client", "token"], default: "client" }, // Dev Dashboard app (client credentials) or a legacy admin token

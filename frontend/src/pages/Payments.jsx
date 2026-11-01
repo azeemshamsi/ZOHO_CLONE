@@ -1,3 +1,4 @@
+import Attachments from "../components/Attachments";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
@@ -407,6 +408,7 @@ export function PaymentView() {
         onConfirm={remove}
         onCancel={() => setConfirm(false)}
       />
+      <Attachments docType="payment" docId={p._id} />
     </>
   );
 }

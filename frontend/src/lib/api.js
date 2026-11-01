@@ -6,6 +6,8 @@ const api = axios.create({ baseURL: "/api" });
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("mgi_token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  const org = localStorage.getItem("ordexago_org"); // company picked in the switcher
+  if (org) config.headers["X-Org"] = org;
   return config;
 });
 

@@ -32,6 +32,8 @@ import { ShopifySettings } from "./pages/ShopifySettings";
 import { Inventory } from "./pages/Inventory";
 import { ReturnScan } from "./pages/ReturnScan";
 import { GstCompliance } from "./pages/GstCompliance";
+import { GstReturns } from "./pages/GstReturns";
+import { GstReconcile } from "./pages/GstReconcile";
 import { TransferList, TransferForm, TransferView } from "./pages/TransferOrders";
 import { DocForm } from "./components/SalesDoc";
 import { KINDS } from "./lib/docKinds";
@@ -96,6 +98,9 @@ export default function App() {
           <Route path="shopify-settings" element={<ShopifySettings />} />
           <Route path="inventory" element={<Inventory />} />
           <Route path="returns-scan" element={<ReturnScan />} />
+          <Route path="no-access" element={<div className="card center no-access"><h3>No pages to show</h3><p className="muted">Your role doesn't include any part of the app yet. Ask an admin.</p></div>} />
+          <Route path="gst" element={<GstReturns />} />
+          <Route path="gst/reconcile" element={<GstReconcile />} />
           <Route path="e-invoices" element={<GstCompliance tab="einvoice" />} />
           <Route path="e-way-bills" element={<GstCompliance tab="eway" />} />
           <Route path="transfer-orders" element={<TransferList />} />

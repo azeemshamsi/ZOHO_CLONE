@@ -57,11 +57,13 @@ async function invoiceOrder(ctx, order, store) {
   if (!lines.length) throw new Error("No items left on the order");
   const cache = new Map();
   const lineItems = [];
+  // Invoicing in another company than the store's: store-specific settings (accounts, branch) don't apply there.
+  const sameOrg = String(store.organization) === String(ctx.org);
   const created = [];
   for (const l of lines) {
     const { item, created: isNew } = await itemFor(ctx.org, l, store, cache);
     if (isNew) created.push(item.name);
-    l.item = item._id;
+    if (sameOrg) l.item = item._id;
     const tr = item.taxRate;
     const gross = r2(l.unitPrice * l.quantity);
     const discount = gross > 0 ? r4(Math.min(100, ((l.discount || 0) / gross) * 100)) : 0;
@@ -91,24 +93,26 @@ async function invoiceOrder(ctx, order, store) {
     placeOfSupply: pos,
     lineItems,
     adjustment,
-    orderNumber: order.name,
+    orderNumber: order.name, // the Reference# field — the only place the order number appears
+    customerNotes: org.defaultNotes || "",
+    terms: org.defaultTerms || "",
     status: store.invoice?.status || "sent",
-    customerNotes: `Shopify order ${order.name}${order.paymentMode === "cod" ? " · Cash on delivery" : order.paymentMode === "partial" ? ` · Paid online ₹${order.prepaidAmount}, ₹${order.codAmount} on delivery` : ""}`,
-    ...(store.invoice?.branch ? { branch: String(store.invoice.branch) } : {}),
-    ...(store.invoice?.warehouse ? { warehouse: String(store.invoice.warehouse) } : {}),
+    ...(sameOrg && store.invoice?.branch ? { branch: String(store.invoice.branch) } : {}),
+    ...(sameOrg && store.invoice?.warehouse ? { warehouse: String(store.invoice.warehouse) } : {}),
   };
   const { createInvoice } = require("../../routes/invoices");
   const inv = await createInvoice({ org: ctx.org, user: ctx.user }, body);
   // Money already received online (full prepaid, or the prepaid part of a partly paid order).
   let paid = 0;
   const online = Math.min(inv.total, order.paymentMode === "cod" ? 0 : order.prepaidAmount || (order.financialStatus === "PAID" ? inv.total : 0));
-  if (store.invoice?.recordPayment && store.invoice.paymentAccount && online > 0 && inv.status !== "draft") {
+  if (sameOrg && store.invoice?.recordPayment && store.invoice.paymentAccount && online > 0 && inv.status !== "draft") {
     const { call } = require("../import/commit");
     await call(require("../../routes/payments"), "POST", "/", ctx, { customer: String(customer._id), date: iso, amount: online, mode: "bank_transfer", reference: `Shopify ${order.name}`, bankAccount: store.invoice.paymentAccount, allocations: [{ invoice: String(inv._id), amount: online }] });
     paid = online;
   }
   order.invoice = inv._id;
   order.invoiceNumber = inv.invoiceNumber;
+  order.invoiceOrg = ctx.org;
   order.invoiceError = "";
   order.markModified("lines");
   await order.save();

@@ -1,3 +1,4 @@
+import Attachments from "../components/Attachments";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
@@ -150,6 +151,7 @@ export function QuoteView() {
             ["Reference#", q.reference],
           ]}
         />
+        <Attachments docType="quote" docId={q._id} />
       </div>
       <Confirm
         open={confirm}

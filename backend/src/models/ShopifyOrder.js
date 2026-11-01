@@ -99,6 +99,7 @@ const shopifyOrderSchema = new mongoose.Schema(
     },
     invoice: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },
     invoiceNumber: String,
+    invoiceOrg: { type: mongoose.Schema.Types.ObjectId, ref: "Organization" }, // the company the invoice is in
     invoiceError: String,
     remarks: String,
   },

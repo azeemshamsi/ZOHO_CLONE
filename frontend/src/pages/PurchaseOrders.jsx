@@ -1,3 +1,4 @@
+import Attachments from "../components/Attachments";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
@@ -123,6 +124,7 @@ export function PurchaseOrderView() {
             ["Reference#", po.reference],
           ]}
         />
+        <Attachments docType="purchaseOrder" docId={po._id} />
       </div>
       <Confirm
         open={confirm === "cancel"}

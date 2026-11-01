@@ -21,10 +21,28 @@ const { labelsPdf } = require("../utils/couriers/label");
 
 const STATUSES = ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "return_created", "returned", "cancelled"];
 const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const ctxOf = (req) => ({ org: req.org, user: req.user });
+const ctxOf = (req) => ({ org: req.org, user: req.user, storeOrg: req.storeOrg });
+
+// The Shopify store can belong to this company or be shared from another company of the same owner.
+// Orders, couriers and settings live with the store's company; invoices are made in the current company.
+async function storeOrgFor(org) {
+  if (await ShopifyStore.exists({ organization: org, shop: { $nin: ["", null] } })) return org;
+  const shared = await ShopifyStore.findOne({ sharedWith: org, connected: true }, { organization: 1 }).lean();
+  return shared ? shared.organization : org;
+}
+router.use(
+  ah(async (req, res, next) => {
+    req.storeOrg = await storeOrgFor(req.org);
+    req.storeShared = String(req.storeOrg) !== String(req.org);
+    next();
+  })
+);
+const ownerOnly = (req) => {
+  if (req.storeShared) throw new HttpError(400, "This store is shared from another company. Change its settings there.");
+};
 
 async function storeOf(req, required = true) {
-  const s = await ShopifyStore.findOne({ organization: req.org });
+  const s = await ShopifyStore.findOne({ organization: req.storeOrg });
   if (!s && required) throw new HttpError(400, "Connect your Shopify store first (Shopify Settings)");
   return s;
 }
@@ -36,6 +54,12 @@ router.get(
     const s = await storeOf(req, false);
     const out = s ? s.toJSON() : { connected: false };
     if (!out.rules) out.rules = DEFAULT_RULES;
+    out.shared = req.storeShared;
+    if (req.storeShared) out.ownerName = (await Organization.findById(req.storeOrg, { name: 1 }))?.name;
+    // Companies this store can be shared with: the user's other companies where they're an admin.
+    const Membership = require("../models/Membership");
+    const mine = await Membership.find({ user: req.user._id, status: "active", role: "admin", organization: { $ne: req.storeOrg } }).populate("organization", "name").lean();
+    out.shareable = mine.filter((m) => m.organization).map((m) => ({ _id: m.organization._id, name: m.organization.name, on: (s?.sharedWith || []).some((x) => String(x) === String(m.organization._id)) }));
     out.carriers = Object.fromEntries(Object.entries(CARRIERS).map(([k, c]) => [k, { label: c.title, fields: c.fields, help: c.help }]));
     res.send(out);
   })
@@ -69,6 +93,7 @@ router.put(
       }),
       req.body
     );
+    ownerOnly(req);
     let s = await storeOf(req, false);
     if (!s) s = new ShopifyStore({ organization: req.org });
     const credsChanged = (d.shop !== undefined && d.shop && shopHost(d.shop) !== s.shop) || (d.clientId !== undefined && d.clientId !== s.clientId) || d.clientSecret || d.accessToken || (d.authType && d.authType !== s.authType);
@@ -108,8 +133,22 @@ router.put(
       const base = req.get("origin") || `${req.get("x-forwarded-proto") || req.protocol}://${req.get("host")}`;
       require("../utils/shopify/sync").registerWebhooks(s, base).catch(() => {});
     }
-    if (s.inventorySync) require("../utils/shopify/inventory").schedulePush(String(req.org), 1000);
+    if (s.inventorySync) require("../utils/shopify/inventory").schedulePush(String(req.storeOrg), 1000);
     res.send(s);
+  })
+);
+
+router.put(
+  "/store/share",
+  ah(async (req, res) => {
+    ownerOnly(req);
+    const { orgs } = validate(Joi.object({ orgs: Joi.array().items(Joi.string()).max(20).required() }), req.body);
+    const Membership = require("../models/Membership");
+    for (const o of orgs) if (!(await Membership.exists({ user: req.user._id, organization: o, role: "admin", status: "active" }))) throw new HttpError(403, "You can only share with companies where you're an admin");
+    const s = await storeOf(req);
+    s.sharedWith = orgs;
+    await s.save();
+    res.send({ sharedWith: s.sharedWith });
   })
 );
 
@@ -128,6 +167,7 @@ router.get(
 router.delete(
   "/store",
   ah(async (req, res) => {
+    ownerOnly(req);
     await ShopifyStore.updateOne({ organization: req.org }, { connected: false, accessToken: "", clientSecret: "", clientId: "", tokenExpires: null });
     res.send({ ok: true });
   })
@@ -148,7 +188,7 @@ router.post(
 /* ---------------- orders ---------------- */
 function filterOf(req) {
   const q = req.query;
-  const f = { organization: req.org };
+  const f = { organization: req.storeOrg };
   if (q.status && q.status !== "all") f.status = q.status;
   if (q.from || q.to) {
     f.orderDate = {};
@@ -188,7 +228,7 @@ router.get(
     const countFilter = { ...f };
     delete countFilter.status;
     const [rows, total, byStatus] = await Promise.all([
-      ShopifyOrder.find(f, { "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, tags: 1, cancelledAt: 1 })
+      ShopifyOrder.find(f, { "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 })
         .sort(sort)
         .skip((page - 1) * limit)
         .limit(limit)
@@ -207,7 +247,7 @@ router.get(
 router.get(
   "/orders/facets",
   ah(async (req, res) => {
-    const org = new mongoose.Types.ObjectId(String(req.org));
+    const org = new mongoose.Types.ObjectId(String(req.storeOrg));
     const [states, tags, financial] = await Promise.all([ShopifyOrder.distinct("shippingAddress.state", { organization: org }), ShopifyOrder.distinct("tags", { organization: org }), ShopifyOrder.distinct("financialStatus", { organization: org })]);
     res.send({ states: states.filter(Boolean).sort(), tags: tags.filter(Boolean).sort().slice(0, 300), financial: financial.filter(Boolean).sort() });
   })
@@ -235,12 +275,12 @@ router.get(
 router.get(
   "/orders/:id",
   ah(async (req, res) => {
-    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.org }).populate("lines.item", "name sku hsnSac taxRate needsReview reviewNote trackInventory").lean();
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg }).populate("lines.item", "name sku hsnSac taxRate needsReview reviewNote trackInventory").lean();
     if (!o) throw new HttpError(404, "Order not found");
     // Where to pick each item from.
     const ids = o.lines.map((l) => l.item?._id).filter(Boolean);
     if (ids.length) {
-      const { rows } = await require("../utils/stockview").stockView(req.org, { itemIds: ids });
+      const { rows } = await require("../utils/stockview").stockView(req.storeOrg, { itemIds: ids });
       const by = new Map(rows.map((r) => [String(r._id), r]));
       for (const l of o.lines) {
         const r = l.item && by.get(String(l.item._id));
@@ -252,7 +292,7 @@ router.get(
 );
 
 const idsJoi = Joi.array().items(Joi.string()).min(1).max(500).required();
-const ordersFor = (req, ids) => ShopifyOrder.find({ _id: { $in: ids }, organization: req.org }).sort({ orderDate: 1 });
+const ordersFor = (req, ids) => ShopifyOrder.find({ _id: { $in: ids }, organization: req.storeOrg }).sort({ orderDate: 1 });
 
 router.post(
   "/orders/status",
@@ -367,7 +407,7 @@ router.post(
   "/returns/scan",
   ah(async (req, res) => {
     const { code } = validate(Joi.object({ code: Joi.string().trim().required().label("AWB or order number") }), req.body);
-    const o = await R.findByCode(req.org, code);
+    const o = await R.findByCode(req.storeOrg, code);
     if (!o) throw new HttpError(404, `No order with AWB or order number "${code}"`);
     const store = await storeOf(req, false);
     const summary = { _id: o._id, name: o.name, customer: o.customer?.name, awb: o.shipment?.awb, courier: o.shipment?.courierName, total: o.total, items: o.lines.filter((l) => l.quantity > 0).map((l) => `${l.quantity} × ${l.title}${l.variantTitle ? ` (${l.variantTitle})` : ""}`), image: o.lines.find((l) => l.image)?.image || "" };
@@ -384,7 +424,7 @@ router.post(
 router.post(
   "/orders/:id/cancel-shipment",
   ah(async (req, res) => {
-    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.org });
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
     if (!o) throw new HttpError(404, "Order not found");
     try {
       await cancelShipment(o);
@@ -399,7 +439,7 @@ router.put(
   "/orders/:id/remarks",
   ah(async (req, res) => {
     const { remarks } = validate(Joi.object({ remarks: Joi.string().allow("").max(2000) }), req.body);
-    await ShopifyOrder.updateOne({ _id: req.params.id, organization: req.org }, { remarks });
+    await ShopifyOrder.updateOne({ _id: req.params.id, organization: req.storeOrg }, { remarks });
     res.send({ ok: true });
   })
 );
@@ -408,7 +448,7 @@ router.put(
 router.get(
   "/orders/:id/label",
   ah(async (req, res) => {
-    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.org }).select("+shipment.labelPdf");
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg }).select("+shipment.labelPdf");
     if (!o) throw new HttpError(404, "Order not found");
     if (!o.shipment?.awb) throw new HttpError(400, "Book a courier first");
     if (req.query.own !== "1") {
@@ -430,7 +470,7 @@ router.get(
       if (o.shipment.labelUrl) return res.send({ url: o.shipment.labelUrl });
     }
     const org = await Organization.findById(req.org);
-    const accs = new Map((await CourierAccount.find({ organization: req.org })).map((a) => [String(a._id), a]));
+    const accs = new Map((await CourierAccount.find({ organization: req.storeOrg })).map((a) => [String(a._id), a]));
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="label-${o.name.replace("#", "")}.pdf"`);
     res.send(await labelsPdf([o], org, accs));
@@ -444,7 +484,7 @@ router.post(
     const orders = (await ordersFor(req, d.ids)).filter((o) => o.shipment?.awb);
     if (!orders.length) throw new HttpError(400, "None of these orders has a shipment booked");
     const org = await Organization.findById(req.org);
-    const accs = new Map((await CourierAccount.find({ organization: req.org })).map((a) => [String(a._id), a]));
+    const accs = new Map((await CourierAccount.find({ organization: req.storeOrg })).map((a) => [String(a._id), a]));
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="labels.pdf"`);
     res.send(await labelsPdf(orders, org, accs, d.format));
@@ -479,7 +519,7 @@ router.post(
 router.get(
   "/couriers",
   ah(async (req, res) => {
-    res.send(await CourierAccount.find({ organization: req.org }).sort({ isDefault: -1, name: 1 }));
+    res.send(await CourierAccount.find({ organization: req.storeOrg }).sort({ isDefault: -1, name: 1 }));
   })
 );
 
@@ -504,18 +544,21 @@ async function saveCourier(req, acc) {
   acc.markModified("credentials");
   acc.markModified("options");
   acc.token = "";
-  if (d.isDefault) await CourierAccount.updateMany({ organization: req.org, _id: { $ne: acc._id } }, { isDefault: false });
+  if (d.isDefault) await CourierAccount.updateMany({ organization: req.storeOrg, _id: { $ne: acc._id } }, { isDefault: false });
   await acc.save();
   return acc;
 }
 router.post(
   "/couriers",
-  ah(async (req, res) => res.send(await saveCourier(req, new CourierAccount({ organization: req.org }))))
+  ah(async (req, res) => {
+    ownerOnly(req);
+    res.send(await saveCourier(req, new CourierAccount({ organization: req.org })));
+  })
 );
 router.put(
   "/couriers/:id",
   ah(async (req, res) => {
-    const acc = await CourierAccount.findOne({ _id: req.params.id, organization: req.org });
+    const acc = await CourierAccount.findOne({ _id: req.params.id, organization: req.storeOrg });
     if (!acc) throw new HttpError(404, "Courier not found");
     res.send(await saveCourier(req, acc));
   })
@@ -523,6 +566,7 @@ router.put(
 router.delete(
   "/couriers/:id",
   ah(async (req, res) => {
+    ownerOnly(req);
     await CourierAccount.updateOne({ _id: req.params.id, organization: req.org }, { active: false, isDefault: false });
     res.send({ ok: true });
   })
@@ -531,7 +575,7 @@ router.delete(
 router.post(
   "/couriers/:id/test",
   ah(async (req, res) => {
-    const acc = await CourierAccount.findOne({ _id: req.params.id, organization: req.org });
+    const acc = await CourierAccount.findOne({ _id: req.params.id, organization: req.storeOrg });
     if (!acc) throw new HttpError(404, "Courier not found");
     const c = CARRIERS[acc.carrier];
     try {
@@ -550,4 +594,14 @@ router.post(
   })
 );
 
+// Which permission a request needs: returns, shipping, settings, or orders.
+router.moduleOf = function (req) {
+  const p = req.path;
+  if (/^\/returns\/|^\/orders\/return$/.test(p)) return "store_returns";
+  if (/^\/orders\/(ship|track|labels)$|^\/orders\/[^/]+\/(label|cancel-shipment)$/.test(p)) return "store_shipping";
+  if (/^\/couriers/.test(p)) return req.method === "GET" ? ["store_shipping", "store_settings"] : "store_settings";
+  if (/^\/(store|locations|rules)/.test(p) && req.method !== "GET") return "store_settings";
+  if (/^\/(store|locations)/.test(p)) return ["store_settings", "store_orders", "store_shipping", "store_returns"];
+  return "store_orders";
+};
 module.exports = router;

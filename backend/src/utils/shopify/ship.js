@@ -25,9 +25,9 @@ async function fulfillInShopify(store, order, sh) {
 async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {} }) {
   if (order.status === "cancelled") throw new Error("Order is cancelled");
   if (order.shipment?.awb && order.status !== "new" && order.status !== "packed") throw new Error(`Already booked: ${order.shipment.courierName} ${order.shipment.awb}`);
-  const acc = await CourierAccount.findOne({ _id: accountId, organization: ctx.org, active: true });
+  const acc = await CourierAccount.findOne({ _id: accountId, organization: ctx.storeOrg || ctx.org, active: true });
   if (!acc) throw new Error("Choose a courier");
-  const store = await ShopifyStore.findOne({ organization: ctx.org });
+  const store = await ShopifyStore.findOne({ organization: ctx.storeOrg || ctx.org });
   const org = await Organization.findById(ctx.org);
   const p = { ...(store?.pkg?.toObject?.() || store?.pkg || {}), ...Object.fromEntries(Object.entries(pkg).filter(([, v]) => v !== "" && v !== null && v !== undefined)) };
   // HSN and GST from the (checked) OrdexaGo items, not Shopify's.
