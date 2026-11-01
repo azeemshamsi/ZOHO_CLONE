@@ -550,3 +550,4 @@ address { font-style: normal; line-height: 1.6; }
 .budget-grid td { padding: 4px 6px; }
 .text-good { color: #0b8a43; }
 .bva { line-height: 1.25; }
+.pad-row { display: flex; align-items: center; justify-content: space-between; padding-right: 16px; }

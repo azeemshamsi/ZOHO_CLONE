@@ -61,6 +61,7 @@ const NAV = [
     children: [
       { to: "/journals", label: "Manual Journals" },
       { to: "/chart-of-accounts", label: "Chart of Accounts" },
+      { to: "/fixed-assets", label: "Fixed Assets" },
       { to: "/budgets", label: "Budgets" },
     ],
   },
@@ -91,6 +92,7 @@ const PATH_MODULES = [
   ["/banking", "banking"],
   ["/journals", "accountant"],
   ["/budgets", "accountant"],
+  ["/fixed-assets", "accountant"],
   ["/chart-of-accounts", "accountant"],
   ["/reports", "reports"],
   ["/settings", "settings"],

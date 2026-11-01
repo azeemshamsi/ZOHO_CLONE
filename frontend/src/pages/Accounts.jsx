@@ -155,6 +155,9 @@ const DOC_LINK = {
   "Vendor Credit Refund": (id) => `/vendor-credits/${id}`,
   "Opening Stock": (id) => `/items/${id}`,
   "Inventory Adjustment": (id) => `/inventory-adjustments/${id}`,
+  "Fixed Asset": (id) => `/fixed-assets/${id}`,
+  Depreciation: (id) => `/fixed-assets/${id}`,
+  "Asset Disposal": (id) => `/fixed-assets/${id}`,
 };
 export const docLink = (type, id) => (DOC_LINK[type] ? DOC_LINK[type](id) : "#");
 

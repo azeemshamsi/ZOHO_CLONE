@@ -19,6 +19,8 @@ const SYSTEM_ACCOUNTS = [
   { code: "input_cgst", name: "Input CGST", group: "Other Current Asset" },
   { code: "input_sgst", name: "Input SGST", group: "Other Current Asset" },
   { code: "input_igst", name: "Input IGST", group: "Other Current Asset" },
+  { code: "fixed_assets", name: "Fixed Assets", group: "Fixed Asset" },
+  { code: "acc_depreciation", name: "Accumulated Depreciation", group: "Fixed Asset" },
   { code: "ap", name: "Accounts Payable", group: "Accounts Payable" },
   { code: "output_cgst", name: "Output CGST", group: "Other Current Liability" },
   { code: "output_sgst", name: "Output SGST", group: "Other Current Liability" },
@@ -30,6 +32,8 @@ const SYSTEM_ACCOUNTS = [
   { code: "shipping_income", name: "Shipping Charge", group: "Income" },
   { code: "other_income", name: "Other Income", group: "Other Income" },
   { code: "adjustments", name: "Rounding & Adjustments", group: "Other Expense" },
+  { code: "depreciation", name: "Depreciation Expense", group: "Expense" },
+  { code: "asset_disposal", name: "Loss / (Gain) on Asset Disposal", group: "Other Expense" },
   { code: "cogs", name: "Cost of Goods Sold", group: "Cost Of Goods Sold" },
   ...EXPENSE_CATEGORIES.map((n) => ({ code: expCode(n), name: n, group: n === "Raw Materials" ? "Cost Of Goods Sold" : "Expense" })),
 ].map((a) => ({ ...a, system: true, type: GROUP_TYPE(a.group) }));
@@ -84,7 +88,8 @@ async function buildEntries(org, { to } = {}) {
   const all = { organization: org };
   const Item = require("../models/Item");
   const InventoryAdjustment = require("../models/InventoryAdjustment");
-  const [invoices, payments, cns, bills, vps, expenses, journals, vcs, items, adjustments] = await Promise.all([
+  const FixedAsset = require("../models/FixedAsset");
+  const [invoices, payments, cns, bills, vps, expenses, journals, vcs, items, adjustments, assets] = await Promise.all([
     Invoice.find(live).lean(),
     Payment.find(all).lean(),
     CreditNote.find(live).lean(),
@@ -95,6 +100,7 @@ async function buildEntries(org, { to } = {}) {
     VendorCredit.find(live).lean(),
     Item.find({ organization: org, trackInventory: true }).lean(),
     InventoryAdjustment.find({ organization: org, status: "adjusted" }).lean(),
+    FixedAsset.find({ organization: org }).lean(),
   ]);
   // Inventory value change per document (see utils/inventory.js).
   const { docInv } = require("./inventory").computeStock({ items, invoices, creditNotes: cns, bills, vendorCredits: vcs, adjustments });
@@ -241,6 +247,42 @@ async function buildEntries(org, { to } = {}) {
         cr(a.account || "cogs", v);
       },
     });
+  }
+  // Fixed assets: purchase, monthly depreciation (up to today), disposal.
+  const today = require("./time").istEndOfToday();
+  const depUntil = to && new Date(to) < today ? new Date(to) : today;
+  const { schedule } = require("./assets");
+  for (const fa of assets) {
+    if (fa.paidFrom)
+      add({
+        date: fa.acquisitionDate, type: "Fixed Asset", id: fa._id, number: fa.number, party: fa.name,
+        build: (dr, cr) => {
+          dr(fa.account || "fixed_assets", fa.cost);
+          cr(fa.paidFrom, fa.cost);
+        },
+      });
+    const sch = schedule(fa, depUntil);
+    for (const d of sch)
+      add({
+        date: d.date, type: "Depreciation", id: fa._id, number: fa.number, party: fa.name,
+        build: (dr, cr) => {
+          dr("depreciation", d.amount);
+          cr("acc_depreciation", d.amount);
+        },
+      });
+    if (fa.status === "disposed" && fa.disposal?.date) {
+      const acc = sch.length ? sch[sch.length - 1].accumulated : 0;
+      const proceeds = fa.disposal.kind === "sold" ? fa.disposal.amount || 0 : 0;
+      add({
+        date: fa.disposal.date, type: "Asset Disposal", id: fa._id, number: fa.number, party: fa.name,
+        build: (dr, cr) => {
+          if (proceeds) dr(fa.disposal.account || "bank", proceeds);
+          dr("acc_depreciation", acc);
+          cr(fa.account || "fixed_assets", fa.cost);
+          dr("asset_disposal", fa.cost - acc - proceeds);
+        },
+      });
+    }
   }
   for (const j of journals) {
     add({

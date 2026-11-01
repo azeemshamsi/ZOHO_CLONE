@@ -337,8 +337,10 @@ const REPORTS = {
         })
         .filter(Boolean);
     const workingCap = [...delta(["Accounts Receivable", "Other Current Asset"]), ...delta(["Accounts Payable", "Other Current Liability"])];
-    const operating = round2(p.net + sum(workingCap, (r) => r.amount));
-    const investing = delta(["Fixed Asset"]);
+    // Depreciation is a non-cash charge: added back under operating activities.
+    const depAdd = delta(["Fixed Asset"]).filter((r) => r.code === "acc_depreciation");
+    const operating = round2(p.net + sum(depAdd, (r) => r.amount) + sum(workingCap, (r) => r.amount));
+    const investing = delta(["Fixed Asset"]).filter((r) => r.code !== "acc_depreciation");
     const financing = [...delta(["Long Term Liability"]), ...delta(["Equity"])];
     const investingTotal = sum(investing, (r) => r.amount);
     const financingTotal = sum(financing, (r) => r.amount);
@@ -352,6 +354,7 @@ const REPORTS = {
       lines: [
         L.section("Cash flows from operating activities"),
         L.item("Net profit", p.net),
+        ...depAdd.map((r) => L.item("Add: Depreciation (net of disposals)", r.amount, r.code)),
         L.section("   Adjustments for changes in working capital"),
         ...workingCap.map((r) => L.item(`Change in ${r.name}`, r.amount, r.code, 2)),
         L.sub("Net cash from operating activities", operating),
@@ -1186,6 +1189,61 @@ Object.assign(REPORTS, {
         subject: l.subject,
         by: l.sentBy,
       })),
+    };
+  },
+});
+
+Object.assign(REPORTS, {
+  "fixed-asset-register": async (req, q) => {
+    const to = asOfDate(q);
+    const FixedAsset = require("../models/FixedAsset");
+    const { position } = require("./assets");
+    const assets = await FixedAsset.find({ organization: req.org, acquisitionDate: { $lte: to } }).sort({ assetType: 1, acquisitionDate: 1 }).lean();
+    const rows = assets.map((a) => {
+      const gone = a.status === "disposed" && new Date(a.disposal.date) <= to;
+      const pos = position(a, to);
+      return {
+        type: a.assetType || "Other",
+        number: a.number,
+        href: `/fixed-assets/${a._id}`,
+        name: a.name,
+        date: a.acquisitionDate,
+        method: a.method === "slm" ? `SLM ${a.usefulLifeYears} yrs` : a.method === "wdv" ? `WDV ${a.rate}%` : "None",
+        cost: gone ? 0 : a.cost,
+        accumulated: gone ? 0 : pos.accumulated,
+        book: gone ? 0 : pos.bookValue,
+        status: gone ? `Disposed ${new Date(a.disposal.date).toISOString().slice(0, 10)}` : "Active",
+      };
+    });
+    return {
+      kind: "table",
+      groupBy: "type",
+      note: "Disposed assets are listed with zero balances. Totals match Fixed Assets less Accumulated Depreciation on the balance sheet.",
+      columns: [col("number", "Asset#", "text", { link: "href" }), col("name", "Asset"), col("date", "Purchased", "date"), col("method", "Method"), col("cost", "Cost", "money", { sum: true }), col("accumulated", "Accumulated Depreciation", "money", { sum: true }), col("book", "Net Book Value", "money", { sum: true }), col("status", "Status")],
+      rows,
+    };
+  },
+
+  "depreciation-schedule": async (req, q) => {
+    const { from, to: asked } = parseRange(q);
+    const to = new Date(Math.min(asked.getTime(), require("./time").istEndOfToday().getTime()));
+    const FixedAsset = require("../models/FixedAsset");
+    const { schedule, position } = require("./assets");
+    const assets = await FixedAsset.find({ organization: req.org, acquisitionDate: { $lte: to } }).sort({ acquisitionDate: 1 }).lean();
+    const rows = assets
+      .map((a) => {
+        const opening = position(a, new Date(from.getTime() - 1));
+        const charged = schedule(a, to).filter((d) => d.date >= from);
+        const closing = position(a, to);
+        return { name: a.name, number: a.number, href: `/fixed-assets/${a._id}`, type: a.assetType || "Other", cost: a.cost, openingBook: new Date(a.acquisitionDate) < from ? opening.bookValue : 0, additions: new Date(a.acquisitionDate) >= from ? a.cost : 0, depreciation: round2(charged.reduce((s, d) => s + d.amount, 0)), closingBook: a.status === "disposed" && new Date(a.disposal.date) <= to ? 0 : closing.bookValue, disposed: a.status === "disposed" && new Date(a.disposal.date) >= from && new Date(a.disposal.date) <= to ? closing.bookValue : 0 };
+      })
+      .filter((r) => r.openingBook || r.additions || r.depreciation || r.closingBook);
+    return {
+      kind: "table",
+      groupBy: "type",
+      note: "Opening book value + additions − depreciation − disposals = closing book value. Depreciation is charged up to today.",
+      columns: [col("number", "Asset#", "text", { link: "href" }), col("name", "Asset"), col("openingBook", "Opening WDV", "money", { sum: true }), col("additions", "Additions", "money", { sum: true }), col("depreciation", "Depreciation", "money", { sum: true }), col("disposed", "Disposals", "money", { sum: true }), col("closingBook", "Closing WDV", "money", { sum: true })],
+      rows,
     };
   },
 });
