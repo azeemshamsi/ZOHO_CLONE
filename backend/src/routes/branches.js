@@ -13,6 +13,7 @@ const schema = Joi.object({
   email: Joi.string().allow(""),
   phone: Joi.string().allow(""),
   active: Joi.boolean(),
+  prefixes: Joi.object().pattern(/^(invoice|creditNote|quote|salesOrder|payment|purchaseOrder|vendorCredit|vendorPayment)$/, Joi.string().allow("").max(12)).default({}),
 });
 const check = (d) => {
   if (d.gstin && d.gstin.slice(0, 2) !== d.state) throw new HttpError(400, "The GSTIN's first two digits must match the branch's state code");

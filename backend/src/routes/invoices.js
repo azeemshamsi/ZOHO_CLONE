@@ -50,7 +50,7 @@ router.get(
   "/next-number",
   ah(async (req, res) => {
     const org = await Organization.findById(req.org);
-    res.send({ number: await peekNumber(req.org, "invoice", org.invoicePrefix || "INV-") });
+    res.send({ number: await peekNumber(req.org, ...(await require("../utils/salesDoc").branchSeries("invoice", org.invoicePrefix || "INV-", req.query.branch))) });
   })
 );
 
@@ -164,7 +164,7 @@ router.delete(
 async function createInvoice(req, body) {
   const data = validate(schema, body);
   const { org, fields } = await build(req, data);
-  if (!fields.invoiceNumber) fields.invoiceNumber = await nextNumber(req.org, "invoice", org.invoicePrefix || "INV-");
+  if (!fields.invoiceNumber) fields.invoiceNumber = await nextNumber(req.org, ...(await require("../utils/salesDoc").branchSeries("invoice", org.invoicePrefix || "INV-", fields.branch)));
   const invoice = new Invoice({ ...fields, organization: req.org, status: data.status || "draft" });
   settleInvoice(invoice);
   await invoice.save();

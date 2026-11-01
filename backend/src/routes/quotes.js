@@ -44,7 +44,7 @@ router.get(
   "/next-number",
   ah(async (req, res) => {
     const org = await Organization.findById(req.org);
-    res.send({ number: await peekNumber(req.org, "quote", prefix(org)) });
+    res.send({ number: await peekNumber(req.org, ...(await require("../utils/salesDoc").branchSeries("quote", prefix(org), req.query.branch))) });
   })
 );
 
@@ -53,7 +53,7 @@ router.post(
   ah(async (req, res) => {
     const data = validate(schema, req.body);
     const { org, fields } = await prepareDoc(req, data);
-    if (!fields.number) fields.number = await nextNumber(req.org, "quote", prefix(org));
+    if (!fields.number) fields.number = await nextNumber(req.org, ...(await require("../utils/salesDoc").branchSeries("quote", prefix(org), fields.branch)));
     if (!fields.expiryDate) fields.expiryDate = undefined;
     const quote = await Quote.create({ ...fields, organization: req.org, status: data.status || "draft" });
     res.status(201).send(quote);
@@ -116,7 +116,7 @@ router.post(
     const date = require("../utils/time").istToday();
     const so = await SalesOrder.create({
       ...copyContent(quote),
-      number: await nextNumber(req.org, "salesOrder", org.salesOrderPrefix || "SO-"),
+      number: await nextNumber(req.org, ...(await require("../utils/salesDoc").branchSeries("salesOrder", org.salesOrderPrefix || "SO-", quote.branch))),
       reference: quote.reference || quote.number,
       date,
       status: "draft",

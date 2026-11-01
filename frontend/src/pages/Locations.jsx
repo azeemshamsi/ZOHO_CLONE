@@ -144,7 +144,7 @@ function LocationModal({ kind, item, branches, onClose, onSaved }) {
   const isB = kind === "branch";
   const [f, setF] = useState(
     isB
-      ? { name: item?.name || "", code: item?.code || "", gstin: item?.gstin || "", state: item?.state || "", street: item?.address?.street || "", city: item?.address?.city || "", pincode: item?.address?.pincode || "", email: item?.email || "", phone: item?.phone || "", active: item ? item.active : true }
+      ? { prefixes: { ...(item?.prefixes || {}) }, name: item?.name || "", code: item?.code || "", gstin: item?.gstin || "", state: item?.state || "", street: item?.address?.street || "", city: item?.address?.city || "", pincode: item?.address?.pincode || "", email: item?.email || "", phone: item?.phone || "", active: item ? item.active : true }
       : { name: item?.name || "", branch: item?.branch || "", street: item?.address?.street || "", city: item?.address?.city || "", primary: !!item?.primary, active: item ? item.active : true }
   );
   const [error, setError] = useState("");
@@ -152,7 +152,7 @@ function LocationModal({ kind, item, branches, onClose, onSaved }) {
   const save = async () => {
     try {
       const body = isB
-        ? { name: f.name, code: f.code, gstin: f.gstin, state: f.state, address: { street: f.street, city: f.city, pincode: f.pincode, country: "India" }, email: f.email, phone: f.phone, active: f.active }
+        ? { prefixes: f.prefixes, name: f.name, code: f.code, gstin: f.gstin, state: f.state, address: { street: f.street, city: f.city, pincode: f.pincode, country: "India" }, email: f.email, phone: f.phone, active: f.active }
         : { name: f.name, branch: f.branch || null, address: { street: f.street, city: f.city }, primary: f.primary, active: f.active };
       const url = `/${isB ? "branches" : "warehouses"}`;
       if (item) await api.put(`${url}/${item._id}`, body);
@@ -221,6 +221,25 @@ function LocationModal({ kind, item, branches, onClose, onSaved }) {
               <Field label="Phone">
                 <input value={f.phone} onChange={set("phone")} />
               </Field>
+            </div>
+            <h4 className="section-title" style={{ margin: "6px 0 0" }}>
+              Number Series <span className="muted small">Leave blank to share the head office series</span>
+            </h4>
+            <div className="row-3">
+              {[
+                ["invoice", "Invoice"],
+                ["creditNote", "Credit Note"],
+                ["payment", "Payment Received"],
+                ["quote", "Quote"],
+                ["salesOrder", "Sales Order"],
+                ["purchaseOrder", "Purchase Order"],
+                ["vendorCredit", "Vendor Credit"],
+                ["vendorPayment", "Payment Made"],
+              ].map(([k, l]) => (
+                <Field key={k} label={`${l} Prefix`}>
+                  <input value={f.prefixes[k] || ""} placeholder={k === "invoice" ? "e.g. DL/INV-" : ""} maxLength={12} onChange={(e) => setF({ ...f, prefixes: { ...f.prefixes, [k]: e.target.value } })} />
+                </Field>
+              ))}
             </div>
           </>
         ) : (

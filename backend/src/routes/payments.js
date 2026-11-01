@@ -64,7 +64,7 @@ router.post(
       ...data,
       organization: req.org,
       customerName: customer.displayName,
-      paymentNumber: await nextNumber(req.org, "payment", org.paymentPrefix),
+      paymentNumber: await nextNumber(req.org, ...(await require("../utils/salesDoc").branchSeries("payment", org.paymentPrefix || "PAY-", invoices[0]?.[0].branch))),
       allocations: invoices.map(([inv, amount]) => ({ invoice: inv._id, invoiceNumber: inv.invoiceNumber, amount })),
       unusedAmount: round2(data.amount - allocated),
       branch: invoices[0]?.[0].branch || null, // follows the branch of the invoices it pays

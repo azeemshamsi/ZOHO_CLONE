@@ -64,7 +64,7 @@ router.get(
   "/next-number",
   ah(async (req, res) => {
     const org = await Organization.findById(req.org);
-    res.send({ number: await peekNumber(req.org, "vendorCredit", prefix(org)) });
+    res.send({ number: await peekNumber(req.org, ...(await require("../utils/salesDoc").branchSeries("vendorCredit", prefix(org), req.query.branch))) });
   })
 );
 
@@ -74,7 +74,7 @@ router.post(
     const data = validate(schema, req.body);
     const { org, fields } = await prepareDoc(req, data, "vendor");
     await linkBill(req, fields);
-    if (!fields.number) fields.number = await nextNumber(req.org, "vendorCredit", prefix(org));
+    if (!fields.number) fields.number = await nextNumber(req.org, ...(await require("../utils/salesDoc").branchSeries("vendorCredit", prefix(org), fields.branch)));
     const cn = new VendorCredit({ ...fields, organization: req.org, status: data.status || "draft", balance: fields.total });
     refreshStatus(cn);
     await cn.save();

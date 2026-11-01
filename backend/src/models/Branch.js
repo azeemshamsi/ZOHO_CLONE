@@ -13,6 +13,17 @@ const branchSchema = new mongoose.Schema(
     email: { type: String, default: "" },
     phone: { type: String, default: "" },
     active: { type: Boolean, default: true },
+    // Own number series per document type (blank = the organization's series), e.g. { invoice: "DL-INV-" }
+    prefixes: {
+      invoice: { type: String, default: "" },
+      creditNote: { type: String, default: "" },
+      quote: { type: String, default: "" },
+      salesOrder: { type: String, default: "" },
+      payment: { type: String, default: "" },
+      purchaseOrder: { type: String, default: "" },
+      vendorCredit: { type: String, default: "" },
+      vendorPayment: { type: String, default: "" },
+    },
   },
   { timestamps: true }
 );

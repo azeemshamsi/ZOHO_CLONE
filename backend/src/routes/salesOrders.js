@@ -41,7 +41,7 @@ router.get(
   "/next-number",
   ah(async (req, res) => {
     const org = await Organization.findById(req.org);
-    res.send({ number: await peekNumber(req.org, "salesOrder", prefix(org)) });
+    res.send({ number: await peekNumber(req.org, ...(await require("../utils/salesDoc").branchSeries("salesOrder", prefix(org), req.query.branch))) });
   })
 );
 
@@ -50,7 +50,7 @@ router.post(
   ah(async (req, res) => {
     const data = validate(schema, req.body);
     const { org, fields } = await prepareDoc(req, data);
-    if (!fields.number) fields.number = await nextNumber(req.org, "salesOrder", prefix(org));
+    if (!fields.number) fields.number = await nextNumber(req.org, ...(await require("../utils/salesDoc").branchSeries("salesOrder", prefix(org), fields.branch)));
     if (!fields.shipmentDate) fields.shipmentDate = undefined;
     const so = await SalesOrder.create({ ...fields, organization: req.org, status: data.status || "draft" });
     res.status(201).send(so);

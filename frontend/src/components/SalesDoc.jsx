@@ -207,7 +207,6 @@ export function DocForm({ kind, recurring = false }) {
       });
       return;
     }
-    if (kind.numberAuto !== false && !recurring) api.get(`${kind.api}/next-number`).then((r) => setAutoNumber(r.data.number));
     const terms = organization?.defaultPaymentTerms ?? 15;
     const today = isoDate();
     const base = {
@@ -278,6 +277,13 @@ export function DocForm({ kind, recurring = false }) {
     if (!isCN || !form?.customer) return setCustInvoices([]);
     api.get(linkApi, { params: { [party]: form.customer } }).then((r) => setCustInvoices(r.data.filter((i) => i.status !== "draft")));
   }, [isCN, form?.customer, linkApi, party]);
+
+  // The next number depends on the branch (branches can have their own series).
+  const branchForNumber = form?.branch || "";
+  useEffect(() => {
+    if (id || recurring || kind.numberAuto === false) return;
+    api.get(`${kind.api}/next-number`, { params: { branch: branchForNumber || undefined } }).then((r) => setAutoNumber(r.data.number));
+  }, [id, recurring, kind, branchForNumber]);
 
   const totals = useMemo(
     () => {

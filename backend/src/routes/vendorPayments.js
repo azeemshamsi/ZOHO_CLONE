@@ -60,7 +60,7 @@ router.post(
       ...data,
       organization: req.org,
       vendorName: vendor.displayName,
-      paymentNumber: await nextNumber(req.org, "vendorPayment", org.vendorPaymentPrefix || "PM-"),
+      paymentNumber: await nextNumber(req.org, ...(await require("../utils/salesDoc").branchSeries("vendorPayment", org.vendorPaymentPrefix || "PM-", bills[0]?.[0].branch))),
       allocations: bills.map(([b, amount]) => ({ bill: b._id, billNumber: b.billNumber, amount })),
       unusedAmount: round2(data.amount - allocated),
       branch: bills[0]?.[0].branch || null,

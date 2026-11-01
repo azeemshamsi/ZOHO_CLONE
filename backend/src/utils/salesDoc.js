@@ -42,6 +42,14 @@ async function currencyFor(req, party, rate) {
   return { currency: code, exchangeRate: c.rate };
 }
 
+// [counter key, prefix] for a document: a branch with its own prefix gets its own series.
+async function branchSeries(key, prefix, branchId) {
+  if (!branchId) return [key, prefix];
+  const b = await require("../models/Branch").findById(branchId).lean();
+  const p = b?.prefixes?.[key];
+  return p ? [`${key}:${branchId}`, p] : [key, prefix];
+}
+
 // Check the branch / warehouse ids on a document belong to this organization.
 async function resolveLocation(req, data) {
   let branch = null;
@@ -156,7 +164,7 @@ async function createInvoiceFrom(req, src, links, orderNumber) {
   const invoice = new Invoice({
     ...copyContent(src),
     ...links,
-    invoiceNumber: await nextNumber(req.org, "invoice", org.invoicePrefix || "INV-"),
+    invoiceNumber: await nextNumber(req.org, ...(await branchSeries("invoice", org.invoicePrefix || "INV-", src.branch))),
     orderNumber: orderNumber || src.reference || src.number || "",
     date,
     dueDate,
@@ -190,6 +198,7 @@ module.exports = {
   lineItemJoi,
   baseDocJoi,
   resolveLocation,
+  branchSeries,
   currencyFor,
   prepareDoc,
   peekNumber,
