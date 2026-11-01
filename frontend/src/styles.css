@@ -567,3 +567,19 @@ address { font-style: normal; line-height: 1.6; }
 .seg > a, .seg > button { padding: 6px 12px; font-size: 13px; background: #fff; border: 0; border-right: 1px solid var(--line); cursor: pointer; color: inherit; text-decoration: none; font: inherit; }
 .seg > :last-child { border-right: 0; }
 .seg .on { background: var(--brand-50); color: var(--brand-600); font-weight: 600; }
+
+/* Import */
+.import-grid { margin-bottom: 0; }
+.dropzone { border: 2px dashed var(--line); border-radius: var(--radius); padding: 28px 16px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; cursor: pointer; margin: 10px 0 16px; color: var(--muted); transition: border-color .15s, background .15s; }
+.dropzone strong { color: var(--text, inherit); }
+.dropzone:hover, .dropzone.over { border-color: var(--brand); background: var(--brand-50); }
+.import-help p { font-size: 13.5px; line-height: 1.55; margin: 8px 0; }
+.template-links { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; margin-top: 10px; }
+.import-set { margin: 14px 0; }
+.import-set-head { margin-bottom: 6px; }
+.import-set .muted.small { margin-top: 4px; }
+.table.compact th, .table.compact td { padding: 6px 10px; font-size: 13px; }
+.badge { display: inline-block; padding: 3px 10px; border-radius: 999px; background: var(--line); font-size: 12px; font-weight: 600; }
+.row-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.progress { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; margin: 12px 0 8px; }
+.progress > div { height: 100%; background: var(--brand); transition: width .3s; }

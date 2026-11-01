@@ -183,7 +183,7 @@ function paymentList(Model, { party, appliedLabel, appliedOf, href }) {
 /* ---------------- Line-item summaries (by item / by party) ---------------- */
 async function byParty(Model, req, q, party) {
   const { from, to } = parseRange(q);
-  const docs = await Model.find({ organization: req.org, status: live, date: inRangeQ(from, to) }, { lineItems: 0 }).lean();
+  const docs = await Model.find({ organization: req.org, status: live, opening: { $ne: true }, date: inRangeQ(from, to) }, { lineItems: 0 }).lean();
   const map = {};
   for (const d of docs) {
     const k = String(d[party]);
@@ -198,7 +198,7 @@ async function byParty(Model, req, q, party) {
 
 async function byItem(Model, req, q) {
   const { from, to } = parseRange(q);
-  const docs = await Model.find({ organization: req.org, status: live, date: inRangeQ(from, to) }).lean();
+  const docs = await Model.find({ organization: req.org, status: live, opening: { $ne: true }, date: inRangeQ(from, to) }).lean();
   const map = {};
   for (const d of docs) {
     for (const l of d.lineItems) {
@@ -431,8 +431,8 @@ const REPORTS = {
   "sales-summary": async (req, q) => {
     const { from, to } = parseRange(q);
     const [invoices, credits] = await Promise.all([
-      Invoice.find({ organization: req.org, status: live, date: inRangeQ(from, to) }, { lineItems: 0 }).lean(),
-      CreditNote.find({ organization: req.org, status: live, date: inRangeQ(from, to) }, { lineItems: 0 }).lean(),
+      Invoice.find({ organization: req.org, status: live, opening: { $ne: true }, date: inRangeQ(from, to) }, { lineItems: 0 }).lean(),
+      CreditNote.find({ organization: req.org, status: live, opening: { $ne: true }, date: inRangeQ(from, to) }, { lineItems: 0 }).lean(),
     ]);
     const map = {};
     const key = (d) => new Date(d).toISOString().slice(0, 7);
@@ -652,7 +652,7 @@ const REPORTS = {
   "expenses-by-vendor": async (req, q) => {
     const { from, to } = parseRange(q);
     const [bills, expenses] = await Promise.all([
-      Bill.find({ organization: req.org, status: live, date: inRangeQ(from, to) }, { lineItems: 0 }).lean(),
+      Bill.find({ organization: req.org, status: live, opening: { $ne: true }, date: inRangeQ(from, to) }, { lineItems: 0 }).lean(),
       Expense.find({ organization: req.org, date: inRangeQ(from, to) }).lean(),
     ]);
     const map = {};
@@ -773,10 +773,10 @@ const REPORTS = {
   "tax-summary": async (req, q) => {
     const { from, to } = parseRange(q);
     const [invoices, credits, bills, vcs, expenses] = await Promise.all([
-      Invoice.find({ organization: req.org, status: live, date: inRangeQ(from, to) }).lean(),
-      CreditNote.find({ organization: req.org, status: live, date: inRangeQ(from, to) }).lean(),
-      Bill.find({ organization: req.org, status: live, date: inRangeQ(from, to) }).lean(),
-      VendorCredit.find({ organization: req.org, status: live, date: inRangeQ(from, to) }).lean(),
+      Invoice.find({ organization: req.org, status: live, opening: { $ne: true }, date: inRangeQ(from, to) }).lean(),
+      CreditNote.find({ organization: req.org, status: live, opening: { $ne: true }, date: inRangeQ(from, to) }).lean(),
+      Bill.find({ organization: req.org, status: live, opening: { $ne: true }, date: inRangeQ(from, to) }).lean(),
+      VendorCredit.find({ organization: req.org, status: live, opening: { $ne: true }, date: inRangeQ(from, to) }).lean(),
       Expense.find({ organization: req.org, date: inRangeQ(from, to) }).lean(),
     ]);
     const map = {};
@@ -977,7 +977,7 @@ Object.assign(REPORTS, {
   "product-sales": async (req, q) => {
     const { from, to } = parseRange(q);
     const { loadStock } = require("./inventory");
-    const [stock, invoices] = await Promise.all([loadStock(req.org, { to }), Invoice.find({ organization: req.org, status: live, date: inRangeQ(from, to) }).lean()]);
+    const [stock, invoices] = await Promise.all([loadStock(req.org, { to }), Invoice.find({ organization: req.org, status: live, opening: { $ne: true }, date: inRangeQ(from, to) }).lean()]);
     const map = {};
     for (const i of invoices)
       for (const l of i.lineItems) {

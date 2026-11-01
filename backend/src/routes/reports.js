@@ -132,9 +132,9 @@ router.get(
 );
 
 const liveInvoices = (org, from, to) =>
-  Invoice.find({ organization: org, status: { $nin: ["draft", "void"] }, date: { $gte: from, $lte: to } }).lean();
+  Invoice.find({ organization: org, status: { $nin: ["draft", "void"] }, opening: { $ne: true }, date: { $gte: from, $lte: to } }).lean();
 const liveCredits = (org, from, to) =>
-  CreditNote.find({ organization: org, status: { $nin: ["draft", "void"] }, date: { $gte: from, $lte: to } }).lean();
+  CreditNote.find({ organization: org, status: { $nin: ["draft", "void"] }, opening: { $ne: true }, date: { $gte: from, $lte: to } }).lean();
 
 router.get(
   "/sales-by-customer",
@@ -274,9 +274,9 @@ router.get(
     const [invoices, credits, bills, expenses, vendorCredits] = await Promise.all([
       liveInvoices(req.org, from, to),
       liveCredits(req.org, from, to),
-      Bill.find({ organization: req.org, status: { $nin: ["draft", "void"] }, date: { $gte: from, $lte: to } }).lean(),
+      Bill.find({ organization: req.org, status: { $nin: ["draft", "void"] }, opening: { $ne: true }, date: { $gte: from, $lte: to } }).lean(),
       Expense.find({ organization: req.org, date: { $gte: from, $lte: to } }).lean(),
-      VendorCredit.find({ organization: req.org, status: { $nin: ["draft", "void"] }, date: { $gte: from, $lte: to } }).lean(),
+      VendorCredit.find({ organization: req.org, status: { $nin: ["draft", "void"] }, opening: { $ne: true }, date: { $gte: from, $lte: to } }).lean(),
     ]);
     const lines = (docs, taxed) => docs.flatMap((d) => d.lineItems).filter((l) => (taxed ? l.taxRate > 0 : !l.taxRate));
     const minus = (a, b) => ({

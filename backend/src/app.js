@@ -12,6 +12,7 @@ const app = express();
 
 app.disable("x-powered-by");
 app.use(cors());
+app.use("/api/import", express.json({ limit: "40mb" }));
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/api/health", (req, res) => res.send({ ok: true }));
@@ -47,6 +48,7 @@ app.use("/api/branches", auth, permit("settings", { readAll: true }), require(".
 app.use("/api/warehouses", auth, permit("items", { readAll: true }), require("./routes/warehouses"));
 app.use("/api/transfer-orders", auth, permit("items"), require("./routes/transferOrders"));
 app.use("/api/currencies", auth, permit("settings", { readAll: true }), require("./routes/currencies"));
+app.use("/api/import", auth, permit("settings"), require("./routes/import"));
 app.use("/api/users", auth, permit("settings"), require("./routes/users"));
 app.use("/api/dashboard", auth, permit(null), require("./config/baseCurrency").inBase, require("./routes/dashboard"));
 app.use("/api", (req, res) => res.status(404).send({ message: "Not found" }));

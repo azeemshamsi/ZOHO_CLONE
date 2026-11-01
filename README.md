@@ -201,3 +201,15 @@ Turn them on under Sales → e-Invoices / e-Way Bills.
 The QR code, IRN and e-way bill number then print on the invoice and PDF. An invoice with a live IRN is locked until its e-invoice is cancelled.
 
 Generating directly through the API needs a GST Suvidha Provider (GSP) account; the JSON upload route needs nothing extra.
+
+## Importing from Zoho Books and Tally
+
+Settings → **Import Data** (`/import`, needs the Settings permission) brings over a chart of accounts, customers (debtors), vendors (creditors), opening balances and transactions.
+
+- **Formats:** Excel (.xlsx, .xls, .ods, Excel 2003 XML), CSV/TSV (UTF-8 or UTF-16), and XML: Tally's XML (Data Interchange) exports, plus any XML with repeated records.
+- **Zoho Books:** the module exports (Chart of Accounts, Contacts/Vendors, Invoice, Bill, Credit Note, Vendor Credits, Customer Payment, Vendor Payment, Expense, Journal) and the Trial Balance for opening balances. Column names are recognised automatically, and a workbook may hold several sheets.
+- **Tally ERP 9 / TallyPrime:** masters (groups and ledgers, with opening balances and bill-wise outstanding) and Day Book vouchers. Sales and Purchase vouchers become invoices and bills, Credit and Debit Notes become credit notes and vendor credits, Receipts and Payments against parties become payments (settled bill-wise against "Agst Ref", otherwise against the oldest open documents), and everything else becomes a journal. Excel exports of the ledger list or trial balance work too. Cancelled and optional vouchers are skipped.
+- **Opening balances** post on the opening balance date against Opening Balance Equity. Customer and vendor balances come in as opening invoices and bills (bill-wise where Tally has the bills), so ageing and payments work. These are flagged `opening` and kept out of sales, purchase and GST reports.
+- **Safe to repeat:** every imported record carries an `importRef`. Re-importing the same file skips what's already there.
+- Documents are created through MGI's own routes (`utils/import/commit.js`), so GST, numbering and settlement are the same as when they're entered by hand. If a total differs from the source (mixed rates, round-off, freight), the difference goes into the Adjustment and a warning is shown.
+- Code: `utils/import/parse.js` (files), `sheets.js` (column detection and Zoho/spreadsheet mapping), `tally.js` (Tally XML), `commit.js`, `routes/import.js`. CSV templates are available on the page.

@@ -28,6 +28,8 @@ const salesDocFields = (party = "customer") => ({
   [`${party}Name`]: { type: String, required: true },
   branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
   currency: { type: String, default: "INR" },
+  opening: { type: Boolean, default: false }, // opening balance carried in from another system
+  importRef: { type: String, index: true }, // set by the importer, to avoid importing twice
   exchangeRate: { type: Number, default: 1 }, // ₹ per 1 unit of currency
   warehouse: { type: mongoose.Schema.Types.ObjectId, ref: "Warehouse" },
   [`${party}Gstin`]: { type: String, default: "" },

@@ -15,6 +15,7 @@ const journalSchema = new mongoose.Schema(
   {
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true },
     branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
+    importRef: { type: String, index: true },
     number: { type: String, required: true },
     date: { type: Date, required: true },
     reference: { type: String, default: "" },

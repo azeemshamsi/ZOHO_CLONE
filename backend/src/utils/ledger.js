@@ -137,6 +137,7 @@ async function buildEntries(org, { to } = {}) {
       date: i.date, type: "Invoice", id: i._id, number: i.invoiceNumber, party: i.customerName, rate: i.exchangeRate,
       build: (dr, cr, drB) => {
         dr("ar", i.total);
+        if (i.opening) return cr("opening_equity", i.total); // balance brought forward from another system
         cr("sales", i.subTotal);
         cr("output_cgst", i.cgst);
         cr("output_sgst", i.sgst);
@@ -166,6 +167,10 @@ async function buildEntries(org, { to } = {}) {
     add({
       date: c.date, type: "Credit Note", id: c._id, number: c.number, party: c.customerName, rate: c.exchangeRate,
       build: (dr, cr, drB, crB) => {
+        if (c.opening) {
+          dr("opening_equity", c.total);
+          return cr("ar", c.total);
+        }
         dr("sales", c.subTotal);
         dr("output_cgst", c.cgst);
         dr("output_sgst", c.sgst);
@@ -191,6 +196,10 @@ async function buildEntries(org, { to } = {}) {
     add({
       date: b.date, type: "Bill", id: b._id, number: b.billNumber, party: b.vendorName, rate: b.exchangeRate,
       build: (dr, cr, drB) => {
+        if (b.opening) {
+          dr("opening_equity", b.total);
+          return cr("ap", b.total);
+        }
         dr("cogs", b.subTotal + (b.shippingCharge || 0));
         drB("cogs", -inv("Bill", b._id));
         drB("inventory", inv("Bill", b._id));
@@ -232,6 +241,7 @@ async function buildEntries(org, { to } = {}) {
       date: c.date, type: "Vendor Credit", id: c._id, number: c.number, party: c.vendorName, rate: c.exchangeRate,
       build: (dr, cr, drB, crB) => {
         dr("ap", c.total);
+        if (c.opening) return cr("opening_equity", c.total);
         cr("cogs", c.subTotal + (c.shippingCharge || 0));
         crB("cogs", inv("Vendor Credit", c._id));
         drB("inventory", inv("Vendor Credit", c._id));

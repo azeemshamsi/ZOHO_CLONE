@@ -13,6 +13,7 @@ const paymentSchema = new mongoose.Schema(
   {
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true },
     branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
+    importRef: { type: String, index: true },
     currency: { type: String, default: "INR" },
     exchangeRate: { type: Number, default: 1 },
     customer: { type: mongoose.Schema.Types.ObjectId, ref: "Customer", required: true, index: true },
