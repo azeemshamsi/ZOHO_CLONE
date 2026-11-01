@@ -91,6 +91,7 @@ function explain(acc, e) {
     return `Couldn't connect to ${acc.host}:${acc.port}. If MGI runs on Render's free plan, Render blocks email (SMTP) ports — switch the provider to Brevo or Resend in Settings → Email, which send over HTTPS. (${m})`;
   if (acc.provider === "smtp" && /Invalid login|535|534|Username and Password not accepted|authentication/i.test(m))
     return `The mailbox rejected the login for ${acc.user}. For Gmail use an App Password, not your normal password. (${m})`;
+  if (acc.provider === "brevo" && /ip address|authori[sz]ed_ips/i.test(m)) return `Brevo blocked the server's IP address. In Brevo go to Security → Authorised IPs and either turn off IP blocking or add your server's outbound IPs (Render: your service → Connect → Outbound). (${m})`;
   if (/^401\b/.test(m)) return `${acc.provider === "brevo" ? "Brevo" : "Resend"} didn't accept the API key (${m}). Copy the key again — it's shown only once when created — paste it into Settings → Email and save.`;
   if (acc.provider === "brevo" && /sender|not valid|unauthori[sz]ed|403/i.test(m)) return `Brevo refused the message: ${m}. Check that ${acc.email} is a verified sender in Brevo (Senders, Domains & Dedicated IPs → Senders).`;
   if (acc.provider === "resend" && /domain|verify|403|422/i.test(m)) return `Resend refused the message: ${m}. Check that the domain of ${acc.email} is verified in Resend (Domains).`;
