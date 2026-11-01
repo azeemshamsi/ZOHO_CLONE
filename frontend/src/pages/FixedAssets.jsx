@@ -34,7 +34,7 @@ export function AssetList() {
         <Empty
           icon="box"
           title="No fixed assets yet"
-          text="Record furniture, computers, vehicles and machinery. MGI works out the depreciation each month and posts it to your books."
+          text="Record furniture, computers, vehicles and machinery. OrdexaGo works out the depreciation each month and posts it to your books."
           action={
             <Link to="/fixed-assets/new" className="btn btn-primary">
               New Asset

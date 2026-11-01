@@ -128,7 +128,7 @@ router.post(
   })
 );
 
-// Undo a wrongly entered IRN (only clears it in MGI).
+// Undo a wrongly entered IRN (only clears it in OrdexaGo).
 router.delete(
   "/einvoice/:kind/:id/irn",
   ah(async (req, res) => {

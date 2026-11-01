@@ -1,6 +1,6 @@
 /**
- * Spreadsheet datasets: Zoho Books exports (CSV/XLSX), Tally Excel lists, and MGI's templates.
- * Each dataset says which headers identify it and turns rows into MGI-shaped records.
+ * Spreadsheet datasets: Zoho Books exports (CSV/XLSX), Tally Excel lists, and OrdexaGo's templates.
+ * Each dataset says which headers identify it and turns rows into OrdexaGo-shaped records.
  */
 const C = require("./common");
 const { pick, clean, num, date, stateCode, gstin, gstTreatment, terms, mode, key } = C;
@@ -102,7 +102,7 @@ const ZOHO_TYPES = {
   "equity": "Equity", "income": "Income", "other income": "Other Income", "expense": "Expense", "cost of goods sold": "Cost Of Goods Sold", "other expense": "Other Expense", "payment clearing": "Other Current Asset",
   "overseas tax payable": "Other Current Liability", "deferred tax asset": "Other Current Asset", "deferred tax liability": "Long Term Liability", "loans and advances": "Other Current Asset",
 };
-// Tally's predefined groups → MGI group ("debtors"/"creditors" become customers/vendors).
+// Tally's predefined groups → OrdexaGo group ("debtors"/"creditors" become customers/vendors).
 const TALLY_GROUPS = {
   "capital account": "Equity", "reserves & surplus": "Equity", "reserves and surplus": "Equity", "retained earnings": "Equity",
   "current assets": "Other Current Asset", "bank accounts": "Bank", "cash-in-hand": "Cash", "cash in hand": "Cash", "deposits (asset)": "Other Current Asset", "loans & advances (asset)": "Other Current Asset",

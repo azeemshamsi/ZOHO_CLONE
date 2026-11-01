@@ -1,7 +1,7 @@
 /**
- * Write normalised import records into MGI, in dependency order:
+ * Write normalised import records into OrdexaGo, in dependency order:
  *   accounts → customers/vendors → opening balances → invoices/bills/notes → payments → expenses → journals
- * Documents go through MGI's own create routes (same validation, GST maths and settlement as the
+ * Documents go through OrdexaGo's own create routes (same validation, GST maths and settlement as the
  * app). Every record gets an importRef, so importing the same file twice doesn't duplicate anything.
  */
 const C = require("./common");
@@ -23,7 +23,7 @@ const { chartOfAccounts } = require("../ledger");
 const { computeTotals } = require("../gst");
 const { nextNumber } = require("../../models/Counter");
 
-// Call one of MGI's own routers in-process (no HTTP), e.g. call(invoicesRouter, "POST", "/", ctx, body).
+// Call one of OrdexaGo's own routers in-process (no HTTP), e.g. call(invoicesRouter, "POST", "/", ctx, body).
 function call(router, method, url, ctx, body) {
   return new Promise((resolve, reject) => {
     const [path, qs] = url.split("?");
@@ -49,7 +49,7 @@ function call(router, method, url, ctx, body) {
 }
 const R = (name) => require(`../../routes/${name}`);
 
-// Names people use for MGI's built-in accounts (lower-case → code).
+// Names people use for OrdexaGo's built-in accounts (lower-case → code).
 function systemSynonyms(code, name) {
   const extra = {
     cash: ["cash", "cash in hand", "cash-in-hand", "petty cash"],
@@ -305,7 +305,7 @@ async function commit(ctx, data, opts, progress) {
           continue;
         }
         const pos = d.placeOfSupply || p.placeOfSupply || org.state;
-        // Make MGI's total match the source: put any difference in Adjustment.
+        // Make OrdexaGo's total match the source: put any difference in Adjustment.
         let adjustment = round2(d.adjustment || 0);
         if (d.total) {
           const t = computeTotals({ lineItems: d.lines, orgState: org.state, placeOfSupply: pos, shippingCharge: d.shippingCharge || 0, adjustment });
@@ -397,7 +397,7 @@ async function commit(ctx, data, opts, progress) {
         let bankAccount = "";
         const code = p.depositTo ? lookupAccount(p.depositTo) : "";
         if (code && isBank(code)) bankAccount = code;
-        else if (p.depositTo && !/^(cash|bank)$/i.test(p.depositTo)) warnings.push(`${label}: "${p.depositTo}" isn't a cash/bank account in MGI, so the default ${p.mode === "cash" ? "Cash" : "Bank"} account was used`);
+        else if (p.depositTo && !/^(cash|bank)$/i.test(p.depositTo)) warnings.push(`${label}: "${p.depositTo}" isn't a cash/bank account in OrdexaGo, so the default ${p.mode === "cash" ? "Cash" : "Bank"} account was used`);
         const body = { [kind]: String(party_._id), date: iso(p.date), amount: p.amount, mode: p.mode || "bank_transfer", reference: (p.reference || p.number || "").slice(0, 100), bankAccount, allocations };
         if (p.exchangeRate && party_.currency && party_.currency !== "INR") body.exchangeRate = p.exchangeRate;
         const doc = await call(R(routeName), "POST", "/", ctx, body);

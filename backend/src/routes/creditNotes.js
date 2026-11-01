@@ -44,7 +44,7 @@ async function linkInvoice(req, fields) {
   fields.invoiceNumber = inv.invoiceNumber;
 }
 
-// Invoices with a live IRN can't be changed in MGI: cancel the e-invoice first.
+// Invoices with a live IRN can't be changed in OrdexaGo: cancel the e-invoice first.
 const blockIfEInvoiced = (doc) => {
   if (doc.einvoice && doc.einvoice.status === "generated") throw new HttpError(400, "This document has an e-invoice (IRN). Cancel the e-invoice first, then edit or void it.");
 };

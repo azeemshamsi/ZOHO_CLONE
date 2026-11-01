@@ -9,7 +9,6 @@ import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Stat
 import Icon from "./Icon";
 import { useLocations } from "../lib/locations";
 import { QrImage } from "./GstPanel";
-import { LogoMark } from "./Logo";
 
 /* ======================= List ======================= */
 export function DocList({ kind, filters, columns, emptyText, summary }) {
@@ -877,7 +876,6 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
       )}
       <div className="doc-head">
         <div className="doc-brand">
-          <LogoMark size={36} />
           <div>
             <h2>{org.name}</h2>
             <div className="doc-small">

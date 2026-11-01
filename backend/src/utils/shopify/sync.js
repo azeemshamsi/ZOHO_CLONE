@@ -145,7 +145,7 @@ function normalise(o) {
   };
 }
 
-// Save one order; MGI's own workflow status is kept, except for cancellations and fulfilments done in Shopify.
+// Save one order; OrdexaGo's own workflow status is kept, except for cancellations and fulfilments done in Shopify.
 async function upsert(orgId, n) {
   const existing = await ShopifyOrder.findOne({ organization: orgId, shopifyId: n.shopifyId });
   if (!existing) {
@@ -203,7 +203,7 @@ async function syncStore(store, { full = false } = {}) {
       if (!data.orders.pageInfo.hasNextPage) break;
       after = data.orders.pageInfo.endCursor;
     }
-    // New orders' products become MGI items straight away (HSN and GST checked).
+    // New orders' products become OrdexaGo items straight away (HSN and GST checked).
     const { ensureItems } = require("./invoice");
     const cache = new Map();
     for (const o of await ShopifyOrder.find({ organization: store.organization, "lines.item": { $exists: false } }).limit(5000)) {
@@ -227,7 +227,7 @@ async function autoSyncAll() {
 
 module.exports = { syncStore, autoSyncAll, normalise, upsert, ORDERS_QUERY };
 
-// Real-time: Shopify calls MGI when orders are created or updated (Dev Dashboard apps; signed with the client secret).
+// Real-time: Shopify calls OrdexaGo when orders are created or updated (Dev Dashboard apps; signed with the client secret).
 async function registerWebhooks(store, baseUrl) {
   if (store.authType !== "client" || !store.clientSecret || !/^https:\/\//.test(baseUrl || "") || /localhost|127\.0\.0\.1/.test(baseUrl)) return [];
   const uri = `${baseUrl.replace(/\/+$/, "")}/api/shopify-webhook/${store._id}`;

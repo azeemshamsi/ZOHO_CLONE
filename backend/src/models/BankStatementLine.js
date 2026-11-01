@@ -13,7 +13,7 @@ const bankStatementLineSchema = new mongoose.Schema(
     balance: { type: Number, default: null }, // running balance from the bank file, if it had one
     seq: { type: Number, default: 0 }, // position in the imported file (keeps same-day order)
     status: { type: String, enum: ["unmatched", "matched", "categorized", "excluded"], default: "unmatched" },
-    // The MGI transaction this line was matched to (or created from it).
+    // The OrdexaGo transaction this line was matched to (or created from it).
     match: {
       type: { type: String },
       id: { type: mongoose.Schema.Types.ObjectId },

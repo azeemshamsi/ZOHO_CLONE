@@ -109,7 +109,7 @@ export const REPORTS = [
   // Recurring
   R("recurring-profiles", "Recurring Profiles", "Recurring", "none", "Recurring invoices, bills and expenses with their schedules."),
   // Activity
-  R("email-log", "Emails Sent", "Activity", "range", "Documents and reminders emailed from MGI."),
+  R("email-log", "Emails Sent", "Activity", "range", "Documents and reminders emailed from OrdexaGo."),
   // Fixed Assets
   R("fixed-asset-register", "Fixed Asset Register", "Fixed Assets", "asof", "Every asset with cost, accumulated depreciation and book value."),
   R("depreciation-schedule", "Depreciation Schedule", "Fixed Assets", "range", "Opening value, additions, depreciation, disposals and closing value per asset."),

@@ -1,5 +1,5 @@
 /**
- * Push MGI stock to Shopify (inventorySetQuantities, "available" at the chosen location).
+ * Push OrdexaGo stock to Shopify (inventorySetQuantities, "available" at the chosen location).
  * Every change to stock (invoices, bills, adjustments, transfers, Shopify orders, item settings) schedules a
  * push a few seconds later; only quantities that changed are sent. A full check also runs every 30 minutes.
  */

@@ -76,7 +76,7 @@ export default function Dashboard() {
 
       {isNew && (
         <div className="card getting-started">
-          <h3>Get started with MGI</h3>
+          <h3>Get started with OrdexaGo</h3>
           <div className="steps">
             <Link to="/settings" className="step">
               <span className="step-n">1</span> Add your GSTIN and address

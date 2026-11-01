@@ -1,4 +1,4 @@
-// Dates in MGI are calendar dates stored as UTC midnight (e.g. "2026-11-01" -> 2026-11-01T00:00:00Z).
+// Dates in OrdexaGo are calendar dates stored as UTC midnight (e.g. "2026-11-01" -> 2026-11-01T00:00:00Z).
 // The server runs in UTC, but the business runs on India time, so "today" must be the India calendar date.
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 

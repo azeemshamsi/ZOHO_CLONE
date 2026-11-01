@@ -22,7 +22,7 @@ function accountFor(org) {
   return serverAccount(org?.name);
 }
 
-function serverAccount(name = "MGI") {
+function serverAccount(name = "OrdexaGo") {
   const fromEmail = (env.MAIL_FROM || env.SMTP_USER || "").replace(/^.*<(.+)>.*$/, "$1").trim();
   if (env.BREVO_API_KEY && fromEmail) return { provider: "brevo", apiKey: env.BREVO_API_KEY, email: fromEmail, name };
   if (env.RESEND_API_KEY && fromEmail) return { provider: "resend", apiKey: env.RESEND_API_KEY, email: fromEmail, name };
@@ -88,7 +88,7 @@ async function deliver(acc, msg) {
 function explain(acc, e) {
   const m = e.message || String(e);
   if (acc.provider === "smtp" && /ETIMEDOUT|ECONNREFUSED|Connection timeout|Greeting never received|ECONNRESET|EHOSTUNREACH/i.test(m))
-    return `Couldn't connect to ${acc.host}:${acc.port}. If MGI runs on Render's free plan, Render blocks email (SMTP) ports — switch the provider to Brevo or Resend in Settings → Email, which send over HTTPS. (${m})`;
+    return `Couldn't connect to ${acc.host}:${acc.port}. If OrdexaGo runs on Render's free plan, Render blocks email (SMTP) ports — switch the provider to Brevo or Resend in Settings → Email, which send over HTTPS. (${m})`;
   if (acc.provider === "smtp" && /Invalid login|535|534|Username and Password not accepted|authentication/i.test(m))
     return `The mailbox rejected the login for ${acc.user}. For Gmail use an App Password, not your normal password. (${m})`;
   if (acc.provider === "brevo" && /ip address|authori[sz]ed_ips/i.test(m)) return `Brevo blocked the server's IP address. In Brevo go to Security → Authorised IPs and either turn off IP blocking or add your server's outbound IPs (Render: your service → Connect → Outbound). (${m})`;
@@ -115,7 +115,7 @@ async function sendOrgMail(org, msg) {
 
 // System emails (sign-up verification, password reset, invites): server settings.
 async function sendSystemMail(to, subject, text) {
-  const acc = serverAccount("MGI");
+  const acc = serverAccount("OrdexaGo");
   if (!acc) {
     console.log(`[email disabled] Would send "${subject}" to ${to}: ${text}`);
     return false;

@@ -1,6 +1,6 @@
 /**
- * Shopify order lines → MGI items, with HSN and GST rate checked against category rules.
- * Shopify prices are GST inclusive; MGI item rates are exclusive.
+ * Shopify order lines → OrdexaGo items, with HSN and GST rate checked against category rules.
+ * Shopify prices are GST inclusive; OrdexaGo item rates are exclusive.
  */
 const Item = require("../../models/Item");
 
@@ -88,12 +88,12 @@ function checkGst(line, store) {
 const itemName = (l) => (l.variantTitle ? `${l.title} - ${l.variantTitle}` : l.title).slice(0, 200);
 const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// Find or create the MGI item for an order line. Existing items keep their (already checked) HSN and rate.
+// Find or create the OrdexaGo item for an order line. Existing items keep their (already checked) HSN and rate.
 async function itemFor(orgId, line, store, cache = new Map()) {
   const key = line.variantId || line.sku || itemName(line);
   if (cache.has(key)) return cache.get(key);
   let item = null;
-  // A Shopify listing linked to an MGI item (e.g. 4 listings of one metal table) uses that item.
+  // A Shopify listing linked to an OrdexaGo item (e.g. 4 listings of one metal table) uses that item.
   if (line.variantId) item = await Item.findOne({ organization: orgId, "shopifyLinks.variantId": line.variantId });
   if (!item && line.variantId) item = await Item.findOne({ organization: orgId, shopifyVariantId: line.variantId, active: { $ne: false } });
   if (!item && line.sku) item = await Item.findOne({ organization: orgId, sku: new RegExp(`^${esc(line.sku)}$`, "i") });

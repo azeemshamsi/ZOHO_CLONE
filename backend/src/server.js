@@ -4,7 +4,7 @@ const app = require("./app");
 
 connectDatabase()
   .then(() => {
-    app.listen(env.PORT, () => console.log(`MGI running on port ${env.PORT}`));
+    app.listen(env.PORT, () => console.log(`OrdexaGo running on port ${env.PORT}`));
     require("./utils/recurring").startScheduler();
   })
   .catch((err) => {

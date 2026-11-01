@@ -1,4 +1,4 @@
-// MGI's own shipping label: 4x6" thermal (one per page) or A4 (four per page).
+// OrdexaGo's own shipping label: 4x6" thermal (one per page) or A4 (four per page).
 const path = require("path");
 const PDFDocument = require("pdfkit");
 const bwipjs = require("bwip-js");

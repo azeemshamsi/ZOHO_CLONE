@@ -13,13 +13,13 @@ const DAY = 24 * 60 * 60 * 1000;
 // A unique key for one posting to a bank account (a credit note can have several refunds).
 const entryKey = (e, l) => `${e.type}|${e.id}|${new Date(e.date).toISOString().slice(0, 10)}|${l.debit}|${l.credit}`;
 
-// Keys of MGI transactions already matched to some statement line on this account.
+// Keys of OrdexaGo transactions already matched to some statement line on this account.
 async function usedKeys(org, account) {
   const taken = await BankStatementLine.find({ organization: org, account, "match.key": { $exists: true } }, { "match.key": 1 }).lean();
   return new Set(taken.map((t) => t.match && t.match.key).filter(Boolean));
 }
 
-// MGI transactions that could be this line: same account, same amount; closest date first.
+// OrdexaGo transactions that could be this line: same account, same amount; closest date first.
 function candidatesFor(line, entries, used) {
   const out = [];
   for (const e of entries) {
@@ -158,7 +158,7 @@ function ruleMatches(rule, line) {
 
 /**
  * Run the transaction rules over unmatched lines (in rule priority order).
- * A line that already has an MGI transaction with the same amount on the same day is left alone,
+ * A line that already has an OrdexaGo transaction with the same amount on the same day is left alone,
  * so a payment you already recorded isn't counted twice — match it instead.
  */
 async function applyRules(org, lines) {

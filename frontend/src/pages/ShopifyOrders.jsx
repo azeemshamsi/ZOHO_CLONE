@@ -300,7 +300,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
         <thead>
           <tr>
             <th>Item</th>
-            <th>HSN · GST in MGI</th>
+            <th>HSN · GST in OrdexaGo</th>
             <th className="num">Qty</th>
             <th className="num">Price</th>
             <th className="num">Total</th>
@@ -377,7 +377,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
           {o.tags?.length > 0 && <>Tags: {o.tags.join(", ")}</>}
         </p>
       )}
-      <Field label="Remarks (only in MGI)">
+      <Field label="Remarks (only in OrdexaGo)">
         <textarea rows={2} value={remarks} onChange={(e) => setRemarks(e.target.value)} onBlur={() => remarks !== (o.remarks || "") && api.put(`/shopify/orders/${o._id}/remarks`, { remarks }).then(() => toast("Remarks saved"))} />
       </Field>
     </Modal>
@@ -387,7 +387,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
 function ReviewItems({ items, onClose, onChanged }) {
   return (
     <Modal open wide title="Items to check" onClose={onClose} footer={<button className="btn btn-primary" onClick={onClose}>Close</button>}>
-      <p className="muted small">These items were created from Shopify orders. MGI corrected the HSN or GST rate using your category rules, or couldn't tell the category. Open an item to fix it, or mark it checked.</p>
+      <p className="muted small">These items were created from Shopify orders. OrdexaGo corrected the HSN or GST rate using your category rules, or couldn't tell the category. Open an item to fix it, or mark it checked.</p>
       <table className="table compact">
         <thead>
           <tr>

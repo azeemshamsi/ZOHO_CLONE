@@ -1,13 +1,13 @@
-/* MGI design tokens */
+/* OrdexaGo design tokens */
 :root {
-  --brand: #4f46e5;
-  --brand-600: #4338ca;
-  --brand-50: #eef0ff;
-  --brand-100: #e0e3ff;
-  --accent: #f5a524;
-  --side: #14172b;
-  --side-2: #1d2140;
-  --side-text: #b4b8d6;
+  --brand: #1565c0;
+  --brand-600: #0d4f9e;
+  --brand-50: #e8f1fc;
+  --brand-100: #d3e4f8;
+  --accent: #00a88c;
+  --side: #062654;
+  --side-2: #0c3468;
+  --side-text: #b7c6de;
   --bg: #f5f6fa;
   --card: #ffffff;
   --ink: #1b1f33;
@@ -53,9 +53,11 @@ p { margin: 0.4em 0; }
 /* ---------- Logo ---------- */
 .logo { display: inline-flex; align-items: center; gap: 10px; }
 .logo-text { display: flex; flex-direction: column; line-height: 1.05; }
-.logo-name { font-weight: 800; font-size: 20px; letter-spacing: 0.04em; color: var(--ink); }
-.logo-tag { font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+.logo-name { font-weight: 800; font-size: 20px; letter-spacing: 0.01em; color: #062654; }
+.logo-go { color: #00a88c; }
+.logo-tag { font-size: 9.5px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; margin-top: 2px; }
 .logo-light .logo-name { color: #fff; }
+.logo-light .logo-go { color: #1dcaa3; }
 .logo-light .logo-tag { color: var(--side-text); }
 
 /* ---------- Buttons ---------- */
@@ -142,7 +144,7 @@ input[type="radio"], input[type="checkbox"] { width: auto; height: auto; accent-
 .nav-children { display: flex; flex-direction: column; padding: 2px 0 6px 39px; }
 .nav-child { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 6px; color: var(--side-text); font-size: 13.5px; }
 .nav-child:hover { color: #fff; background: var(--side-2); text-decoration: none; }
-.nav-child.active { color: #fff; background: rgba(79, 70, 229, 0.35); }
+.nav-child.active { color: #fff; background: rgba(0, 168, 140, 0.28); }
 .nav-settings { margin: 8px 10px 14px; width: auto; border-top: 1px solid var(--side-2); border-radius: 0; padding-top: 14px; }
 .soon { font-size: 10px; padding: 1px 6px; border-radius: 99px; background: var(--side-2); color: #8d92b8; margin-left: auto; font-weight: 600; letter-spacing: 0.03em; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -155,7 +157,7 @@ input[type="radio"], input[type="checkbox"] { width: auto; height: auto; accent-
 .menu-btn { display: none; }
 .avatar {
   width: 34px; height: 34px; border-radius: 50%; border: 0; cursor: pointer;
-  background: linear-gradient(135deg, #6d5efc, #4338ca); color: #fff; font-weight: 700;
+  background: linear-gradient(135deg, #1770ce, #00a88c); color: #fff; font-weight: 700;
 }
 .profile { position: relative; }
 .profile-menu {
@@ -237,7 +239,7 @@ input[type="radio"], input[type="checkbox"] { width: auto; height: auto; accent-
 /* ---------- Auth ---------- */
 .auth { min-height: 100vh; display: grid; grid-template-columns: 440px 1fr; }
 .auth-side {
-  background: radial-gradient(circle at 20% 110%, rgba(109, 94, 252, 0.45), transparent 55%), var(--side);
+  background: radial-gradient(circle at 15% 110%, rgba(0, 168, 140, 0.35), transparent 55%), radial-gradient(circle at 100% 0%, rgba(23, 112, 206, 0.45), transparent 50%), var(--side);
   color: var(--side-text); padding: 40px; display: flex; flex-direction: column;
 }
 .auth-pitch { margin: auto 0; }
@@ -415,7 +417,7 @@ address { font-style: normal; line-height: 1.6; }
 .status-excluded { background: #eef0f4; color: #9aa0b4; }
 .bank-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
 .bank-card { text-align: left; font: inherit; color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 16px; transition: border-color 0.15s, box-shadow 0.15s; }
-.bank-card:hover { border-color: var(--brand); box-shadow: 0 4px 16px rgba(79, 70, 229, 0.12); }
+.bank-card:hover { border-color: var(--brand); box-shadow: 0 4px 16px rgba(21, 101, 192, 0.12); }
 .bank-card-head { display: flex; gap: 12px; align-items: center; }
 .bank-icon { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: var(--brand-50); color: var(--brand); }
 .bank-figures { display: flex; gap: 28px; }

@@ -97,7 +97,7 @@ export function BankingHome() {
             </div>
             <div className="bank-figures">
               <div>
-                <span className="muted small">Balance in MGI</span>
+                <span className="muted small">Balance in OrdexaGo</span>
                 <strong className={a.balance < 0 ? "text-overdue" : ""}>{money(a.balance)}</strong>
               </div>
               {a.statement.lastBalance !== null ? (
@@ -434,13 +434,13 @@ function MatchModal({ line, accounts, bankCode, onClose, onDone }) {
         </div>
 
         <h4 className="section-title" style={{ marginTop: 0 }}>
-          Match with a transaction already in MGI
+          Match with a transaction already in OrdexaGo
         </h4>
         {!sugs ? (
           <Spinner />
         ) : !sugs.length ? (
           <p className="muted small">
-            Nothing in MGI for this exact amount. If it's a customer payment or a bill payment, record it first (
+            Nothing in OrdexaGo for this exact amount. If it's a customer payment or a bill payment, record it first (
             <Link to="/payments/new">Record Payment</Link> · <Link to="/payments-made/new">Payment Made</Link>) using this bank account, then come back to
             match. Otherwise categorise it below.
           </p>
@@ -623,7 +623,7 @@ function Reconcile({ code, acc, onChanged, openLine, version }) {
           )}
           {r.openingDifference ? (
             <div className="alert alert-error">
-              Opening balance mismatch: the statement starts at {money(r.statementOpening)} on {date(r.statementStart)}, but MGI shows {money(r.bookOpening)} the
+              Opening balance mismatch: the statement starts at {money(r.statementOpening)} on {date(r.statementStart)}, but OrdexaGo shows {money(r.bookOpening)} the
               day before. Record the opening balance with a manual journal (against Opening Balance Equity) or check earlier entries.
             </div>
           ) : null}
@@ -637,11 +637,11 @@ function Reconcile({ code, acc, onChanged, openLine, version }) {
             <table className="report-table">
               <tbody>
                 <tr className="row-total">
-                  <td>Balance as per MGI books</td>
+                  <td>Balance as per OrdexaGo books</td>
                   <td className="num">{money(r.bookBalance)}</td>
                 </tr>
                 <BrsSection
-                  title="Add: cheques issued / payments recorded in MGI but not yet cleared by the bank"
+                  title="Add: cheques issued / payments recorded in OrdexaGo but not yet cleared by the bank"
                   items={r.uncleared.filter((u) => u.amount < 0).map((u) => ({ ...u, show: -u.amount }))}
                   renderLabel={(u) => (
                     <>
@@ -650,7 +650,7 @@ function Reconcile({ code, acc, onChanged, openLine, version }) {
                   )}
                 />
                 <BrsSection
-                  title="Less: deposits recorded in MGI but not yet credited by the bank"
+                  title="Less: deposits recorded in OrdexaGo but not yet credited by the bank"
                   items={r.uncleared.filter((u) => u.amount > 0).map((u) => ({ ...u, show: u.amount }))}
                   renderLabel={(u) => (
                     <>
@@ -659,12 +659,12 @@ function Reconcile({ code, acc, onChanged, openLine, version }) {
                   )}
                 />
                 <BrsSection
-                  title="Add: money received in the bank but not yet recorded in MGI"
+                  title="Add: money received in the bank but not yet recorded in OrdexaGo"
                   items={[...r.notInBooks, ...r.excluded.map((x) => ({ ...x, excluded: true }))].filter((l) => l.amount > 0).map((l) => ({ ...l, show: l.amount }))}
                   renderLabel={(l) => <StatementItem l={l} openLine={openLine} />}
                 />
                 <BrsSection
-                  title="Less: money paid from the bank but not yet recorded in MGI"
+                  title="Less: money paid from the bank but not yet recorded in OrdexaGo"
                   items={[...r.notInBooks, ...r.excluded.map((x) => ({ ...x, excluded: true }))].filter((l) => l.amount < 0).map((l) => ({ ...l, show: -l.amount }))}
                   renderLabel={(l) => <StatementItem l={l} openLine={openLine} />}
                 />
@@ -867,7 +867,7 @@ export function BankAccountPage() {
       const { data } = await api.post("/banking/lines/bulk", { ids, action, ...extra });
       const verb = { categorize: "categorised", exclude: "excluded", automatch: "matched", undo: "undone" }[action];
       toast(
-        `${data.done} line${data.done === 1 ? "" : "s"} ${verb}${data.skipped ? ` · ${data.skipped} skipped${action === "automatch" ? " (no matching transaction in MGI)" : ""}` : ""}`,
+        `${data.done} line${data.done === 1 ? "" : "s"} ${verb}${data.skipped ? ` · ${data.skipped} skipped${action === "automatch" ? " (no matching transaction in OrdexaGo)" : ""}` : ""}`,
         data.done ? "success" : "error"
       );
       if (data.errors?.length) toast(data.errors[0], "error");
@@ -884,7 +884,7 @@ export function BankAccountPage() {
       const { data } = await api.post(`/banking/${encodeURIComponent(code)}/apply-rules`, { ids });
       toast(
         data.categorized
-          ? `Rules categorised ${data.categorized} line${data.categorized === 1 ? "" : "s"}${data.skippedHasMatch ? ` · ${data.skippedHasMatch} left to match (already in MGI)` : ""}`
+          ? `Rules categorised ${data.categorized} line${data.categorized === 1 ? "" : "s"}${data.skippedHasMatch ? ` · ${data.skippedHasMatch} left to match (already in OrdexaGo)` : ""}`
           : "No lines matched your rules",
         data.categorized ? "success" : "error"
       );
@@ -906,7 +906,7 @@ export function BankAccountPage() {
           </button>
         )}
         <Link to={`/chart-of-accounts/${encodeURIComponent(code)}`} className="btn">
-          Transactions in MGI
+          Transactions in OrdexaGo
         </Link>
         <button className="btn btn-primary" onClick={() => setImportOpen(true)}>
           <Icon name="plus" size={16} /> Import Statement
@@ -915,7 +915,7 @@ export function BankAccountPage() {
 
       <div className="card stat-row" style={{ marginBottom: 18 }}>
         <div>
-          <span className="muted small">Balance in MGI</span>
+          <span className="muted small">Balance in OrdexaGo</span>
           <strong className="big">{money(acc.balance)}</strong>
         </div>
         <div>
@@ -948,7 +948,7 @@ export function BankAccountPage() {
           title={tab === "unmatched" ? (acc.statement.lines ? "All caught up" : "Import your bank statement") : "Nothing here"}
           text={
             tab === "unmatched" && !acc.statement.lines
-              ? "Upload the CSV statement from your bank. MGI suggests matches with payments and expenses you've recorded, and you can categorise the rest in a click."
+              ? "Upload the CSV statement from your bank. OrdexaGo suggests matches with payments and expenses you've recorded, and you can categorise the rest in a click."
               : undefined
           }
           action={

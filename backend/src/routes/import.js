@@ -181,7 +181,7 @@ router.get("/templates/:type", (req, res) => {
   const t = TEMPLATES[req.params.type];
   if (!t) return res.status(404).send({ message: "No such template" });
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
-  res.setHeader("Content-Disposition", `attachment; filename="mgi-${req.params.type}-template.csv"`);
+  res.setHeader("Content-Disposition", `attachment; filename="ordexago-${req.params.type}-template.csv"`);
   res.send("﻿" + t.join("\r\n") + "\r\n");
 });
 

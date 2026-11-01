@@ -214,7 +214,7 @@ function RuleModal({ open, rule, accounts, banks, onClose, onSaved }) {
               ? `Each matching line becomes an expense in "${target.name}".`
               : `Each matching line becomes a journal between the bank and "${target.name}".`
             : "Pick where these lines should be recorded."}{" "}
-          Lines that already have the same amount recorded in MGI on the same day are left for you to match instead.
+          Lines that already have the same amount recorded in OrdexaGo on the same day are left for you to match instead.
         </p>
         {rule && (
           <label className="check">
@@ -294,7 +294,7 @@ export function BankRules() {
         <Empty
           icon="bank"
           title="No transaction rules yet"
-          text="Teach MGI how to record repeat transactions — bank charges, Facebook/Google ads, rent, interest — and they'll be categorised automatically when you import a statement."
+          text="Teach OrdexaGo how to record repeat transactions — bank charges, Facebook/Google ads, rent, interest — and they'll be categorised automatically when you import a statement."
           action={
             <button className="btn btn-primary" onClick={() => setModal("new")}>
               New Rule

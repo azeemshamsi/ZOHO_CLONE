@@ -25,8 +25,8 @@ async function invite(req, user) {
     try {
       await sendOrgMail(org, {
         to: [user.email],
-        subject: `${req.user.name} invited you to ${org.name} on MGI`,
-        text: `Hi ${user.name},\n\n${req.user.name} has invited you to join ${org.name} on MGI as ${ROLES[user.role].label}.\n\nAccept the invitation and set your password: ${link}\n\nThe link works for 7 days.`,
+        subject: `${req.user.name} invited you to ${org.name} on OrdexaGo`,
+        text: `Hi ${user.name},\n\n${req.user.name} has invited you to join ${org.name} on OrdexaGo as ${ROLES[user.role].label}.\n\nAccept the invitation and set your password: ${link}\n\nThe link works for 7 days.`,
       });
       sent = true;
     } catch (e) {
@@ -57,7 +57,7 @@ router.post(
       req.body
     );
     const email = data.email.toLowerCase();
-    if (await User.findOne({ email })) throw new HttpError(409, "This email already has an MGI account");
+    if (await User.findOne({ email })) throw new HttpError(409, "This email already has an OrdexaGo account");
     const user = new User({ name: data.name, email, role: data.role, organization: req.org, status: "invited", invitedBy: req.user._id, verified: true });
     const r = await invite(req, user);
     res.status(201).send({ user: pub(user), ...r });

@@ -64,7 +64,7 @@ router.post(
 
     if (needsVerification) {
       const t = await createToken(user._id, "verify");
-      await sendEmail(email, "Verify your MGI account", `Verify your email: ${env.APP_URL}/verify/${user._id}/${t.token}`);
+      await sendEmail(email, "Verify your OrdexaGo account", `Verify your email: ${env.APP_URL}/verify/${user._id}/${t.token}`);
       return res.status(201).send({ message: "We sent a verification link to your email." });
     }
     res.status(201).send(await sessionPayload(user));
@@ -85,7 +85,7 @@ router.post(
     if (user.status === "inactive") throw new HttpError(403, "Your access to this organization has been turned off. Contact your admin.");
     if (!user.verified) {
       const t = await createToken(user._id, "verify");
-      await sendEmail(user.email, "Verify your MGI account", `Verify your email: ${env.APP_URL}/verify/${user._id}/${t.token}`);
+      await sendEmail(user.email, "Verify your OrdexaGo account", `Verify your email: ${env.APP_URL}/verify/${user._id}/${t.token}`);
       throw new HttpError(403, "Please verify your email. We sent you a new link.");
     }
     user.lastLogin = new Date();
@@ -147,7 +147,7 @@ router.post(
     const user = await User.findOne({ email: email.toLowerCase() });
     if (user) {
       const t = await createToken(user._id, "reset");
-      await sendEmail(user.email, "Reset your MGI password", `Reset your password: ${env.APP_URL}/reset-password/${user._id}/${t.token}`);
+      await sendEmail(user.email, "Reset your OrdexaGo password", `Reset your password: ${env.APP_URL}/reset-password/${user._id}/${t.token}`);
     }
     // Same answer whether or not the account exists, so emails can't be probed.
     res.send({ message: "If that email has an account, a reset link is on its way." });

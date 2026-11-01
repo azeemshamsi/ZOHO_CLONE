@@ -66,7 +66,7 @@ function Connection({ store, onSaved }) {
         <Field label="Store address" required hint="Your .myshopify.com address, e.g. wooden-twist.myshopify.com">
           <input value={f.shop} onChange={set("shop")} placeholder="your-store.myshopify.com" />
         </Field>
-        <Field label="How MGI connects">
+        <Field label="How OrdexaGo connects">
           <select value={f.authType} onChange={set("authType")}>
             <option value="client">App from the Shopify Dev Dashboard (Client ID + secret)</option>
             <option value="token">Older custom app (Admin API access token shpat_…)</option>
@@ -105,7 +105,7 @@ function Connection({ store, onSaved }) {
           {busy ? "Connecting…" : "Save & Connect"}
         </button>
         {store.connected && (
-          <button type="button" className="btn btn-ghost" onClick={() => window.confirm("Disconnect Shopify? Orders already in MGI stay.") && api.delete("/shopify/store").then(() => api.get("/shopify/store").then((r) => onSaved(r.data)))}>
+          <button type="button" className="btn btn-ghost" onClick={() => window.confirm("Disconnect Shopify? Orders already in OrdexaGo stay.") && api.delete("/shopify/store").then(() => api.get("/shopify/store").then((r) => onSaved(r.data)))}>
             Disconnect
           </button>
         )}
@@ -137,7 +137,7 @@ function Invoicing({ store, onSaved }) {
   return (
     <form className="card form" onSubmit={save} style={{ marginTop: 18 }}>
       <h4 className="section-title" style={{ marginTop: 0 }}>Invoices & shipping</h4>
-      <p className="muted small">Shopify prices include GST. MGI takes the GST out of each price using the item's rate, puts discounts on the lines, adds shipping as a line at the order's highest GST rate, and makes the invoice total match Shopify to the paisa.</p>
+      <p className="muted small">Shopify prices include GST. OrdexaGo takes the GST out of each price using the item's rate, puts discounts on the lines, adds shipping as a line at the order's highest GST rate, and makes the invoice total match Shopify to the paisa.</p>
       <div className="form-grid">
         <div className="row-3">
           <Field label="New invoices are">
@@ -229,7 +229,7 @@ function InventorySync({ store, onSaved }) {
         <span className={`pill ${store.inventorySync ? "pill-green" : ""}`}>{store.inventorySync ? "Syncing" : "Off"}</span>
       </h4>
       <p className="muted small">
-        MGI sends each item's Shopify quantity whenever stock changes: in stock − reserved by open Shopify orders − buffer, plus virtual (made-to-order) stock. Linked listings get their main item's quantity. Needs the <code>read_locations</code>, <code>write_inventory</code> and (for returns) <code>read_returns, write_returns</code> scopes.
+        OrdexaGo sends each item's Shopify quantity whenever stock changes: in stock − reserved by open Shopify orders − buffer, plus virtual (made-to-order) stock. Linked listings get their main item's quantity. Needs the <code>read_locations</code>, <code>write_inventory</code> and (for returns) <code>read_returns, write_returns</code> scopes.
       </p>
       <div className="form-grid">
         <label className="switch-row">
@@ -237,7 +237,7 @@ function InventorySync({ store, onSaved }) {
             <input type="checkbox" checked={f.inventorySync} onChange={(e) => setF({ ...f, inventorySync: e.target.checked })} />
             <span />
           </span>
-          <span>Sync inventory from MGI to Shopify</span>
+          <span>Sync inventory from OrdexaGo to Shopify</span>
         </label>
         <div className="row-2">
           <Field label="Shopify location to update">
@@ -304,7 +304,7 @@ function Rules({ store, onSaved }) {
     <form className="card form" onSubmit={save} style={{ marginTop: 18 }}>
       <h4 className="section-title" style={{ marginTop: 0 }}>GST & HSN rules for new items</h4>
       <p className="muted small">
-        When a Shopify product becomes an item, MGI finds its category from the product type, Shopify category, tags or title (rules are checked top to bottom). The category sets the GST rate; a Shopify HSN that's missing, invalid or from another category is replaced by the category's default HSN. Anything changed is flagged under <Link to="/shopify-orders">Review items</Link>. Items that already exist keep their HSN and rate.
+        When a Shopify product becomes an item, OrdexaGo finds its category from the product type, Shopify category, tags or title (rules are checked top to bottom). The category sets the GST rate; a Shopify HSN that's missing, invalid or from another category is replaced by the category's default HSN. Anything changed is flagged under <Link to="/shopify-orders">Review items</Link>. Items that already exist keep their HSN and rate.
       </p>
       <table className="table compact rules-table">
         <thead>
@@ -442,7 +442,7 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
               ))}
             </select>
           </Field>
-          <Field label="Name in MGI">
+          <Field label="Name in OrdexaGo">
             <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder={c.label} />
           </Field>
         </div>
@@ -504,7 +504,7 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
           <label className="check" style={{ alignSelf: "end" }}>
             <input type="checkbox" checked={f.options.codEnabled !== false} onChange={(e) => setO("codEnabled", e.target.checked)} /> COD enabled
           </label>
-          <Field label="Label format (MGI labels)">
+          <Field label="Label format (OrdexaGo labels)">
             <select value={f.options.labelFormat || "4x6"} onChange={(e) => setO("labelFormat", e.target.value)}>
               <option value="4x6">4x6 thermal</option>
               <option value="a4">A4 (4 per page)</option>

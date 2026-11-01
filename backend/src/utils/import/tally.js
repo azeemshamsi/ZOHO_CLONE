@@ -53,7 +53,7 @@ function normalise(xml) {
   };
 
   const out = { accounts: [], customers: [], vendors: [], invoices: [], bills: [], creditNotes: [], vendorCredits: [], payments: [], vendorPayments: [], journals: [] };
-  const ledgerGroup = new Map(); // ledger name → MGI group / "debtors" / "creditors"
+  const ledgerGroup = new Map(); // ledger name → OrdexaGo group / "debtors" / "creditors"
   for (const l of collect(xml, "LEDGER")) {
     const name = nameOf(l);
     if (!name) continue;

@@ -19,7 +19,7 @@ export function AuthShell({ title, subtitle, children, footer }) {
             <li>Record payments by UPI, bank, cash or cheque</li>
           </ul>
         </div>
-        <p className="auth-foot">© {new Date().getFullYear()} MGI</p>
+        <p className="auth-foot">© {new Date().getFullYear()} OrdexaGo</p>
       </div>
       <div className="auth-main">
         <div className="auth-card">
@@ -61,10 +61,10 @@ export function Login() {
   return (
     <AuthShell
       title="Sign in"
-      subtitle="Welcome back to MGI."
+      subtitle="Welcome back to OrdexaGo."
       footer={
         <>
-          New to MGI? <Link to="/signup">Create an account</Link>
+          New to OrdexaGo? <Link to="/signup">Create an account</Link>
         </>
       }
     >
@@ -119,7 +119,7 @@ export function Signup() {
 
   return (
     <AuthShell
-      title="Create your MGI account"
+      title="Create your OrdexaGo account"
       subtitle="Set up your organization in under a minute."
       footer={
         <>

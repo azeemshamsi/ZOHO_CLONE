@@ -140,16 +140,16 @@ router.post(
       }),
       req.body
     );
-    // Skip only lines that are already in MGI. Statements often contain genuinely identical lines
+    // Skip only lines that are already in OrdexaGo. Statements often contain genuinely identical lines
     // (two ₹59 SMS charges on the same day), so duplicates are counted, not just looked up:
-    // if MGI has 1 such line and the file has 2, the second one is imported.
+    // if OrdexaGo has 1 such line and the file has 2, the second one is imported.
     const keyOf = (date, deposit, withdrawal, description) =>
       `${new Date(date).toISOString().slice(0, 10)}|${deposit}|${withdrawal}|${String(description || "").trim().toLowerCase()}`;
     const existing = await BankStatementLine.find(
       { organization: req.org, account: req.params.code },
       { date: 1, deposit: 1, withdrawal: 1, description: 1, balance: 1 }
     ).lean();
-    const have = {}; // key -> balances of lines already in MGI (null when unknown)
+    const have = {}; // key -> balances of lines already in OrdexaGo (null when unknown)
     for (const l of existing) (have[keyOf(l.date, l.deposit, l.withdrawal, l.description)] ||= []).push(l.balance ?? null);
 
     const batch = `b${Date.now()}`;
@@ -165,7 +165,7 @@ router.post(
       const balance = r.balance === null || r.balance === undefined ? null : round2(r.balance);
       candidates.push({ i, r, deposit, withdrawal, balance, key: keyOf(r.date, deposit, withdrawal, r.description) });
     }
-    // Pass 1: a line whose bank balance matches a line already in MGI is that same line.
+    // Pass 1: a line whose bank balance matches a line already in OrdexaGo is that same line.
     const skip = new Set();
     for (const c of candidates) {
       const pool = have[c.key];
@@ -176,7 +176,7 @@ router.post(
         skip.add(c.i);
       }
     }
-    // Pass 2: for lines without a matching balance, skip only as many as MGI still has.
+    // Pass 2: for lines without a matching balance, skip only as many as OrdexaGo still has.
     for (const c of candidates) {
       if (skip.has(c.i)) continue;
       const pool = have[c.key];
@@ -338,7 +338,7 @@ async function findLine(req) {
   return line;
 }
 
-// MGI transactions on this account with the same amount, closest date first.
+// OrdexaGo transactions on this account with the same amount, closest date first.
 router.get(
   "/lines/:id/suggestions",
   ah(async (req, res) => {
@@ -413,7 +413,7 @@ router.post(
 /**
  * Bulk actions on ticked lines.
  *  categorize: record each against one account   exclude: ignore them
- *  automatch: match each to the closest MGI transaction with the same amount (within 7 days)
+ *  automatch: match each to the closest OrdexaGo transaction with the same amount (within 7 days)
  *  undo: undo matches/categorisations/exclusions
  */
 router.post(

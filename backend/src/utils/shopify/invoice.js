@@ -74,7 +74,7 @@ async function invoiceOrder(ctx, order, store) {
   }
   const pos = order.shippingAddress?.state || order.billingAddress?.state || org.state;
   const customer = await customerFor(ctx.org, order, org);
-  // Make MGI's total equal Shopify's: rounding paise (and anything Shopify adds that isn't itemised) go to Adjustment.
+  // Make OrdexaGo's total equal Shopify's: rounding paise (and anything Shopify adds that isn't itemised) go to Adjustment.
   const t = computeTotals({ lineItems, orgState: org.state, placeOfSupply: pos });
   const target = order.total || t.total;
   const adjustment = r2(target - t.total);
@@ -115,7 +115,7 @@ async function invoiceOrder(ctx, order, store) {
   return { invoiceNumber: inv.invoiceNumber, invoiceId: inv._id, total: inv.total, adjustment, paid, itemsCreated: created };
 }
 
-// Make sure every line has an MGI item (used when orders are synced, so items appear straight away).
+// Make sure every line has an OrdexaGo item (used when orders are synced, so items appear straight away).
 async function ensureItems(orgId, order, store, cache) {
   let n = 0;
   for (const l of order.lines) {

@@ -30,7 +30,7 @@ async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {} }) {
   const store = await ShopifyStore.findOne({ organization: ctx.org });
   const org = await Organization.findById(ctx.org);
   const p = { ...(store?.pkg?.toObject?.() || store?.pkg || {}), ...Object.fromEntries(Object.entries(pkg).filter(([, v]) => v !== "" && v !== null && v !== undefined)) };
-  // HSN and GST from the (checked) MGI items, not Shopify's.
+  // HSN and GST from the (checked) OrdexaGo items, not Shopify's.
   const Item = require("../../models/Item");
   const items = new Map((await Item.find({ _id: { $in: order.lines.map((l) => l.item).filter(Boolean) } }).lean()).map((i) => [String(i._id), i]));
   const s = shipmentFrom(order, org, p, items);

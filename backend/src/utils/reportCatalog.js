@@ -845,7 +845,7 @@ const REPORTS = {
       kind: "table",
       columns: [
         col("name", "Account", "text", { link: "href" }),
-        col("books", "Balance in MGI", "money", { sum: true }),
+        col("books", "Balance in OrdexaGo", "money", { sum: true }),
         col("bank", "Balance as per bank", "money"),
         col("lines", "Statement lines", "number", { sum: true }),
         col("todo", "To match / categorise", "number", { sum: true }),

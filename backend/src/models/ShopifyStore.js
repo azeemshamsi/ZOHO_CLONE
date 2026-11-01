@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-// GST category rule used when Shopify products become MGI items.
+// GST category rule used when Shopify products become OrdexaGo items.
 const ruleSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -56,7 +56,7 @@ const shopifyStoreSchema = new mongoose.Schema(
       height: { type: Number, default: 10 },
     },
     fulfillInShopify: { type: Boolean, default: false },
-    // Inventory sync (MGI → Shopify)
+    // Inventory sync (OrdexaGo → Shopify)
     inventorySync: { type: Boolean, default: false },
     locationId: { type: String, default: "" },
     locationName: { type: String, default: "" },

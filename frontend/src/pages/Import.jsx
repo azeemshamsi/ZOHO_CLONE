@@ -35,7 +35,7 @@ function download(type) {
   api.get(`/import/templates/${type}`, { responseType: "blob" }).then((r) => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(r.data);
-    a.download = `mgi-${type}-template.csv`;
+    a.download = `ordexago-${type}-template.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   });
@@ -145,7 +145,7 @@ export function Import() {
               <div className="muted small">Excel (.xlsx, .xls), CSV, or XML — up to 25 MB</div>
               <input ref={input} type="file" hidden accept=".xlsx,.xls,.xlsm,.ods,.csv,.txt,.tsv,.xml" onChange={(e) => pick(e.target.files[0])} />
             </div>
-            <Field label="What's in this file?" hint="Leave on automatic — MGI reads the column names. Change it only if a sheet isn't recognised.">
+            <Field label="What's in this file?" hint="Leave on automatic — OrdexaGo reads the column names. Change it only if a sheet isn't recognised.">
               <select
                 value={type}
                 onChange={(e) => {
@@ -231,7 +231,7 @@ export function Import() {
             3. Import
           </h3>
           {preview.hasOpening && (
-            <Field label="Opening balance date" required hint="The date your books in MGI start from. Opening balances are posted on this date, against Opening Balance Equity.">
+            <Field label="Opening balance date" required hint="The date your books in OrdexaGo start from. Opening balances are posted on this date, against Opening Balance Equity.">
               <input type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} style={{ maxWidth: 200 }} />
             </Field>
           )}

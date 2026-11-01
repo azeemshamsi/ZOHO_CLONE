@@ -2,7 +2,7 @@
  * Courier integrations. Each carrier exposes:
  *   book(acc, s)      → { awb, courierName, labelUrl?, trackingUrl?, refs? }
  *   track(acc, sh)    → { status: picked|in_transit|out_for_delivery|delivered|rto|cancelled|pending, text, events[] }
- *   label(acc, sh)    → { url } | { pdf: Buffer } | null   (null → MGI prints its own 4x6 label)
+ *   label(acc, sh)    → { url } | { pdf: Buffer } | null   (null → OrdexaGo prints its own 4x6 label)
  *   cancel(acc, sh)
  * `s` is the shipment built from a Shopify order (see shipmentFrom); `sh` is order.shipment.
  */
@@ -26,7 +26,7 @@ const pickupOk = (acc) => {
   if (!p.pincode || !p.address || !p.phone) throw new Error(`${acc.name}: fill in the pickup address, pincode and phone in Shopify Settings → Couriers`);
 };
 
-// Map courier status text to MGI's tracking states.
+// Map courier status text to OrdexaGo's tracking states.
 function normStatus(text) {
   const t = String(text || "").toLowerCase();
   if (/rto|return(ed)? to origin|returned|return delivered|rt[- ]?(in|delivered)/.test(t)) return "rto";

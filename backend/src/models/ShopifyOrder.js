@@ -69,7 +69,7 @@ const shopifyOrderSchema = new mongoose.Schema(
     outstanding: Number,
     lines: [lineSchema],
     shopifyFulfillments: [{ _id: false, company: String, number: String, url: String }],
-    // MGI workflow
+    // OrdexaGo workflow
     status: { type: String, enum: ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "return_created", "returned", "cancelled"], default: "new" },
     returnStatus: String, // Shopify's
     shopifyReturnId: String,

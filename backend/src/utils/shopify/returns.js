@@ -97,7 +97,7 @@ async function markReturnClosed(ctx, order, store) {
       order.shopifyReturnId = id;
       await closeInShopify(store, id);
     } catch (e) {
-      out.warning = `Closed in MGI; Shopify: ${e.message}`;
+      out.warning = `Closed in OrdexaGo; Shopify: ${e.message}`;
     }
   if (order.invoice && store?.returnCreditNote !== false && !order.returnCreditNote) {
     const cn = await creditNoteFor(ctx, order);

@@ -86,7 +86,7 @@ router.post(
     const org = await Organization.findById(req.org);
     await require("../utils/mailer").sendOrgMail(org, {
       to: [req.user.email],
-      subject: `MGI test email for ${org.name}`,
+      subject: `OrdexaGo test email for ${org.name}`,
       text: `Hi ${req.user.name},\n\nYour email settings work. Invoices, quotes and reminders will be sent from this account.\n\nMGI`,
     });
     res.send({ message: `Test email sent to ${req.user.email}` });

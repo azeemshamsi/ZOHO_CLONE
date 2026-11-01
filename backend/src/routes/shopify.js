@@ -404,7 +404,7 @@ router.put(
   })
 );
 
-// Labels: the courier's own label when there is one (single order), otherwise MGI's 4x6 label (any number of orders).
+// Labels: the courier's own label when there is one (single order), otherwise OrdexaGo's 4x6 label (any number of orders).
 router.get(
   "/orders/:id/label",
   ah(async (req, res) => {
