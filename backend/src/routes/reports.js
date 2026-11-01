@@ -300,4 +300,15 @@ router.get(
   })
 );
 
+// Every other report in the Reports Center.
+router.get(
+  "/:key",
+  ah(async (req, res) => {
+    const { REPORTS } = require("../utils/reportCatalog");
+    const fn = REPORTS[req.params.key];
+    if (!fn) return res.status(404).send({ message: "Report not found" });
+    res.send(await fn(req, req.query));
+  })
+);
+
 module.exports = router;

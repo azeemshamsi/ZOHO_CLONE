@@ -105,3 +105,19 @@ Every invoice, payment, credit note, bill, payment made, expense and manual jour
 ```bash
 npm test   # GST calculation tests
 ```
+
+## Reports Center
+
+The Reports Center (Reports in the sidebar) works like Zoho's. It has a category sidebar, search, starred favourites and a "last visited" time for each report. It holds 43 reports:
+
+- **Business Overview:** Profit and Loss (standard, Schedule III and horizontal), Cash Flow Statement (indirect method), Balance Sheet (standard, Schedule III and horizontal), Business Performance Ratios, Movement of Equity
+- **Sales:** by customer, by item, monthly summary
+- **Receivables:** customer balances, AR ageing summary and details, invoice, quote, sales order and credit note details
+- **Payments Received**
+- **Payables:** vendor balances, AP ageing summary and details, bill, purchase order and vendor credit details, payments made
+- **Purchases and Expenses:** by vendor, by item and by category, expenses by vendor, expense details
+- **Taxes:** GSTR-1, GSTR-3B, tax summary by rate
+- **Banking:** reconciliation status
+- **Accountant:** account transactions, account type summary, general ledger and detailed general ledger, journal report, day book, trial balance
+
+Every report has date filters, CSV export and print/PDF. The new reports live in `backend/src/utils/reportCatalog.js` and are served at `GET /api/reports/:key`.

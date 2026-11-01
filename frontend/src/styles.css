@@ -485,3 +485,24 @@ address { font-style: normal; line-height: 1.6; }
   .doc-items th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .ribbon, .doc-grand td, .receipt-amount { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* Reports Center */
+.rc { display: grid; grid-template-columns: 230px 1fr; gap: 18px; align-items: start; }
+.rc-side { padding: 8px; position: sticky; top: 12px; }
+.rc-side-item { display: flex; justify-content: space-between; width: 100%; background: none; border: 0; text-align: left; padding: 8px 10px; border-radius: 6px; cursor: pointer; font: inherit; color: var(--text, inherit); }
+.rc-side-item:hover { background: var(--line-2); }
+.rc-side-item.active { background: var(--brand-50); color: var(--brand-600); font-weight: 600; }
+.rc-count { color: var(--muted); font-size: 12px; }
+.rc-side-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 14px 10px 6px; }
+.rc-main { padding: 0; overflow-x: auto; }
+.rc-main-head { display: flex; align-items: baseline; gap: 10px; padding: 16px 18px 8px; }
+.rc-main-head h3 { margin: 0; font-size: 16px; }
+.rc-star { background: none; border: 0; cursor: pointer; font-size: 16px; color: #b8bcc8; margin-right: 6px; padding: 0; }
+.rc-star.on { color: #f5a623; }
+.rc-name { font-weight: 600; }
+.rc-desc { margin-left: 22px; }
+.rc-search { width: 260px; }
+.report-horizontal { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+.report-note { margin-top: 14px; }
+.report-table tr.muted td { color: var(--muted); font-style: italic; }
+@media (max-width: 900px) { .rc { grid-template-columns: 1fr; } .rc-side { position: static; } .report-horizontal { grid-template-columns: 1fr; } }

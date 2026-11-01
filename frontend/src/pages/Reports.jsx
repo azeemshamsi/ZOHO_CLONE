@@ -5,7 +5,8 @@ import { useAuth } from "../lib/auth";
 import { money, date, isoDate } from "../lib/format";
 import { stateName } from "../lib/constants";
 import { PERIODS, periodRange, fmtRange, exportCsv } from "../lib/period";
-import { PageHeader, Spinner } from "../components/ui";
+import { PageHeader, Spinner, Status } from "../components/ui";
+import { docLink } from "./Accounts";
 import Icon from "../components/Icon";
 
 /* ---------------- Period pickers ---------------- */
@@ -47,44 +48,162 @@ function AsOfPicker({ value, onChange }) {
 }
 
 /* ---------------- Catalogue ---------------- */
+const R = (key, title, group, mode, desc, extra = {}) => ({ key, title, group, mode, desc, ...extra });
 export const REPORTS = [
-  { key: "profit-and-loss", title: "Profit and Loss", group: "Business Overview", mode: "range", desc: "Income, cost of goods sold and expenses, and the profit left over." },
-  { key: "balance-sheet", title: "Balance Sheet", group: "Business Overview", mode: "asof", desc: "What the business owns and owes on a given date." },
-  { key: "sales-by-customer", title: "Sales by Customer", group: "Sales", mode: "range", desc: "Invoiced sales for each customer." },
-  { key: "sales-by-item", title: "Sales by Item", group: "Sales", mode: "range", desc: "Quantity sold and sales value per item." },
-  { key: "ar-aging", title: "Receivables Ageing", group: "Receivables & Payables", mode: "none", desc: "What customers owe, by how overdue it is." },
-  { key: "ap-aging", title: "Payables Ageing", group: "Receivables & Payables", mode: "none", desc: "What you owe vendors, by how overdue it is." },
-  { key: "expenses-by-category", title: "Expenses by Category", group: "Purchases & Expenses", mode: "range", desc: "Spending per expense account, including bills." },
-  { key: "trial-balance", title: "Trial Balance", group: "Accountant", mode: "asof", desc: "Debit and credit totals of every account." },
-  { key: "gstr1", title: "GSTR-1 Summary", group: "GST", mode: "range", period: "last_month", desc: "Outward supplies: B2B, B2C large & small, credit notes, HSN summary." },
-  { key: "gstr3b", title: "GSTR-3B Summary", group: "GST", mode: "range", period: "last_month", desc: "Tax on sales, input tax credit and net GST payable." },
+  // Business Overview
+  R("profit-and-loss", "Profit and Loss", "Business Overview", "range", "Income, cost of goods sold and expenses, and the profit left over."),
+  R("pl-schedule-iii", "Profit and Loss (Schedule III)", "Business Overview", "range", "Statement of profit and loss in the Companies Act format."),
+  R("horizontal-pl", "Horizontal Profit and Loss", "Business Overview", "range", "Expenses and income side by side (T-format)."),
+  R("cash-flow", "Cash Flow Statement", "Business Overview", "range", "Where cash came from and went: operating, investing, financing."),
+  R("balance-sheet", "Balance Sheet", "Business Overview", "asof", "What the business owns and owes on a given date."),
+  R("horizontal-bs", "Horizontal Balance Sheet", "Business Overview", "asof", "Liabilities and assets side by side (T-format)."),
+  R("bs-schedule-iii", "Balance Sheet (Schedule III)", "Business Overview", "asof", "Balance sheet in the Companies Act format."),
+  R("ratios", "Business Performance Ratios", "Business Overview", "range", "Liquidity, profitability, solvency and efficiency ratios."),
+  R("movement-of-equity", "Movement of Equity", "Business Overview", "range", "Opening, additions, reductions and closing equity."),
+  // Sales
+  R("sales-by-customer", "Sales by Customer", "Sales", "range", "Invoiced sales for each customer."),
+  R("sales-by-item", "Sales by Item", "Sales", "range", "Quantity sold and sales value per item."),
+  R("sales-summary", "Sales Summary", "Sales", "range", "Sales, tax and credit notes month by month."),
+  // Receivables
+  R("customer-balances", "Customer Balances", "Receivables", "none", "Invoiced, received, credits and balance due per customer."),
+  R("ar-aging", "AR Aging Summary", "Receivables", "none", "What customers owe, by how overdue it is."),
+  R("ar-aging-details", "AR Aging Details", "Receivables", "none", "Every unpaid invoice with its age."),
+  R("invoice-details", "Invoice Details", "Receivables", "range", "All invoices in the period with status and balance."),
+  R("quote-details", "Quote Details", "Receivables", "range", "All quotes in the period."),
+  R("sales-order-details", "Sales Order Details", "Receivables", "range", "All sales orders in the period."),
+  R("credit-note-details", "Credit Note Details", "Receivables", "range", "All credit notes and their remaining credit."),
+  // Payments Received
+  R("payments-received", "Payments Received", "Payments Received", "range", "Customer payments with mode, reference and invoices settled."),
+  // Payables
+  R("vendor-balances", "Vendor Balances", "Payables", "none", "Billed, paid, credits and balance due per vendor."),
+  R("ap-aging", "AP Aging Summary", "Payables", "none", "What you owe vendors, by how overdue it is."),
+  R("ap-aging-details", "AP Aging Details", "Payables", "none", "Every unpaid bill with its age."),
+  R("bill-details", "Bill Details", "Payables", "range", "All bills in the period with status and balance."),
+  R("purchase-order-details", "Purchase Order Details", "Payables", "range", "All purchase orders in the period."),
+  R("vendor-credit-details", "Vendor Credit Details", "Payables", "range", "All vendor credits and their remaining credit."),
+  R("payments-made", "Payments Made", "Payables", "range", "Vendor payments with mode, reference and bills settled."),
+  // Purchases and Expenses
+  R("purchases-by-vendor", "Purchases by Vendor", "Purchases and Expenses", "range", "Billed purchases for each vendor."),
+  R("purchases-by-item", "Purchases by Item", "Purchases and Expenses", "range", "Quantity bought and cost per item."),
+  R("expenses-by-category", "Expenses by Category", "Purchases and Expenses", "range", "Spending per expense account, including bills."),
+  R("expenses-by-vendor", "Expenses by Vendor", "Purchases and Expenses", "range", "Bills and expenses grouped by vendor."),
+  R("expense-details", "Expense Details", "Purchases and Expenses", "range", "Every recorded expense with GST."),
+  // Taxes
+  R("gstr1", "GSTR-1 Summary", "Taxes", "range", "Outward supplies: B2B, B2C large & small, credit notes, HSN summary.", { period: "last_month" }),
+  R("gstr3b", "GSTR-3B Summary", "Taxes", "range", "Tax on sales, input tax credit and net GST payable.", { period: "last_month" }),
+  R("tax-summary", "Tax Summary", "Taxes", "range", "Output and input GST by tax rate."),
+  // Banking
+  R("reconciliation-status", "Reconciliation Status", "Banking", "none", "Books vs bank balance and lines still to match, per account."),
+  // Accountant
+  R("account-transactions", "Account Transactions", "Accountant", "link", "Pick an account to see every entry with a running balance.", { to: "/chart-of-accounts" }),
+  R("account-type-summary", "Account Type Summary", "Accountant", "range", "Debits and credits per account type."),
+  R("general-ledger", "General Ledger", "Accountant", "range", "Opening, debits, credits and closing for every account."),
+  R("detailed-general-ledger", "Detailed General Ledger", "Accountant", "range", "Every transaction in every account with a running balance."),
+  R("journal-report", "Journal Report", "Accountant", "range", "Each transaction as a debit/credit journal entry."),
+  R("day-book", "Day Book", "Accountant", "range", "All transactions day by day."),
+  R("trial-balance", "Trial Balance", "Accountant", "asof", "Debit and credit totals of every account."),
 ];
+const CATEGORIES = [...new Set(REPORTS.map((r) => r.group))];
+
+const store = {
+  get(k, d) {
+    try {
+      return JSON.parse(localStorage.getItem(k)) ?? d;
+    } catch {
+      return d;
+    }
+  },
+  set(k, v) {
+    try {
+      localStorage.setItem(k, JSON.stringify(v));
+    } catch {
+      /* storage unavailable */
+    }
+  },
+};
+const FAV = "mgi.reportFavs";
+const SEEN = "mgi.reportSeen";
+const reportHref = (r) => (r.mode === "link" ? r.to : `/reports/${r.key}`);
 
 export function ReportsHome() {
-  const groups = [...new Set(REPORTS.map((r) => r.group))];
+  const [view, setView] = useState("home");
+  const [q, setQ] = useState("");
+  const [favs, setFavs] = useState(() => store.get(FAV, []));
+  const seen = store.get(SEEN, {});
+  const toggleFav = (k) => {
+    const next = favs.includes(k) ? favs.filter((x) => x !== k) : [...favs, k];
+    setFavs(next);
+    store.set(FAV, next);
+  };
+  let list = REPORTS;
+  if (view === "favorites") list = list.filter((r) => favs.includes(r.key));
+  else if (view === "recent") list = list.filter((r) => seen[r.key]).sort((a, b) => seen[b.key] - seen[a.key]);
+  else if (view !== "home") list = list.filter((r) => r.group === view);
+  if (q.trim()) {
+    const t = q.trim().toLowerCase();
+    list = REPORTS.filter((r) => `${r.title} ${r.group} ${r.desc}`.toLowerCase().includes(t));
+  }
+  const title = q.trim() ? `Search results` : view === "home" ? "All Reports" : view === "favorites" ? "Favorites" : view === "recent" ? "Recently Visited" : view;
+  const side = (k, label, count) => (
+    <button key={k} className={`rc-side-item ${view === k && !q ? "active" : ""}`} onClick={() => (setView(k), setQ(""))}>
+      <span>{label}</span>
+      {count !== undefined && <span className="rc-count">{count}</span>}
+    </button>
+  );
   return (
     <>
-      <PageHeader title="Reports" subtitle="Built from your invoices, bills, payments, expenses and journals." />
-      <div className="report-grid">
-        {groups.map((g) => (
-          <div className="card" key={g}>
-            <h3 className="report-group">{g}</h3>
-            <ul className="report-links">
-              {REPORTS.filter((r) => r.group === g).map((r) => (
-                <li key={r.key}>
-                  <Link to={`/reports/${r.key}`}>{r.title}</Link>
-                  <span className="muted small">{r.desc}</span>
-                </li>
-              ))}
-              {g === "Accountant" && (
-                <li>
-                  <Link to="/chart-of-accounts">Account Transactions</Link>
-                  <span className="muted small">Pick an account to see every entry with a running balance.</span>
-                </li>
-              )}
-            </ul>
+      <PageHeader title="Reports Center" subtitle="Every report is built live from your invoices, bills, payments, expenses, journals and bank statements.">
+        <input className="input rc-search" placeholder="Search reports" value={q} onChange={(e) => setQ(e.target.value)} />
+      </PageHeader>
+      <div className="rc">
+        <aside className="rc-side card">
+          {side("home", "Home", REPORTS.length)}
+          {side("favorites", "Favorites", favs.length)}
+          {side("recent", "Recently Visited")}
+          <div className="rc-side-label">Report Category</div>
+          {CATEGORIES.map((c) => side(c, c, REPORTS.filter((r) => r.group === c).length))}
+        </aside>
+        <div className="card rc-main">
+          <div className="rc-main-head">
+            <h3>{title}</h3>
+            <span className="muted small">{list.length} reports</span>
           </div>
-        ))}
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Report Name</th>
+                <th>Report Category</th>
+                <th>Created By</th>
+                <th>Last Visited</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((r) => (
+                <tr key={r.key}>
+                  <td>
+                    <button className={`rc-star ${favs.includes(r.key) ? "on" : ""}`} title={favs.includes(r.key) ? "Remove from favorites" : "Add to favorites"} onClick={() => toggleFav(r.key)}>
+                      {favs.includes(r.key) ? "★" : "☆"}
+                    </button>
+                    <Link to={reportHref(r)} className="rc-name">
+                      {r.title}
+                    </Link>
+                    <div className="muted small rc-desc">{r.desc}</div>
+                  </td>
+                  <td>{r.group}</td>
+                  <td className="muted">System Generated</td>
+                  <td className="muted">{seen[r.key] ? new Date(seen[r.key]).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—"}</td>
+                </tr>
+              ))}
+              {!list.length && (
+                <tr>
+                  <td colSpan={4} className="muted center">
+                    {view === "favorites" ? "Star a report to add it here." : "No reports found."}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </>
   );
@@ -106,6 +225,10 @@ export function ReportPage() {
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (meta) store.set(SEEN, { ...store.get(SEEN, {}), [key]: Date.now() });
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     if (!meta) return;
     setData(null);
     setError("");
@@ -118,7 +241,7 @@ export function ReportPage() {
 
   if (!meta) return <p>Report not found.</p>;
   const subtitle = meta.mode === "range" ? fmtRange(range.from, range.to) : meta.mode === "asof" ? `As of ${date(asOf)}` : `As of ${date(new Date())}`;
-  const Body = BODIES[key];
+  const Body = BODIES[key] || GenericReport;
 
   return (
     <>
@@ -599,6 +722,149 @@ function Gstr3b({ d }) {
       </p>
     </>
   );
+}
+
+/* ---------------- Generic renderers (Reports Center catalog) ---------------- */
+const isNum = (t) => t === "money" || t === "number";
+function Cell({ c, r }) {
+  const v = r[c.key];
+  if (v === null || v === undefined || v === "") return <td className={isNum(c.type) ? "num" : ""} />;
+  let content = v;
+  if (c.type === "money") content = money(v);
+  else if (c.type === "number") content = Number(v).toLocaleString("en-IN");
+  else if (c.type === "date") content = date(v);
+  else if (c.type === "status") content = <Status value={v} />;
+  else if (c.type === "doc" && r.ref) content = <Link to={docLink(r.ref.type, r.ref.id)}>{v}</Link>;
+  if (c.link && r[c.link]) content = <Link to={r[c.link]}>{content}</Link>;
+  return <td className={isNum(c.type) || c.align === "right" ? "num" : ""}>{content}</td>;
+}
+const sumCol = (rows, c) => Math.round(rows.reduce((s, r) => s + (Number(r[c.key]) || 0), 0) * 100) / 100;
+function TotalsRow({ columns, rows, label, cls }) {
+  if (!columns.some((c) => c.sum)) return null;
+  return (
+    <tr className={cls}>
+      {columns.map((c, i) => (
+        <td key={c.key} className={isNum(c.type) ? "num" : ""}>
+          {c.sum ? (c.type === "money" ? money(sumCol(rows, c)) : sumCol(rows, c).toLocaleString("en-IN")) : i === 0 ? label : ""}
+        </td>
+      ))}
+    </tr>
+  );
+}
+function TableReport({ d }) {
+  const { columns, rows, groupBy } = d;
+  if (!rows.length) return <p className="muted center">No transactions for this period.</p>;
+  const groups = groupBy ? [...new Set(rows.map((r) => r[groupBy]))] : [null];
+  return (
+    <table className="report-table">
+      <thead>
+        <tr>
+          {columns.map((c) => (
+            <th key={c.key} className={isNum(c.type) || c.align === "right" ? "num" : ""}>
+              {c.label}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {groups.map((g) => {
+          const mine = g === null ? rows : rows.filter((r) => r[groupBy] === g);
+          return [
+            g !== null && (
+              <tr className="row-section" key={`h-${g}`}>
+                <td colSpan={columns.length}>{g}</td>
+              </tr>
+            ),
+            ...mine.map((r, i) => (
+              <tr key={`${g}-${i}`} className={r.muted ? "muted" : ""}>
+                {columns.map((c) => (
+                  <Cell key={c.key} c={c} r={r} />
+                ))}
+              </tr>
+            )),
+            g !== null && groups.length > 1 && <TotalsRow key={`t-${g}`} columns={columns} rows={mine} label={`Total for ${g}`} cls="row-subtotal" />,
+          ];
+        })}
+        <TotalsRow columns={columns} rows={rows} label="Total" cls="row-grand" />
+      </tbody>
+    </table>
+  );
+}
+function StatementLines({ lines, range }) {
+  return lines.map((l, i) => {
+    const link = acctLink(l.code, range);
+    const label = link ? <Link to={link}>{l.label}</Link> : l.label;
+    if (l.style === "head")
+      return (
+        <tr className="row-head" key={i}>
+          <td colSpan={2}>{l.label}</td>
+        </tr>
+      );
+    if (l.style === "section")
+      return (
+        <tr className="row-section" key={i}>
+          <td colSpan={2}>{l.label}</td>
+        </tr>
+      );
+    const cls = { subtotal: "row-subtotal", total: "row-total", grand: "row-grand" }[l.style] || "";
+    return (
+      <tr className={cls} key={i}>
+        <td style={l.style === "item" ? { paddingLeft: 12 + (l.indent || 0) * 18 } : undefined}>{label}</td>
+        <td className="num">{l.amount === undefined || l.amount === null ? "" : money(l.amount)}</td>
+      </tr>
+    );
+  });
+}
+function StatementReport({ d, range }) {
+  return (
+    <>
+      <table className="report-table">
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th className="num">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <StatementLines lines={d.lines} range={range} />
+        </tbody>
+      </table>
+      {d.check === false && <div className="alert alert-error">The cash flow does not tie to your cash and bank balances — please report this.</div>}
+      {d.note && <p className="muted small report-note">{d.note}</p>}
+    </>
+  );
+}
+function HorizontalReport({ d, range }) {
+  const side = (s) => (
+    <table className="report-table">
+      <thead>
+        <tr>
+          <th>{s.title}</th>
+          <th className="num">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        <StatementLines lines={s.lines} range={range} />
+      </tbody>
+      <tfoot>
+        <tr className="row-grand">
+          <td>Total</td>
+          <td className="num">{money(s.total)}</td>
+        </tr>
+      </tfoot>
+    </table>
+  );
+  return (
+    <div className="report-horizontal">
+      {side(d.left)}
+      {side(d.right)}
+    </div>
+  );
+}
+function GenericReport(p) {
+  if (p.d.kind === "statement") return <StatementReport {...p} />;
+  if (p.d.kind === "horizontal") return <HorizontalReport {...p} />;
+  return <TableReport {...p} />;
 }
 
 const BODIES = {
