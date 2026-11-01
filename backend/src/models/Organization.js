@@ -33,8 +33,34 @@ const organizationSchema = new mongoose.Schema(
     defaultPaymentTerms: { type: Number, default: 15 },
     defaultNotes: { type: String, default: "Thanks for your business." },
     defaultTerms: { type: String, default: "" },
+    // Outgoing email (e.g. Gmail with an app password). Falls back to the server's SMTP settings.
+    smtp: {
+      host: { type: String, default: "" },
+      port: { type: Number, default: 587 },
+      secure: { type: Boolean, default: false },
+      user: { type: String, default: "" },
+      pass: { type: String, default: "" },
+      fromName: { type: String, default: "" },
+    },
+    // Automatic payment reminders: days after the due date to remind (e.g. [1, 7, 15]).
+    reminders: {
+      enabled: { type: Boolean, default: false },
+      days: { type: [Number], default: [3, 10] },
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: {
+      transform: (doc, ret) => {
+        // Never send the SMTP password to the browser.
+        if (ret.smtp) {
+          ret.smtp.hasPassword = Boolean(ret.smtp.pass);
+          delete ret.smtp.pass;
+        }
+        return ret;
+      },
+    },
+  }
 );
 
 module.exports = mongoose.model("Organization", organizationSchema);

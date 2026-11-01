@@ -7,6 +7,7 @@ import { money, date } from "../lib/format";
 import { PageHeader, Spinner, toast, Status, Confirm, MoreMenu } from "../components/ui";
 import { DocList, DocForm, DocPaper } from "../components/SalesDoc";
 import Icon from "../components/Icon";
+import { DocEmail } from "../components/EmailDoc";
 
 const K = KINDS.purchaseOrder;
 
@@ -76,6 +77,7 @@ export function PurchaseOrderView() {
         <button className="btn" onClick={() => window.print()}>
           <Icon name="print" size={16} /> Print / PDF
         </button>
+        <DocEmail kind="purchaseOrder" id={id} onSent={load} />
         {po.status === "draft" && (
           <button className="btn" onClick={() => setStatus("issued", "Purchase order issued")}>
             Mark as Issued

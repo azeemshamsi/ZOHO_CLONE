@@ -35,6 +35,7 @@ app.use("/api/accounts", auth, permit("accountant", { readAll: true }), require(
 app.use("/api/journals", auth, permit("accountant"), require("./routes/journals"));
 app.use("/api/reports", auth, permit("reports"), require("./routes/reports"));
 app.use("/api/payments", auth, permit("sales"), require("./routes/payments"));
+app.use("/api/documents", auth, permit((req) => require("./routes/documents").moduleOf(req)), require("./routes/documents"));
 app.use("/api/users", auth, permit("settings"), require("./routes/users"));
 app.use("/api/dashboard", auth, permit(null), require("./routes/dashboard"));
 app.use("/api", (req, res) => res.status(404).send({ message: "Not found" }));

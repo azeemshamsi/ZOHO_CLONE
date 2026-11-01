@@ -8,6 +8,7 @@ import { money, amount, date, round2 } from "../lib/format";
 import { PageHeader, Spinner, toast, Status, Confirm, Modal, MoreMenu, invoiceStatus } from "../components/ui";
 import { DocList, DocForm, DocPaper, MiniTable } from "../components/SalesDoc";
 import Icon from "../components/Icon";
+import { DocEmail } from "../components/EmailDoc";
 
 const K = KINDS.invoice;
 
@@ -194,6 +195,7 @@ export function InvoiceView() {
         <button className="btn" onClick={() => window.print()}>
           <Icon name="print" size={16} /> Print / PDF
         </button>
+        <DocEmail kind="invoice" id={id} onSent={load} reminder={inv.balance > 0 && ['sent','partially_paid'].includes(inv.status) && new Date(inv.dueDate) < new Date(new Date().toDateString())} />
         {inv.status === "draft" && (
           <button className="btn btn-primary" onClick={() => act(() => api.post(`/invoices/${id}/send`), "Marked as sent")}>
             Mark as Sent

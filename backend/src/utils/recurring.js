@@ -80,7 +80,10 @@ async function runDue(organization) {
 }
 
 function startScheduler() {
-  const tick = () => runDue().catch((e) => console.error("Recurring run failed:", e.message));
+  const tick = () => {
+    runDue().catch((e) => console.error("Recurring run failed:", e.message));
+    require("./reminders").runReminders().catch((e) => console.error("Reminders failed:", e.message));
+  };
   setTimeout(tick, 5000);
   setInterval(tick, 60 * 60 * 1000).unref();
 }

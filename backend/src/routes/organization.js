@@ -49,4 +49,49 @@ router.put(
   })
 );
 
+// Outgoing email account (Gmail, Zoho Mail, Outlook… via SMTP).
+router.put(
+  "/email",
+  ah(async (req, res) => {
+    const data = validate(
+      Joi.object({
+        host: Joi.string().allow("").trim(),
+        port: Joi.number().integer().min(1).max(65535).default(587),
+        secure: Joi.boolean().default(false),
+        user: Joi.string().allow("").trim(),
+        pass: Joi.string().allow(""), // blank = keep the saved password
+        fromName: Joi.string().allow("").trim(),
+      }),
+      req.body
+    );
+    const org = await Organization.findById(req.org);
+    const pass = data.pass ? data.pass.replace(/\s+/g, "") : org.smtp?.pass || "";
+    org.smtp = { ...data, pass: data.host ? pass : "" };
+    await org.save();
+    res.send(org);
+  })
+);
+
+router.post(
+  "/email/test",
+  ah(async (req, res) => {
+    const org = await Organization.findById(req.org);
+    await require("../utils/mailer").sendOrgMail(org, {
+      to: [req.user.email],
+      subject: `MGI test email for ${org.name}`,
+      text: `Hi ${req.user.name},\n\nYour email settings work. Invoices, quotes and reminders will be sent from this account.\n\nMGI`,
+    });
+    res.send({ message: `Test email sent to ${req.user.email}` });
+  })
+);
+
+router.put(
+  "/reminders",
+  ah(async (req, res) => {
+    const data = validate(Joi.object({ enabled: Joi.boolean().required(), days: Joi.array().items(Joi.number().integer().min(0).max(365)).max(6).default([]) }), req.body);
+    const org = await Organization.findByIdAndUpdate(req.org, { reminders: { enabled: data.enabled, days: [...new Set(data.days)].sort((a, b) => a - b) } }, { new: true });
+    res.send(org);
+  })
+);
+
 module.exports = router;

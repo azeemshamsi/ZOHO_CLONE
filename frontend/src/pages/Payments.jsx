@@ -6,6 +6,7 @@ import { PAYMENT_MODES, modeName } from "../lib/constants";
 import { money, amount, date, isoDate, round2, inWords } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Confirm, Status, invoiceStatus } from "../components/ui";
 import Icon from "../components/Icon";
+import { DocEmail } from "../components/EmailDoc";
 import BankAccountSelect from "../components/BankAccountSelect";
 
 
@@ -316,6 +317,7 @@ export function PaymentView() {
         <button className="btn" onClick={() => window.print()}>
           <Icon name="print" size={16} /> Print / PDF
         </button>
+        <DocEmail kind="payment" id={id} />
         <button className="icon-btn" title="Delete" onClick={() => setConfirm(true)}>
           <Icon name="trash" />
         </button>

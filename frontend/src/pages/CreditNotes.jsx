@@ -8,6 +8,7 @@ import { money, amount, date, isoDate, round2 } from "../lib/format";
 import { PageHeader, Spinner, toast, Status, Confirm, Modal, MoreMenu, Field, invoiceStatus } from "../components/ui";
 import { DocList, DocForm, DocPaper, MiniTable } from "../components/SalesDoc";
 import Icon from "../components/Icon";
+import { DocEmail } from "../components/EmailDoc";
 import BankAccountSelect from "../components/BankAccountSelect";
 
 
@@ -242,6 +243,7 @@ export function CreditNoteView() {
         <button className="btn" onClick={() => window.print()}>
           <Icon name="print" size={16} /> Print / PDF
         </button>
+        <DocEmail kind="creditNote" id={id} onSent={load} />
         {cn.status === "draft" && (
           <button className="btn btn-primary" onClick={() => act(() => api.post(`/credit-notes/${id}/open`), "Credit note opened")}>
             Convert to Open
