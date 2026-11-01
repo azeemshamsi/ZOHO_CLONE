@@ -34,8 +34,16 @@ const pad = (n) => String(n).padStart(2, "0");
 
 // Indian banks write day first. Returns "YYYY-MM-DD" or null.
 export function parseBankDate(s) {
-  if (!s) return null;
+  if (s === null || s === undefined || s === "") return null;
   s = String(s).trim();
+  // Excel date stored as a plain number (days since 1899-12-30), e.g. 46328
+  if (/^\d{5}(\.\d+)?$/.test(s) && +s > 30000 && +s < 80000) {
+    const d = new Date(Date.UTC(1899, 11, 30) + Math.floor(+s) * 86400000);
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  }
+  // 20261102
+  let c = s.match(/^(20\d{2})(\d{2})(\d{2})$/);
+  if (c && +c[2] >= 1 && +c[2] <= 12) return `${c[1]}-${c[2]}-${c[3]}`;
   let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
   m = s.match(/^(\d{1,2})[-/. ](\d{1,2})[-/. ](\d{2,4})/);

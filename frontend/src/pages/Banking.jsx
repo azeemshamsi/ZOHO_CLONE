@@ -133,6 +133,7 @@ function ImportModal({ open, account, onClose, onDone }) {
   const [headerIdx, setHeaderIdx] = useState(0);
   const [map, setMap] = useState(null);
   const [useAmount, setUseAmount] = useState(false);
+  const [showIgnored, setShowIgnored] = useState(false);
   const [busy, setBusy] = useState(false);
   const [fileName, setFileName] = useState("");
 
@@ -198,6 +199,7 @@ function ImportModal({ open, account, onClose, onDone }) {
       }
       const balRaw = map.balance >= 0 ? String(r[map.balance] ?? "").trim() : "";
       return {
+        raw: r,
         date: dateStr,
         description: map.description >= 0 ? r[map.description] || "" : "",
         reference: map.reference >= 0 ? r[map.reference] || "" : "",
@@ -208,12 +210,15 @@ function ImportModal({ open, account, onClose, onDone }) {
     });
   }, [rows, map, headerIdx, useAmount]);
   const good = parsed.filter((r) => r.date && (r.deposit || r.withdrawal));
-  const bad = parsed.length - good.length;
+  const badRows = parsed.filter((r) => !(r.date && (r.deposit || r.withdrawal)));
+  const bad = badRows.length;
+  // Rows that look like transactions (they have an amount or a date) but couldn't be read in full.
+  const suspicious = badRows.filter((r) => r.deposit || r.withdrawal || r.balance !== null || r.date);
 
   const save = async () => {
     setBusy(true);
     try {
-      const { data } = await api.post(`/banking/${encodeURIComponent(account.code)}/import`, { rows: good });
+      const { data } = await api.post(`/banking/${encodeURIComponent(account.code)}/import`, { rows: good.map(({ raw, ...x }) => x) });
       toast(`Imported ${data.imported} lines${data.skipped ? `, skipped ${data.skipped} already imported` : ""}`);
       onDone();
     } catch (e) {
@@ -352,6 +357,23 @@ function ImportModal({ open, account, onClose, onDone }) {
             </table>
             {good.length > 6 && <p className="muted small">…and {good.length - 6} more transactions</p>}
             {!good.length && <div className="alert alert-error">No transactions found. Check the header row and column choices above.</div>}
+            {suspicious.length > 0 && (
+              <div className="alert alert-error">
+                {suspicious.length} row{suspicious.length > 1 ? "s look" : " looks"} like a transaction but couldn't be read (date or amount missing).{" "}
+                <button type="button" className="link-btn" onClick={() => setShowIgnored(!showIgnored)}>
+                  {showIgnored ? "Hide" : "Show"}
+                </button>
+                {showIgnored && (
+                  <ul className="ignored-list">
+                    {suspicious.slice(0, 20).map((r, i) => (
+                      <li key={i}>
+                        <span className="muted">{!r.date ? "no date" : "no amount"}:</span> {r.raw.filter(Boolean).join(" | ")}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>

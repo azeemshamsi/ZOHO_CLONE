@@ -432,6 +432,7 @@ address { font-style: normal; line-height: 1.6; }
 .match-row.on { border-color: var(--brand); background: var(--brand-50); }
 .nowrap { white-space: nowrap; }
 .recon-controls { max-width: none; }
+.ignored-list { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--ink-2); }
 .recon-save { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
 .recon-save input { max-width: 320px; }
 
