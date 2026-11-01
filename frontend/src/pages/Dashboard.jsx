@@ -101,7 +101,7 @@ export default function Dashboard() {
             <Icon name="plus" size={14} /> New
           </Link>
         </div>
-        <p className="muted small">Total unpaid invoices {money(r.total)}</p>
+        <p className="muted small">Total unpaid invoices {money(r.total, r.currency)}</p>
         <div className="meter">
           <div className="meter-current" style={{ width: `${100 - overduePct}%` }} />
           <div className="meter-overdue" style={{ width: `${overduePct}%` }} />
@@ -252,8 +252,8 @@ export default function Dashboard() {
                   <td>
                     <Status value={invoiceStatus(i.displayStatus)} />
                   </td>
-                  <td className="num">{money(i.total)}</td>
-                  <td className="num">{money(i.balance)}</td>
+                  <td className="num">{money(i.total, i.currency)}</td>
+                  <td className="num">{money(i.balance, i.currency)}</td>
                 </tr>
               ))}
             </tbody>

@@ -65,7 +65,7 @@ export function CustomerList() {
                   <td>{c.email}</td>
                   <td>{c.phone}</td>
                   <td>{(GST_TREATMENTS.find((g) => g[0] === c.gstTreatment) || [])[1]}</td>
-                  <td className="num">{money(c.receivables)}</td>
+                  <td className="num">{money(c.receivables, c.currency)}</td>
                 </tr>
               ))}
             </tbody>
@@ -113,6 +113,10 @@ export function AddressFields({ value, onChange }) {
 }
 
 export function CustomerForm() {
+  const [currencies, setCurrencies] = useState([]);
+  useEffect(() => {
+    api.get("/currencies").then((r) => setCurrencies(r.data)).catch(() => {});
+  }, []);
   const { id } = useParams();
   const navigate = useNavigate();
   const { organization } = useAuth();
@@ -134,6 +138,7 @@ export function CustomerForm() {
           gstTreatment: data.gstTreatment,
           gstin: data.gstin,
           placeOfSupply: data.placeOfSupply,
+          currency: data.currency || "INR",
           billingAddress: { ...emptyAddress, ...data.billingAddress },
           shippingAddress: { ...emptyAddress, ...data.shippingAddress },
           paymentTerms: data.paymentTerms,
@@ -153,6 +158,7 @@ export function CustomerForm() {
         gstTreatment: "consumer",
         gstin: "",
         placeOfSupply: organization?.state || "",
+        currency: "INR",
         billingAddress: { ...emptyAddress },
         shippingAddress: { ...emptyAddress },
         paymentTerms: organization?.defaultPaymentTerms ?? 15,
@@ -259,6 +265,18 @@ export function CustomerForm() {
               ))}
             </select>
           </Field>
+          {currencies.length > 0 && (
+            <Field label="Currency" hint="Invoices and payments for this customer are in this currency">
+              <select value={form.currency || "INR"} onChange={set("currency")}>
+                <option value="INR">INR - Indian Rupee</option>
+                {currencies.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.code} - {c.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="Payment Terms">
             <select value={form.paymentTerms} onChange={set("paymentTerms")}>
               {PAYMENT_TERMS.map(([v, l]) => (
@@ -398,7 +416,7 @@ export function CustomerDetail() {
             <div className="card stat-row">
               <div>
                 <span className="muted small">Outstanding Receivables</span>
-                <strong className="big">{money(c.receivables)}</strong>
+                <strong className="big">{money(c.receivables, c.currency)}</strong>
               </div>
               <div>
                 <span className="muted small">Unused Credits</span>
@@ -408,8 +426,8 @@ export function CustomerDetail() {
             <div className="card">
               <h3>Recent activity</h3>
               <ul className="timeline">
-                {[...c.invoices.map((i) => ({ d: i.date, t: `Invoice ${i.invoiceNumber} for ${money(i.total)}`, to: `/invoices/${i._id}` })),
-                  ...c.payments.map((p) => ({ d: p.date, t: `Payment ${p.paymentNumber} of ${money(p.amount)} received`, to: `/payments/${p._id}` }))]
+                {[...c.invoices.map((i) => ({ d: i.date, t: `Invoice ${i.invoiceNumber} for ${money(i.total, i.currency)}`, to: `/invoices/${i._id}` })),
+                  ...c.payments.map((p) => ({ d: p.date, t: `Payment ${p.paymentNumber} of ${money(p.amount, p.currency)} received`, to: `/payments/${p._id}` }))]
                   .sort((a, b) => new Date(b.d) - new Date(a.d))
                   .slice(0, 8)
                   .map((x, i) => (
@@ -445,8 +463,8 @@ export function CustomerDetail() {
                     <td>
                       <Status value={invoiceStatus(i.displayStatus)} />
                     </td>
-                    <td className="num">{money(i.total)}</td>
-                    <td className="num">{money(i.balance)}</td>
+                    <td className="num">{money(i.total, i.currency)}</td>
+                    <td className="num">{money(i.balance, i.currency)}</td>
                   </tr>
                 ))}
                 {!c.invoices.length && (
@@ -505,7 +523,7 @@ export function CustomerDetail() {
                     <td>{date(p.date)}</td>
                     <td className="link">{p.paymentNumber}</td>
                     <td>{modeName(p.mode)}</td>
-                    <td className="num">{money(p.amount)}</td>
+                    <td className="num">{money(p.amount, p.currency)}</td>
                   </tr>
                 ))}
                 {!c.payments.length && (

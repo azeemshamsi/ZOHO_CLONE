@@ -28,7 +28,7 @@ function computeStock({ items, invoices = [], creditNotes = [], bills = [], vend
   const lines = (d, cb) => (d.lineItems || []).forEach((l, i) => l.item && cb(String(l.item), l, i));
   const meta = (type, d, number, party) => ({ type, id: d._id, number, party });
   for (const b of bills.filter(live))
-    lines(b, (item, l) => push({ kind: "bill", item, wh: W(b.warehouse), date: b.date, seq: b.createdAt, qty: l.quantity, cost: l.amount, doc: meta("Bill", b, b.billNumber, b.vendorName) }));
+    lines(b, (item, l) => push({ kind: "bill", item, wh: W(b.warehouse), date: b.date, seq: b.createdAt, qty: l.quantity, cost: l.amount * (Number(b.exchangeRate) || 1), doc: meta("Bill", b, b.billNumber, b.vendorName) }));
   for (const c of creditNotes.filter(live))
     lines(c, (item, l) => push({ kind: "creditNote", item, wh: W(c.warehouse), date: c.date, seq: c.createdAt, qty: l.quantity, doc: meta("Credit Note", c, c.number, c.customerName) }));
   for (const i of invoices.filter(live))
@@ -165,7 +165,8 @@ async function loadStock(org, { to } = {}) {
   const live = { organization: org, status: { $nin: ["draft", "void"] } };
   const TransferOrder = require("../models/TransferOrder");
   const Warehouse = require("../models/Warehouse");
-  const [items, invoices, creditNotes, bills, vendorCredits, adjustments, transfers, primaryWh] = await Promise.all([
+  const { raw } = require("../config/baseCurrency");
+  const [items, invoices, creditNotes, bills, vendorCredits, adjustments, transfers, primaryWh] = await raw(() => Promise.all([
     Item.find({ organization: org }).lean(),
     Invoice.find(live).lean(),
     CreditNote.find(live).lean(),
@@ -174,7 +175,7 @@ async function loadStock(org, { to } = {}) {
     InventoryAdjustment.find({ organization: org, status: "adjusted" }).lean(),
     TransferOrder.find({ organization: org, status: "transferred" }).lean(),
     Warehouse.findOne({ organization: org, primary: true }).lean(),
-  ]);
+  ]));
   return computeStock({ items, invoices, creditNotes, bills, vendorCredits, adjustments, transfers, primary: primaryWh?._id, to });
 }
 

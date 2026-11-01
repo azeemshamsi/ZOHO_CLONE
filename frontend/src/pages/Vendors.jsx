@@ -79,6 +79,10 @@ export function VendorList() {
 }
 
 export function VendorForm() {
+  const [currencies, setCurrencies] = useState([]);
+  useEffect(() => {
+    api.get("/currencies").then((r) => setCurrencies(r.data)).catch(() => {});
+  }, []);
   const { id } = useParams();
   const navigate = useNavigate();
   const [form, setForm] = useState(null);
@@ -99,6 +103,7 @@ export function VendorForm() {
           gstin: data.gstin,
           pan: data.pan || "",
           placeOfSupply: data.placeOfSupply,
+          currency: data.currency || "INR",
           billingAddress: { ...emptyAddress, ...data.billingAddress },
           paymentTerms: data.paymentTerms,
           notes: data.notes,
@@ -117,6 +122,7 @@ export function VendorForm() {
         gstin: "",
         pan: "",
         placeOfSupply: "",
+        currency: "INR",
         billingAddress: { ...emptyAddress },
         paymentTerms: 30,
         notes: "",
@@ -217,6 +223,18 @@ export function VendorForm() {
               <input maxLength={10} value={form.pan} onChange={(e) => setForm({ ...form, pan: e.target.value.toUpperCase() })} className="mono" />
             </Field>
           </div>
+          {currencies.length > 0 && (
+            <Field label="Currency" hint="Invoices and payments for this vendor are in this currency">
+              <select value={form.currency || "INR"} onChange={set("currency")}>
+                <option value="INR">INR - Indian Rupee</option>
+                {currencies.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.code} - {c.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           <Field label="Payment Terms">
             <select value={form.paymentTerms} onChange={set("paymentTerms")}>
               {PAYMENT_TERMS.map(([v, l]) => (
@@ -354,8 +372,8 @@ export function VendorDetail() {
                 ["Date", (b) => date(b.date)],
                 ["Bill#", (b) => b.billNumber, "link"],
                 ["Status", (b) => <Status value={b.displayStatus} />],
-                ["Amount", (b) => money(b.total), "num"],
-                ["Balance Due", (b) => money(b.balance), "num"],
+                ["Amount", (b) => money(b.total, b.currency), "num"],
+                ["Balance Due", (b) => money(b.balance, b.currency), "num"],
               ],
             },
             {
@@ -366,8 +384,8 @@ export function VendorDetail() {
                 ["Date", (c) => date(c.date)],
                 ["Vendor Credit#", (c) => c.number, "link"],
                 ["Status", (c) => <Status value={c.status} />],
-                ["Amount", (c) => money(c.total), "num"],
-                ["Balance", (c) => money(c.balance), "num"],
+                ["Amount", (c) => money(c.total, c.currency), "num"],
+                ["Balance", (c) => money(c.balance, c.currency), "num"],
               ],
             },
             {
@@ -378,7 +396,7 @@ export function VendorDetail() {
                 ["Date", (p) => date(p.date)],
                 ["Payment#", (p) => p.paymentNumber, "link"],
                 ["Mode", (p) => modeName(p.mode)],
-                ["Amount", (p) => money(p.amount), "num"],
+                ["Amount", (p) => money(p.amount, p.currency), "num"],
               ],
             },
             {

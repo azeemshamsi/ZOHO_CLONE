@@ -16,6 +16,7 @@ const schema = Joi.object({
   reference: Joi.string().allow(""),
   bankAccount: Joi.string().allow(""),
   notes: Joi.string().allow(""),
+  exchangeRate: Joi.number().greater(0),
   allocations: Joi.array()
     .items(Joi.object({ bill: Joi.string().required(), amount: Joi.number().min(0).required() }))
     .default([]),
@@ -63,6 +64,7 @@ router.post(
       allocations: bills.map(([b, amount]) => ({ bill: b._id, billNumber: b.billNumber, amount })),
       unusedAmount: round2(data.amount - allocated),
       branch: bills[0]?.[0].branch || null,
+      ...(await require("../utils/salesDoc").currencyFor(req, vendor, data.exchangeRate)),
     });
     for (const [bill, amount] of bills) {
       bill.amountPaid = round2(bill.amountPaid + amount);

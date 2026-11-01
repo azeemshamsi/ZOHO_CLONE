@@ -36,6 +36,7 @@ const schema = Joi.object({
     .pattern(/^[A-Z]{5}[0-9]{4}[A-Z]$/)
     .messages({ "string.pattern.base": "PAN must look like ABCDE1234F" }),
   placeOfSupply: Joi.string().allow(""),
+  currency: Joi.string().uppercase().length(3),
   billingAddress: address,
   paymentTerms: Joi.number().min(0).max(365),
   notes: Joi.string().allow(""),

@@ -224,7 +224,7 @@ export function AccountDetail() {
                 <td>{r.party}</td>
                 <td className="num">{r.debit ? money(r.debit) : ""}</td>
                 <td className="num">{r.credit ? money(r.credit) : ""}</td>
-                <td className="num">{money(r.balance)}</td>
+                <td className="num">{money(r.balance, r.currency)}</td>
               </tr>
             ))}
             {!data.rows.length && (

@@ -41,8 +41,8 @@ export function BillList() {
         { label: "Vendor Name", render: (r) => r.vendorName },
         { label: "Status", render: (r) => <Status value={r.displayStatus} /> },
         { label: "Due Date", render: (r) => date(r.dueDate) },
-        { label: "Amount", num: true, render: (r) => money(r.total) },
-        { label: "Balance Due", num: true, render: (r) => money(r.balance) },
+        { label: "Amount", num: true, render: (r) => money(r.total, r.currency) },
+        { label: "Balance Due", num: true, render: (r) => money(r.balance, r.currency) },
       ]}
     />
   );
@@ -94,7 +94,7 @@ function ApplyVendorCredits({ bill, open, onClose, onDone }) {
       footer={
         <>
           <span className="muted small" style={{ marginRight: "auto" }}>
-            Bill balance {money(bill.balance)} · Applying {money(applied)}
+            Bill balance {money(bill.balance, bill.currency)} · Applying {money(applied)}
           </span>
           <button className="btn" onClick={onClose}>
             Cancel
@@ -225,7 +225,7 @@ export function BillView() {
           columns={[
             { label: "Date", render: (c) => date(c.date) },
             { label: "Vendor Credit#", render: (c) => <Link to={`/vendor-credits/${c._id}`}>{c.number}</Link> },
-            { label: "Amount", num: true, render: (c) => money(c.amount) },
+            { label: "Amount", num: true, render: (c) => money(c.amount, c.currency) },
           ]}
         />
       )}
@@ -239,7 +239,7 @@ export function BillView() {
             { label: "Payment#", render: (p) => <Link to={`/payments-made/${p._id}`}>{p.paymentNumber}</Link> },
             { label: "Mode", render: (p) => modeName(p.mode) },
             { label: "Reference", render: (p) => p.reference },
-            { label: "Amount", num: true, render: (p) => money(p.amount) },
+            { label: "Amount", num: true, render: (p) => money(p.amount, p.currency) },
           ]}
         />
       )}
@@ -262,7 +262,7 @@ export function BillView() {
           extraTotals={[
             bill.amountPaid > 0 && ["Payments Made", <span className="text-paid">(-) {amount(bill.amountPaid)}</span>],
             bill.creditsApplied > 0 && ["Vendor Credits", <span className="text-paid">(-) {amount(bill.creditsApplied)}</span>],
-            ["Balance Due", money(bill.balance), "doc-grand"],
+            ["Balance Due", money(bill.balance, bill.currency), "doc-grand"],
           ].filter(Boolean)}
         />
       </div>

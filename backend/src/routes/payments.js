@@ -16,6 +16,7 @@ const schema = Joi.object({
   reference: Joi.string().allow(""),
   bankAccount: Joi.string().allow(""),
   notes: Joi.string().allow(""),
+  exchangeRate: Joi.number().greater(0),
   allocations: Joi.array()
     .items(Joi.object({ invoice: Joi.string().required(), amount: Joi.number().min(0).required() }))
     .default([]),
@@ -67,6 +68,7 @@ router.post(
       allocations: invoices.map(([inv, amount]) => ({ invoice: inv._id, invoiceNumber: inv.invoiceNumber, amount })),
       unusedAmount: round2(data.amount - allocated),
       branch: invoices[0]?.[0].branch || null, // follows the branch of the invoices it pays
+      ...(await require("../utils/salesDoc").currencyFor(req, customer, data.exchangeRate)),
     });
 
     for (const [inv, amount] of invoices) {

@@ -134,6 +134,10 @@ export function DocForm({ kind, recurring = false }) {
   const [busy, setBusy] = useState(false);
   const [autoNumber, setAutoNumber] = useState("");
   const { branches, warehouses } = useLocations();
+  const [currencies, setCurrencies] = useState([]);
+  useEffect(() => {
+    api.get("/currencies").then((r) => setCurrencies(r.data)).catch(() => {});
+  }, []);
   const stockKind = ["invoice", "bill", "creditNote", "vendorCredit", "salesOrder", "purchaseOrder"].includes(kind.key);
   // Credit notes (customers) and vendor credits (vendors) can point at an invoice / bill.
   const isCN = kind.key === "creditNote" || kind.key === "vendorCredit";
@@ -197,6 +201,7 @@ export function DocForm({ kind, recurring = false }) {
           reason: data.reason || "",
           branch: data.branch || "",
           warehouse: data.warehouse || "",
+          exchangeRate: data.exchangeRate || 1,
         };
         setForm(f);
       });
@@ -286,6 +291,8 @@ export function DocForm({ kind, recurring = false }) {
   if (!form) return <Spinner />;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const customer = customers.find((c) => c._id === form.customer);
+  const cur = customer?.currency || "INR";
+  const curRate = currencies.find((c) => c.code === cur)?.rate;
 
   const pickCustomer = (e) => {
     const c = customers.find((x) => x._id === e.target.value);
@@ -325,6 +332,7 @@ export function DocForm({ kind, recurring = false }) {
         terms: form.terms,
         branch: form.branch || null,
         warehouse: form.warehouse || null,
+        ...(cur !== "INR" ? { exchangeRate: Number(form.exchangeRate) || undefined } : {}),
         status,
         lineItems: form.lineItems
           .filter((l) => l.name.trim())
@@ -396,7 +404,7 @@ export function DocForm({ kind, recurring = false }) {
                 </span>
               )}
               <span>
-                {isVendor ? "Payables" : "Receivables"}: <b>{money(isVendor ? customer.payables : customer.receivables)}</b>
+                {isVendor ? "Payables" : "Receivables"}: <b>{money(isVendor ? customer.payables : customer.receivables, customer.currency)}</b>
               </span>
             </div>
           )}
@@ -442,6 +450,18 @@ export function DocForm({ kind, recurring = false }) {
               )}
             </div>
           )}
+          {cur !== "INR" && (
+            <div className="row-2">
+              <Field label={`Exchange Rate (1 ${cur} = ₹)`} required hint={curRate ? `Current rate in Settings: ₹${curRate}` : `Add ${cur} in Settings → Currencies`}>
+                <input type="number" step="0.0001" min="0" value={form.exchangeRate && form.exchangeRate !== 1 ? form.exchangeRate : curRate || ""} onChange={set("exchangeRate")} />
+              </Field>
+              <div className="customer-chip" style={{ alignSelf: "end" }}>
+                <span>
+                  Amounts are in <b>{cur}</b>. Your books record them in ₹ at this rate.
+                </span>
+              </div>
+            </div>
+          )}
           {isCN && (
             <div className="row-2">
               <Field label={isVendor ? "Bill#" : "Invoice#"} hint={`The ${linkKey} this credit is for (optional)`}>
@@ -449,7 +469,7 @@ export function DocForm({ kind, recurring = false }) {
                   <option value="">None</option>
                   {custInvoices.map((i) => (
                     <option key={i._id} value={i._id}>
-                      {i[linkNumber]} — {money(i.total)}
+                      {i[linkNumber]} — {money(i.total, i.currency)}
                     </option>
                   ))}
                 </select>
@@ -592,7 +612,7 @@ export function DocForm({ kind, recurring = false }) {
               <tr>
                 <th style={{ width: "34%" }}>Item Details</th>
                 <th>Quantity</th>
-                <th>Rate (₹)</th>
+                <th>Rate ({cur})</th>
                 <th>Discount %</th>
                 <th>GST</th>
                 <th className="num">Amount</th>
@@ -714,7 +734,7 @@ export function DocForm({ kind, recurring = false }) {
               <input type="number" step="0.01" value={form.adjustment} onChange={set("adjustment")} />
             </div>
             <div className="tot-row tot-total">
-              <span>Total (₹)</span>
+              <span>Total ({cur})</span>
               <span>{amount(totals.total)}</span>
             </div>
           </div>
@@ -782,7 +802,7 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
           {balance && (
             <div className="doc-balance">
               <span>{balance.label}</span>
-              <strong>{money(balance.value)}</strong>
+              <strong>{money(balance.value, doc.currency)}</strong>
             </div>
           )}
         </div>
@@ -876,7 +896,12 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
       <div className="doc-foot">
         <div className="doc-words">
           <div className="doc-label">Total In Words</div>
-          <em>{inWords(doc.total)}</em>
+          <em>{doc.currency && doc.currency !== "INR" ? inWords(doc.total).replace("Indian Rupee", doc.currency).replace("Paise", "Cents") : inWords(doc.total)}</em>
+          {doc.currency && doc.currency !== "INR" && (
+            <div className="doc-small">
+              Amounts in {doc.currency}. Exchange rate 1 {doc.currency} = ₹{doc.exchangeRate} (₹{amount(doc.total * doc.exchangeRate)})
+            </div>
+          )}
           {extraInfo.map(([k, v]) => (
             <div key={k}>
               <div className="doc-label">{k}</div>
@@ -941,7 +966,7 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
             ) : null}
             <tr className="doc-grand">
               <td>Total</td>
-              <td>{money(doc.total)}</td>
+              <td>{money(doc.total, doc.currency)}</td>
             </tr>
             {extraTotals.map(([k, v, cls]) => (
               <tr key={k} className={cls || ""}>

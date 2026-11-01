@@ -1,7 +1,17 @@
 const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2 });
 const num = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export const money = (n) => inr.format(Number(n) || 0);
+const fmts = {};
+// Format in a currency (default ₹). Unknown codes fall back to "CODE 1,234.00".
+export const money = (n, cur = "INR") => {
+  if (!cur || cur === "INR") return inr.format(Number(n) || 0);
+  try {
+    fmts[cur] = fmts[cur] || new Intl.NumberFormat("en-IN", { style: "currency", currency: cur, minimumFractionDigits: 2 });
+    return fmts[cur].format(Number(n) || 0);
+  } catch {
+    return `${cur} ${num.format(Number(n) || 0)}`;
+  }
+};
 export const amount = (n) => num.format(Number(n) || 0);
 
 export const date = (d) =>

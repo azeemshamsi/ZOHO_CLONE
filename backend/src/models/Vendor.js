@@ -17,7 +17,8 @@ const vendorSchema = new mongoose.Schema(
     },
     gstin: { type: String, default: "", uppercase: true, trim: true },
     pan: { type: String, default: "", uppercase: true, trim: true },
-    placeOfSupply: { type: String, default: "" }, // "Source of supply": vendor's GST state code
+    placeOfSupply: { type: String, default: "" },
+    currency: { type: String, default: "INR" }, // "Source of supply": vendor's GST state code
     billingAddress: { type: addressSchema, default: () => ({}) },
     paymentTerms: { type: Number, default: 30 },
     notes: { type: String, default: "" },

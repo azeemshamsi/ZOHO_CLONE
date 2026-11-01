@@ -75,6 +75,7 @@ const PATH_MODULES = [
   ["/inventory-adjustments", "items"],
   ["/transfer-orders", "items"],
   ["/locations", "settings"],
+  ["/currencies", "settings"],
   ["/customers", "sales"],
   ["/quotes", "sales"],
   ["/sales-orders", "sales"],
@@ -175,6 +176,10 @@ export default function Layout() {
             <NavLink to="/locations" className="nav-item" onClick={close}>
               <Icon name="bank" />
               <span>Branches & Warehouses</span>
+            </NavLink>
+            <NavLink to="/currencies" className="nav-item" onClick={close}>
+              <Icon name="chart" />
+              <span>Currencies</span>
             </NavLink>
             <NavLink to="/settings" className="nav-item" onClick={close}>
               <Icon name="settings" />

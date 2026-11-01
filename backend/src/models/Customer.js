@@ -17,7 +17,8 @@ const customerSchema = new mongoose.Schema(
       default: "consumer",
     },
     gstin: { type: String, default: "", uppercase: true, trim: true },
-    placeOfSupply: { type: String, default: "" }, // GST state code
+    placeOfSupply: { type: String, default: "" },
+    currency: { type: String, default: "INR" }, // GST state code
     billingAddress: { type: addressSchema, default: () => ({}) },
     shippingAddress: { type: addressSchema, default: () => ({}) },
     paymentTerms: { type: Number, default: 15 }, // days

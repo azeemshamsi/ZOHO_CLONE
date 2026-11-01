@@ -41,8 +41,8 @@ export function InvoiceList() {
         { label: "Customer Name", render: (r) => r.customerName },
         { label: "Status", render: (r) => <Status value={invoiceStatus(r.displayStatus)} /> },
         { label: "Due Date", render: (r) => date(r.dueDate) },
-        { label: "Amount", num: true, render: (r) => money(r.total) },
-        { label: "Balance Due", num: true, render: (r) => money(r.balance) },
+        { label: "Amount", num: true, render: (r) => money(r.total, r.currency) },
+        { label: "Balance Due", num: true, render: (r) => money(r.balance, r.currency) },
       ]}
     />
   );
@@ -94,7 +94,7 @@ function ApplyCredits({ inv, open, onClose, onDone }) {
       footer={
         <>
           <span className="muted small" style={{ marginRight: "auto" }}>
-            Invoice balance {money(inv.balance)} · Applying {money(applied)}
+            Invoice balance {money(inv.balance, inv.currency)} · Applying {money(applied)}
           </span>
           <button className="btn" onClick={onClose}>
             Cancel
@@ -236,7 +236,7 @@ export function InvoiceView() {
             { label: "Payment#", render: (p) => <Link to={`/payments/${p._id}`}>{p.paymentNumber}</Link> },
             { label: "Mode", render: (p) => modeName(p.mode) },
             { label: "Reference", render: (p) => p.reference },
-            { label: "Amount", num: true, render: (p) => money(p.amount) },
+            { label: "Amount", num: true, render: (p) => money(p.amount, p.currency) },
           ]}
         />
       )}
@@ -247,7 +247,7 @@ export function InvoiceView() {
           columns={[
             { label: "Date", render: (c) => date(c.date) },
             { label: "Credit Note#", render: (c) => <Link to={`/credit-notes/${c._id}`}>{c.number}</Link> },
-            { label: "Amount", num: true, render: (c) => money(c.amount) },
+            { label: "Amount", num: true, render: (c) => money(c.amount, c.currency) },
           ]}
         />
       )}
@@ -269,7 +269,7 @@ export function InvoiceView() {
           extraTotals={[
             inv.amountPaid > 0 && ["Payment Made", <span className="text-paid">(-) {amount(inv.amountPaid)}</span>],
             inv.creditsApplied > 0 && ["Credits Applied", <span className="text-paid">(-) {amount(inv.creditsApplied)}</span>],
-            ["Balance Due", money(inv.balance), "doc-grand"],
+            ["Balance Due", money(inv.balance, inv.currency), "doc-grand"],
           ].filter(Boolean)}
         />
       </div>

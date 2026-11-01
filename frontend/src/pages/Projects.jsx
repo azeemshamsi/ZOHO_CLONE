@@ -456,7 +456,7 @@ export function ProjectView() {
                   <td>
                     <span className={`status status-${i.status}`}>{i.status.replace("_", " ")}</span>
                   </td>
-                  <td className="num">{money(i.total)}</td>
+                  <td className="num">{money(i.total, i.currency)}</td>
                 </tr>
               ))}
               {!s.invoices.length && (

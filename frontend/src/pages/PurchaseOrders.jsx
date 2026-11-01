@@ -31,7 +31,7 @@ export function PurchaseOrderList() {
         { label: "Status", render: (r) => <Status value={r.status} /> },
         { label: "Billed", render: (r) => (r.billNumber ? <span className="text-paid">● {r.billNumber}</span> : <span className="muted">○</span>) },
         { label: "Delivery Date", render: (r) => date(r.deliveryDate) },
-        { label: "Amount", num: true, render: (r) => money(r.total) },
+        { label: "Amount", num: true, render: (r) => money(r.total, r.currency) },
       ]}
     />
   );

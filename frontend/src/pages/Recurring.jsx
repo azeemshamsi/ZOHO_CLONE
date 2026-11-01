@@ -69,7 +69,7 @@ export function RecurringList({ kind }) {
                     <span className={`status status-${statusCls[p.status]}`}>{statusLabel[p.status]}</span>
                     {p.lastError && <div className="text-danger small" title={p.lastError}>Last run failed</div>}
                   </td>
-                  <td className="num">{money(p.amount)}</td>
+                  <td className="num">{money(p.amount, p.currency)}</td>
                 </tr>
               ))}
             </tbody>
@@ -146,7 +146,7 @@ export function RecurringView({ kind }) {
           {info("Start Date", date(p.startDate))}
           {info("End Date", p.endDate ? date(p.endDate) : "Never expires")}
           {info("Next Date", p.status === "active" ? date(p.nextDate) : "—")}
-          {info("Amount", money(p.amount))}
+          {info("Amount", money(p.amount, p.currency))}
           {kind !== "expense" && info("Payment Terms", p.paymentTerms ? `Net ${p.paymentTerms}` : "Due on receipt")}
           {kind !== "expense" && info("Created As", p.createAs === "draft" ? "Draft" : kind === "invoice" ? "Sent" : "Open")}
         </div>

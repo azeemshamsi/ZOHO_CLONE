@@ -161,3 +161,22 @@ Projects can be billed four ways:
 - a rate per person
 
 Log time by hand or with the timer, then **Invoice Project** to turn unbilled time into a draft invoice.
+
+## Budgets
+
+Accountant → Budgets: monthly, quarterly or yearly budgets per account for a financial year, with **Budget vs Actuals** (variance and % achieved per period).
+
+## Fixed assets
+
+Accountant → Fixed Assets: assets with Written Down Value (Income Tax) or Straight Line (Companies Act) depreciation, posted monthly (`backend/src/utils/assets.js`). Selling or writing off an asset posts the gain or loss. Reports: Fixed Asset Register, Depreciation Schedule.
+
+## Branches and warehouses
+
+- **Branches** have their own GSTIN, state and address. Documents carry the branch, GST follows the branch's state, PDFs show its GSTIN, and every report has a branch filter (`config/branchScope.js`).
+- **Warehouses** track stock per location. Transfer Orders move stock between them; Warehouse Stock Summary report.
+
+## Multiple currencies
+
+Settings → Currencies holds foreign currencies with ₹ rates. A customer or vendor can use one of them; its invoices, bills and payments are then in that currency at a per-document rate.
+
+The books and all reports stay in ₹ (`config/baseCurrency.js` converts documents for reports). Differences between invoice and payment rates are posted to "Exchange Loss / (Gain)".

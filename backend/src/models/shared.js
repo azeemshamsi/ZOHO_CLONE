@@ -27,6 +27,8 @@ const salesDocFields = (party = "customer") => ({
   [party]: { type: mongoose.Schema.Types.ObjectId, ref: party === "vendor" ? "Vendor" : "Customer", required: true, index: true },
   [`${party}Name`]: { type: String, required: true },
   branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
+  currency: { type: String, default: "INR" },
+  exchangeRate: { type: Number, default: 1 }, // ₹ per 1 unit of currency
   warehouse: { type: mongoose.Schema.Types.ObjectId, ref: "Warehouse" },
   [`${party}Gstin`]: { type: String, default: "" },
   billingAddress: { type: addressSchema, default: () => ({}) },

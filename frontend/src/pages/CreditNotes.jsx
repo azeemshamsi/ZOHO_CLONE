@@ -33,8 +33,8 @@ export function CreditNoteList() {
         { label: "Customer Name", render: (r) => r.customerName },
         { label: "Invoice#", render: (r) => r.invoiceNumber },
         { label: "Status", render: (r) => <Status value={r.status} /> },
-        { label: "Amount", num: true, render: (r) => money(r.total) },
-        { label: "Balance", num: true, render: (r) => money(r.balance) },
+        { label: "Amount", num: true, render: (r) => money(r.total, r.currency) },
+        { label: "Balance", num: true, render: (r) => money(r.balance, r.currency) },
       ]}
     />
   );
@@ -89,7 +89,7 @@ function ApplyToInvoices({ cn, open, onClose, onDone }) {
       footer={
         <>
           <span className={`small ${applied > cn.balance ? "text-overdue" : "muted"}`} style={{ marginRight: "auto" }}>
-            Available {money(cn.balance)} · Applying {money(applied)}
+            Available {money(cn.balance, cn.currency)} · Applying {money(applied)}
           </span>
           <button className="btn" onClick={onClose}>
             Cancel
@@ -168,7 +168,7 @@ function RefundModal({ cn, open, onClose, onDone }) {
   return (
     <Modal open={open} onClose={onClose} title={`Refund from ${cn.number}`}>
       <form className="stack" onSubmit={save}>
-        <Field label="Amount (₹)" required hint={`Available: ${money(cn.balance)}`}>
+        <Field label="Amount (₹)" required hint={`Available: ${money(cn.balance, cn.currency)}`}>
           <input type="number" required min="0.01" step="0.01" max={cn.balance} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
         </Field>
         <div className="row-2">
@@ -266,7 +266,7 @@ export function CreditNoteView() {
       {isOpen && (
         <div className="banner banner-amber no-print">
           <span>
-            <strong>{money(cn.balance)}</strong> of credit is still available.
+            <strong>{money(cn.balance, cn.currency)}</strong> of credit is still available.
           </span>
           <span className="page-actions">
             <button className="btn btn-sm" onClick={() => setModal("refund")}>
@@ -307,7 +307,7 @@ export function CreditNoteView() {
             { label: "Date", render: (r) => date(r.date) },
             { label: "Mode", render: (r) => modeName(r.mode) },
             { label: "Reference", render: (r) => r.reference },
-            { label: "Amount", num: true, render: (r) => money(r.amount) },
+            { label: "Amount", num: true, render: (r) => money(r.amount, r.currency) },
             {
               label: "",
               num: true,
@@ -337,7 +337,7 @@ export function CreditNoteView() {
           extraInfo={cn.reason ? [["Reason", cn.reason]] : []}
           extraTotals={[
             usedAmt > 0 && ["Credits Used", <span>(-) {amount(usedAmt)}</span>],
-            ["Credits Remaining", money(cn.balance), "doc-grand"],
+            ["Credits Remaining", money(cn.balance, cn.currency), "doc-grand"],
           ].filter(Boolean)}
         />
       </div>

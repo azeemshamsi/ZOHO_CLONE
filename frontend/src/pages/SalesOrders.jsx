@@ -31,7 +31,7 @@ export function SalesOrderList() {
         { label: "Status", render: (r) => <Status value={r.status} /> },
         { label: "Invoiced", render: (r) => (r.invoiceNumber ? <span className="text-paid">● {r.invoiceNumber}</span> : <span className="muted">○</span>) },
         { label: "Shipment Date", render: (r) => date(r.shipmentDate) },
-        { label: "Amount", num: true, render: (r) => money(r.total) },
+        { label: "Amount", num: true, render: (r) => money(r.total, r.currency) },
       ]}
     />
   );

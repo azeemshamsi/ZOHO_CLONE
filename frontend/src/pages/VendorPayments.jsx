@@ -65,8 +65,8 @@ export function VendorPaymentList() {
                   <td>{p.vendorName}</td>
                   <td>{p.allocations.map((a) => a.billNumber).join(", ")}</td>
                   <td>{modeName(p.mode)}</td>
-                  <td className="num">{money(p.amount)}</td>
-                  <td className="num">{money(p.unusedAmount)}</td>
+                  <td className="num">{money(p.amount, p.currency)}</td>
+                  <td className="num">{money(p.unusedAmount, p.currency)}</td>
                 </tr>
               ))}
             </tbody>
@@ -78,6 +78,10 @@ export function VendorPaymentList() {
 }
 
 export function VendorPaymentForm() {
+  const [payCurrencies, setPayCurrencies] = useState([]);
+  useEffect(() => {
+    api.get("/currencies").then((r) => setPayCurrencies(r.data)).catch(() => {});
+  }, []);
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const [vendors, setVendors] = useState([]);
@@ -133,6 +137,10 @@ export function VendorPaymentForm() {
     setAlloc(next);
   };
 
+  const payParty = vendors.find((x) => x._id === form.vendor);
+  const payCur = payParty?.currency || "INR";
+  const payRateDefault = payCurrencies.find((c) => c.code === payCur)?.rate;
+
   const submit = async (e) => {
     e.preventDefault();
     if (excess < 0) return setError("You've applied more than the amount paid.");
@@ -142,6 +150,7 @@ export function VendorPaymentForm() {
       const { data } = await api.post("/vendor-payments", {
         ...form,
         amount: received,
+        exchangeRate: payCur !== "INR" ? Number(form.exchangeRate) || undefined : undefined,
         allocations: Object.entries(alloc)
           .filter(([, v]) => Number(v) > 0)
           .map(([bill, v]) => ({ bill, amount: Number(v) })),
@@ -170,13 +179,18 @@ export function VendorPaymentForm() {
             </select>
           </Field>
           <div className="row-2">
-            <Field label="Amount Paid (₹)" required>
+            <Field label={`Amount Paid (${payCur})`} required>
               <input type="number" step="0.01" min="0.01" required value={form.amount} onChange={set("amount")} onBlur={() => !applied && autoApply(form.amount)} />
             </Field>
             <Field label="Payment Date" required>
               <input type="date" required value={form.date} onChange={set("date")} />
             </Field>
           </div>
+          {payCur !== "INR" && (
+            <Field label={`Exchange Rate (1 ${payCur} = ₹)`} required hint="The rate on the payment date. The difference from the invoice rate is posted as exchange gain or loss.">
+              <input type="number" step="0.0001" min="0" value={form.exchangeRate || ""} placeholder={String(payRateDefault || "")} onChange={set("exchangeRate")} />
+            </Field>
+          )}
           <div className="row-2">
             <Field label="Payment Mode">
               <select value={form.mode} onChange={set("mode")}>
@@ -346,7 +360,7 @@ export function VendorPaymentView() {
             </dl>
             <div className="receipt-amount">
               <span>Amount Paid</span>
-              <strong>{money(p.amount)}</strong>
+              <strong>{money(p.amount, p.currency)}</strong>
             </div>
           </div>
           <div className="doc-label">Paid To</div>
@@ -380,7 +394,7 @@ export function VendorPaymentView() {
           )}
           {p.unusedAmount > 0 && (
             <p className="muted">
-              Excess kept as advance with vendor: <strong>{money(p.unusedAmount)}</strong>
+              Excess kept as advance with vendor: <strong>{money(p.unusedAmount, p.currency)}</strong>
             </p>
           )}
           {p.notes && <p>{p.notes}</p>}

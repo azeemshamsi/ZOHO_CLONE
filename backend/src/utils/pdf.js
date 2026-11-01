@@ -12,7 +12,7 @@ const MUTED = "#6b7280";
 const LINE = "#e5e7eb";
 
 const inr = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const money = (n) => `₹${inr.format(Number(n) || 0)}`;
+const money = (n, cur) => (cur && cur !== "INR" ? `${cur} ${inr.format(Number(n) || 0)}` : `₹${inr.format(Number(n) || 0)}`);
 const num = (n) => inr.format(Number(n) || 0);
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "");
 const stateName = (c) => (STATES.find(([k]) => k === c) || [c, c])[1];
@@ -154,12 +154,14 @@ function totals(doc, rows) {
   doc.y = y + 6;
 }
 
-function footerNotes(doc, total, notes, terms) {
+function footerNotes(doc, total, notes, terms, cur = "INR", rate = 1) {
   const L = 40;
   const W = doc.page.width - 80;
   if (total !== null) {
     doc.font("r").fontSize(8).fillColor(MUTED).text("Total in words", L, doc.y);
-    doc.font("b").fontSize(9).fillColor("#111827").text(inWords(total), L, doc.y + 1, { width: W });
+    const words = cur && cur !== "INR" ? inWords(total).replace("Indian Rupee", cur).replace("Paise", "Cents") : inWords(total);
+    doc.font("b").fontSize(9).fillColor("#111827").text(words, L, doc.y + 1, { width: W });
+    if (cur && cur !== "INR") doc.font("r").fontSize(8).fillColor(MUTED).text(`Amounts in ${cur}. Exchange rate 1 ${cur} = ₹${rate}`, L, doc.y + 2, { width: W });
     doc.y += 8;
   }
   for (const [label, text] of [
@@ -204,11 +206,11 @@ async function documentPdf(org, d, meta) {
   }
   if (d.shippingCharge) rows.push(["Shipping Charges", num(d.shippingCharge)]);
   if (d.adjustment) rows.push(["Adjustment", num(d.adjustment)]);
-  rows.push(["Total", money(d.total), true]);
+  rows.push(["Total", money(d.total, d.currency), true]);
   if (meta.paid) rows.push(["Payments / Credits", `(-) ${num(meta.paid)}`]);
-  if (meta.balance !== undefined) rows.push([meta.balanceLabel || "Balance Due", money(meta.balance), true]);
+  if (meta.balance !== undefined) rows.push([meta.balanceLabel || "Balance Due", money(meta.balance, d.currency), true]);
   totals(doc, rows);
-  footerNotes(doc, d.total, d.customerNotes, d.terms);
+  footerNotes(doc, d.total, d.customerNotes, d.terms, d.currency, d.exchangeRate);
   pageNumbers(doc, org);
   return toBuffer(doc);
 }
@@ -225,7 +227,7 @@ async function receiptPdf(org, p, { title, partyLabel, party, appliedLabel, appl
   ]);
   doc.rect(L, doc.y, W, 44).fill("#eef2ff");
   doc.font("r").fontSize(9).fillColor(MUTED).text("Amount Received", L + 12, doc.y + 8);
-  doc.font("b").fontSize(18).fillColor(BRAND).text(money(p.amount), L + 12, doc.y + 2);
+  doc.font("b").fontSize(18).fillColor(BRAND).text(money(p.amount, p.currency), L + 12, doc.y + 2);
   doc.y += 18;
   doc.font("r").fontSize(8.5).fillColor("#374151").text(inWords(p.amount), L, doc.y, { width: W });
   doc.y += 12;

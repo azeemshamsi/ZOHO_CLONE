@@ -324,7 +324,7 @@ function Section({ title, sec, range, totalLabel }) {
       {sec.rows.map((r) => (
         <tr key={r.code}>
           <td className="indent">{acctLink(r.code, range) ? <Link to={acctLink(r.code, range)}>{r.name}</Link> : r.name}</td>
-          <td className="num">{money(r.amount)}</td>
+          <td className="num">{money(r.amount, r.currency)}</td>
         </tr>
       ))}
       {!sec.rows.length && (
@@ -553,7 +553,7 @@ function SalesByItem({ d }) {
             <td className="num">
               {r.quantity} {r.unit}
             </td>
-            <td className="num">{money(r.amount)}</td>
+            <td className="num">{money(r.amount, r.currency)}</td>
             <td className="num">{money(r.averagePrice)}</td>
           </tr>
         ))}
@@ -585,12 +585,12 @@ function ExpensesByCategory({ d, range }) {
               <Link to={acctLink(r.code, range)}>{r.name}</Link>
             </td>
             <td className="muted">{r.group}</td>
-            <td className="num">{money(r.amount)}</td>
+            <td className="num">{money(r.amount, r.currency)}</td>
           </tr>
         ))}
         <tr className="row-grand">
           <td colSpan={2}>Total</td>
-          <td className="num">{money(d.total)}</td>
+          <td className="num">{money(d.total, d.currency)}</td>
         </tr>
       </tbody>
     </table>

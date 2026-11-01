@@ -34,6 +34,7 @@ const SYSTEM_ACCOUNTS = [
   { code: "adjustments", name: "Rounding & Adjustments", group: "Other Expense" },
   { code: "depreciation", name: "Depreciation Expense", group: "Expense" },
   { code: "asset_disposal", name: "Loss / (Gain) on Asset Disposal", group: "Other Expense" },
+  { code: "fx_gain_loss", name: "Exchange Loss / (Gain)", group: "Other Expense" },
   { code: "cogs", name: "Cost of Goods Sold", group: "Cost Of Goods Sold" },
   ...EXPENSE_CATEGORIES.map((n) => ({ code: expCode(n), name: n, group: n === "Raw Materials" ? "Cost Of Goods Sold" : "Expense" })),
 ].map((a) => ({ ...a, system: true, type: GROUP_TYPE(a.group) }));
@@ -89,7 +90,9 @@ async function buildEntries(org, { to } = {}) {
   const Item = require("../models/Item");
   const InventoryAdjustment = require("../models/InventoryAdjustment");
   const FixedAsset = require("../models/FixedAsset");
-  const [invoices, payments, cns, bills, vps, expenses, journals, vcs, items, adjustments, assets] = await Promise.all([
+  // Raw documents in their own currency; rates are applied below.
+  const { raw } = require("../config/baseCurrency");
+  const [invoices, payments, cns, bills, vps, expenses, journals, vcs, items, adjustments, assets] = await raw(() => Promise.all([
     Invoice.find(live).lean(),
     Payment.find(all).lean(),
     CreditNote.find(live).lean(),
@@ -101,28 +104,37 @@ async function buildEntries(org, { to } = {}) {
     Item.find({ organization: org, trackInventory: true }).lean(),
     InventoryAdjustment.find({ organization: org, status: "adjusted" }).lean(),
     FixedAsset.find({ organization: org }).lean(),
-  ]);
+  ]));
   // Inventory value change per document (see utils/inventory.js).
   const { docInv } = require("./inventory").computeStock({ items, invoices, creditNotes: cns, bills, vendorCredits: vcs, adjustments });
   const inv = (type, id) => docInv[`${type}|${id}`] || 0;
 
   const entries = [];
+  // meta.rate converts a foreign-currency document to ₹. dr/cr take document amounts;
+  // drB/crB take amounts already in ₹ (inventory values, exchange differences).
   const add = (meta) => {
     const lines = [];
-    const dr = (account, amt) => {
+    const rate = Number(meta.rate) || 1;
+    const drB = (account, amt) => {
       amt = round2(amt || 0);
       if (amt > 0) lines.push({ account, debit: amt, credit: 0 });
       else if (amt < 0) lines.push({ account, debit: 0, credit: -amt });
     };
+    const crB = (account, amt) => drB(account, -(amt || 0));
+    const dr = (account, amt) => drB(account, (amt || 0) * rate);
     const cr = (account, amt) => dr(account, -(amt || 0));
-    meta.build(dr, cr);
+    meta.build(dr, cr, drB, crB);
+    // Converting each line separately can leave a paisa or two over: post it to rounding.
+    const diff = round2(lines.reduce((s, l) => s + l.debit - l.credit, 0));
+    if (diff && Math.abs(diff) < 1) crB("adjustments", diff);
     if (lines.length) entries.push({ date: meta.date, type: meta.type, id: meta.id, number: meta.number, party: meta.party || "", lines });
   };
+  const rateOf = new Map([...invoices, ...bills].map((d) => [String(d._id), Number(d.exchangeRate) || 1]));
 
   for (const i of invoices) {
     add({
-      date: i.date, type: "Invoice", id: i._id, number: i.invoiceNumber, party: i.customerName,
-      build: (dr, cr) => {
+      date: i.date, type: "Invoice", id: i._id, number: i.invoiceNumber, party: i.customerName, rate: i.exchangeRate,
+      build: (dr, cr, drB) => {
         dr("ar", i.total);
         cr("sales", i.subTotal);
         cr("output_cgst", i.cgst);
@@ -130,24 +142,29 @@ async function buildEntries(org, { to } = {}) {
         cr("output_igst", i.igst);
         cr("shipping_income", i.shippingCharge);
         dr("adjustments", -(i.adjustment || 0));
-        dr("cogs", -inv("Invoice", i._id));
-        dr("inventory", inv("Invoice", i._id));
+        drB("cogs", -inv("Invoice", i._id));
+        drB("inventory", inv("Invoice", i._id));
       },
     });
   }
   for (const p of payments) {
     add({
       date: p.date, type: "Customer Payment", id: p._id, number: p.paymentNumber, party: p.customerName,
-      build: (dr, cr) => {
-        dr(modeAccount(p.mode, p.bankAccount), p.amount);
-        cr("ar", p.amount);
+      build: (dr, cr, drB, crB) => {
+        const r = Number(p.exchangeRate) || 1;
+        const received = round2(p.amount * r);
+        // Receivables are cleared at each invoice's own rate; the difference is exchange gain/loss.
+        const cleared = round2(p.allocations.reduce((s, a) => s + round2(a.amount * (rateOf.get(String(a.invoice)) || r)), 0) + (p.unusedAmount || 0) * r);
+        drB(modeAccount(p.mode, p.bankAccount), received);
+        crB("ar", cleared);
+        drB("fx_gain_loss", cleared - received);
       },
     });
   }
   for (const c of cns) {
     add({
-      date: c.date, type: "Credit Note", id: c._id, number: c.number, party: c.customerName,
-      build: (dr, cr) => {
+      date: c.date, type: "Credit Note", id: c._id, number: c.number, party: c.customerName, rate: c.exchangeRate,
+      build: (dr, cr, drB, crB) => {
         dr("sales", c.subTotal);
         dr("output_cgst", c.cgst);
         dr("output_sgst", c.sgst);
@@ -155,13 +172,13 @@ async function buildEntries(org, { to } = {}) {
         dr("shipping_income", c.shippingCharge);
         cr("adjustments", -(c.adjustment || 0));
         cr("ar", c.total);
-        dr("inventory", inv("Credit Note", c._id));
-        cr("cogs", inv("Credit Note", c._id));
+        drB("inventory", inv("Credit Note", c._id));
+        crB("cogs", inv("Credit Note", c._id));
       },
     });
     for (const r of c.refunds || []) {
       add({
-        date: r.date, type: "Credit Note Refund", id: c._id, number: c.number, party: c.customerName,
+        date: r.date, type: "Credit Note Refund", id: c._id, number: c.number, party: c.customerName, rate: c.exchangeRate,
         build: (dr, cr) => {
           dr("ar", r.amount);
           cr(modeAccount(r.mode, r.bankAccount), r.amount);
@@ -171,10 +188,11 @@ async function buildEntries(org, { to } = {}) {
   }
   for (const b of bills) {
     add({
-      date: b.date, type: "Bill", id: b._id, number: b.billNumber, party: b.vendorName,
-      build: (dr, cr) => {
-        dr("cogs", b.subTotal + (b.shippingCharge || 0) - inv("Bill", b._id));
-        dr("inventory", inv("Bill", b._id));
+      date: b.date, type: "Bill", id: b._id, number: b.billNumber, party: b.vendorName, rate: b.exchangeRate,
+      build: (dr, cr, drB) => {
+        dr("cogs", b.subTotal + (b.shippingCharge || 0));
+        drB("cogs", -inv("Bill", b._id));
+        drB("inventory", inv("Bill", b._id));
         dr("input_cgst", b.cgst);
         dr("input_sgst", b.sgst);
         dr("input_igst", b.igst);
@@ -186,9 +204,13 @@ async function buildEntries(org, { to } = {}) {
   for (const v of vps) {
     add({
       date: v.date, type: "Vendor Payment", id: v._id, number: v.paymentNumber, party: v.vendorName,
-      build: (dr, cr) => {
-        dr("ap", v.amount);
-        cr(modeAccount(v.mode, v.bankAccount), v.amount);
+      build: (dr, cr, drB, crB) => {
+        const r = Number(v.exchangeRate) || 1;
+        const paid = round2(v.amount * r);
+        const cleared = round2(v.allocations.reduce((s, a) => s + round2(a.amount * (rateOf.get(String(a.bill)) || r)), 0) + (v.unusedAmount || 0) * r);
+        drB("ap", cleared);
+        crB(modeAccount(v.mode, v.bankAccount), paid);
+        drB("fx_gain_loss", paid - cleared);
       },
     });
   }
@@ -206,11 +228,12 @@ async function buildEntries(org, { to } = {}) {
   }
   for (const c of vcs) {
     add({
-      date: c.date, type: "Vendor Credit", id: c._id, number: c.number, party: c.vendorName,
-      build: (dr, cr) => {
+      date: c.date, type: "Vendor Credit", id: c._id, number: c.number, party: c.vendorName, rate: c.exchangeRate,
+      build: (dr, cr, drB, crB) => {
         dr("ap", c.total);
-        cr("cogs", c.subTotal + (c.shippingCharge || 0) + inv("Vendor Credit", c._id));
-        dr("inventory", inv("Vendor Credit", c._id));
+        cr("cogs", c.subTotal + (c.shippingCharge || 0));
+        crB("cogs", inv("Vendor Credit", c._id));
+        drB("inventory", inv("Vendor Credit", c._id));
         cr("input_cgst", c.cgst);
         cr("input_sgst", c.sgst);
         cr("input_igst", c.igst);
@@ -219,7 +242,7 @@ async function buildEntries(org, { to } = {}) {
     });
     for (const r of c.refunds || []) {
       add({
-        date: r.date, type: "Vendor Credit Refund", id: c._id, number: c.number, party: c.vendorName,
+        date: r.date, type: "Vendor Credit Refund", id: c._id, number: c.number, party: c.vendorName, rate: c.exchangeRate,
         build: (dr, cr) => {
           dr(modeAccount(r.mode, r.bankAccount), r.amount);
           cr("ap", r.amount);

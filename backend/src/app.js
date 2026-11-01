@@ -1,6 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 require("./config/branchScope"); // before any model is compiled
+require("./config/baseCurrency");
 const express = require("express");
 const cors = require("cors");
 const auth = require("./middleware/auth");
@@ -36,16 +37,17 @@ app.use("/api/bank-rules", auth, permit("banking"), require("./routes/bankRules"
 app.use("/api/banking", auth, permit((req) => (req.method === "GET" && req.path === "/accounts" ? null : "banking")), require("./routes/banking"));
 app.use("/api/accounts", auth, permit("accountant", { readAll: true }), require("./routes/accounts"));
 app.use("/api/journals", auth, permit("accountant"), require("./routes/journals"));
-app.use("/api/budgets", auth, permit("accountant"), require("./config/branchScope").scopeByBranch, require("./routes/budgets"));
+app.use("/api/budgets", auth, permit("accountant"), require("./config/baseCurrency").inBase, require("./config/branchScope").scopeByBranch, require("./routes/budgets"));
 app.use("/api/fixed-assets", auth, permit("accountant"), require("./routes/fixedAssets"));
-app.use("/api/reports", auth, permit("reports"), require("./config/branchScope").scopeByBranch, require("./routes/reports"));
+app.use("/api/reports", auth, permit("reports"), require("./config/baseCurrency").inBase, require("./config/branchScope").scopeByBranch, require("./routes/reports"));
 app.use("/api/payments", auth, permit("sales"), require("./routes/payments"));
 app.use("/api/documents", auth, permit((req) => require("./routes/documents").moduleOf(req)), require("./routes/documents"));
 app.use("/api/branches", auth, permit("settings", { readAll: true }), require("./routes/branches"));
 app.use("/api/warehouses", auth, permit("items", { readAll: true }), require("./routes/warehouses"));
 app.use("/api/transfer-orders", auth, permit("items"), require("./routes/transferOrders"));
+app.use("/api/currencies", auth, permit("settings", { readAll: true }), require("./routes/currencies"));
 app.use("/api/users", auth, permit("settings"), require("./routes/users"));
-app.use("/api/dashboard", auth, permit(null), require("./routes/dashboard"));
+app.use("/api/dashboard", auth, permit(null), require("./config/baseCurrency").inBase, require("./routes/dashboard"));
 app.use("/api", (req, res) => res.status(404).send({ message: "Not found" }));
 
 // Serve the built React app (frontend/dist) in production.

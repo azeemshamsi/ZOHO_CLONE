@@ -358,7 +358,7 @@ function ImportModal({ open, account, onClose, onDone }) {
                     <td className="clamp">{r.description}</td>
                     <td className="num">{r.deposit ? money(r.deposit) : ""}</td>
                     <td className="num">{r.withdrawal ? money(r.withdrawal) : ""}</td>
-                    <td className="num muted">{r.balance !== null ? money(r.balance) : ""}</td>
+                    <td className="num muted">{r.balance !== null ? money(r.balance, r.currency) : ""}</td>
                   </tr>
                 ))}
               </tbody>

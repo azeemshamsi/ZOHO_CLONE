@@ -29,6 +29,7 @@ const schema = Joi.object({
     .pattern(/^[0-9]{2}[A-Z0-9]{13}$/)
     .messages({ "string.pattern.base": "GSTIN must be 15 characters" }),
   placeOfSupply: Joi.string().allow(""),
+  currency: Joi.string().uppercase().length(3),
   billingAddress: address,
   shippingAddress: address,
   paymentTerms: Joi.number().min(0).max(365),

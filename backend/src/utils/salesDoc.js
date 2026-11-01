@@ -29,7 +29,18 @@ const baseDocJoi = {
   terms: Joi.string().allow(""),
   branch: Joi.string().allow(null, ""),
   warehouse: Joi.string().allow(null, ""),
+  exchangeRate: Joi.number().greater(0),
 };
+
+// Currency of a party and the rate to use (₹ per unit): the one given, else the currency's current rate.
+async function currencyFor(req, party, rate) {
+  const code = (party && party.currency) || "INR";
+  if (code === "INR") return { currency: "INR", exchangeRate: 1 };
+  if (rate) return { currency: code, exchangeRate: Number(rate) };
+  const c = await require("../models/Currency").findOne({ organization: req.org, code });
+  if (!c) throw new HttpError(400, `Add ${code} with an exchange rate in Settings → Currencies first`);
+  return { currency: code, exchangeRate: c.rate };
+}
 
 // Check the branch / warehouse ids on a document belong to this organization.
 async function resolveLocation(req, data) {
@@ -72,6 +83,7 @@ async function prepareDoc(req, data, party = "customer") {
       ...totals,
       branch: branch ? branch._id : null,
       warehouse: warehouse ? warehouse._id : null,
+      ...(await currencyFor(req, customer, data.exchangeRate)),
       placeOfSupply,
       [`${party}Name`]: customer.displayName,
       [`${party}Gstin`]: customer.gstin,
@@ -110,6 +122,10 @@ function copyContent(src) {
     customerName: src.customerName,
     customerGstin: src.customerGstin,
     billingAddress: src.billingAddress,
+    branch: src.branch,
+    warehouse: src.warehouse,
+    currency: src.currency || "INR",
+    exchangeRate: src.exchangeRate || 1,
     placeOfSupply: src.placeOfSupply,
     isInterState: src.isInterState,
     lineItems: src.lineItems.map((l) => (l.toObject ? l.toObject() : l)),
@@ -174,6 +190,7 @@ module.exports = {
   lineItemJoi,
   baseDocJoi,
   resolveLocation,
+  currencyFor,
   prepareDoc,
   peekNumber,
   settleInvoice,

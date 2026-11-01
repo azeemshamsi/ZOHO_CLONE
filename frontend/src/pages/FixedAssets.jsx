@@ -333,7 +333,7 @@ export function AssetView() {
               ? a.schedule.map((r, i) => (
                   <tr key={i} className={r.posted ? "" : "muted"}>
                     <td>{date(r.date)}</td>
-                    <td className="num">{money(r.amount)}</td>
+                    <td className="num">{money(r.amount, r.currency)}</td>
                     <td className="num">{money(r.accumulated)}</td>
                     <td className="num">{money(r.bookValue)}</td>
                     <td>{r.posted ? "Posted" : "Projected"}</td>
@@ -344,7 +344,7 @@ export function AssetView() {
                     <td>
                       FY {r.fy}-{String(r.fy + 1).slice(2)}
                     </td>
-                    <td className="num">{money(r.amount)}</td>
+                    <td className="num">{money(r.amount, r.currency)}</td>
                     <td className="num">{money(r.closing)}</td>
                     <td>{r.posted ? "Posted" : "Projected"}</td>
                   </tr>

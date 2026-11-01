@@ -14,6 +14,8 @@ const vendorPaymentSchema = new mongoose.Schema(
   {
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true },
     branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch" },
+    currency: { type: String, default: "INR" },
+    exchangeRate: { type: Number, default: 1 },
     vendor: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor", required: true, index: true },
     vendorName: { type: String, required: true },
     paymentNumber: { type: String, required: true },

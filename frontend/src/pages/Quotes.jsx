@@ -35,7 +35,7 @@ export function QuoteList() {
         { label: "Customer Name", render: (r) => r.customerName },
         { label: "Status", render: (r) => <Status value={quoteStatus(r)} /> },
         { label: "Expiry Date", render: (r) => date(r.expiryDate) },
-        { label: "Amount", num: true, render: (r) => money(r.total) },
+        { label: "Amount", num: true, render: (r) => money(r.total, r.currency) },
       ]}
     />
   );
