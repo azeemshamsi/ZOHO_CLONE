@@ -71,7 +71,7 @@ router.put(
     const api = data.provider !== "smtp";
     if (api && data.user && !data.apiKey && !(old.apiKey && old.provider === data.provider)) throw new HttpError(400, "Enter the API key");
     const pass = data.pass ? data.pass.replace(/\s+/g, "") : old.pass || "";
-    const apiKey = data.apiKey || (old.provider === data.provider ? old.apiKey : "") || "";
+    const apiKey = (data.apiKey || "").replace(/\s+/g, "") || (old.provider === data.provider ? old.apiKey : "") || "";
     org.smtp = api
       ? { provider: data.provider, host: "", port: 587, secure: false, user: data.user, pass: "", apiKey: data.user ? apiKey : "", fromName: data.fromName }
       : { provider: "smtp", host: data.host, port: data.port, secure: data.secure, user: data.user, pass: data.host ? pass : "", apiKey: "", fromName: data.fromName };
