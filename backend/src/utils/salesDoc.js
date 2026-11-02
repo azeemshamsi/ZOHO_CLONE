@@ -15,6 +15,7 @@ const lineItemJoi = Joi.object({
   rate: Joi.number().min(0).required().label("Rate"),
   discount: Joi.number().min(0).max(100),
   taxRate: Joi.number().min(0).max(100),
+  account: Joi.string().allow(""),
 });
 
 const addrJoi = Joi.object({ street: Joi.string().allow(""), city: Joi.string().allow(""), state: Joi.string().allow(""), pincode: Joi.string().allow(""), country: Joi.string().allow("") });
@@ -27,6 +28,7 @@ const baseDocJoi = {
   lineItems: Joi.array().items(lineItemJoi).min(1).required().label("Items"),
   shippingCharge: Joi.number().min(0),
   adjustment: Joi.number(),
+  adjustmentAccount: Joi.string().allow(""),
   customerNotes: Joi.string().allow(""),
   terms: Joi.string().allow(""),
   branch: Joi.string().allow(null, ""),

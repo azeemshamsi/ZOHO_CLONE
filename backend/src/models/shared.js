@@ -17,6 +17,7 @@ const lineItemSchema = new mongoose.Schema(
     cgst: { type: Number, default: 0 },
     sgst: { type: Number, default: 0 },
     igst: { type: Number, default: 0 },
+    account: { type: String, default: "" }, // bills/vendor credits: expense account the line posts to (blank = purchases/COGS)
   },
   { _id: false }
 );
@@ -55,6 +56,7 @@ const salesDocFields = (party = "customer") => ({
   taxTotal: { type: Number, default: 0 },
   shippingCharge: { type: Number, default: 0 },
   adjustment: { type: Number, default: 0 },
+  adjustmentAccount: { type: String, default: "" }, // purchases: account the adjustment posts to (blank = Rounding & Adjustments)
   total: { type: Number, default: 0 },
   customerNotes: { type: String, default: "" },
   terms: { type: String, default: "" },

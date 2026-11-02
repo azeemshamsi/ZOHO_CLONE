@@ -66,6 +66,14 @@ async function chartOfAccounts(org) {
   ];
 }
 
+// Purchase lines with their own account (and no stock item): [[account, amount], …] summed per account.
+function lineAccounts(lines = []) {
+  const m = new Map();
+  for (const l of lines) if (l.account && !l.item) m.set(l.account, (m.get(l.account) || 0) + (l.amount || 0));
+  return [...m];
+}
+const sumOf = (pairs) => pairs.reduce((s, [, a]) => s + a, 0);
+
 // The cash/bank account money went through: the one picked, else by payment mode.
 const modeAccount = (mode, bankAccount) => bankAccount || (mode === "cash" ? "cash" : "bank");
 
@@ -200,13 +208,15 @@ async function buildEntries(org, { to } = {}) {
           dr("opening_equity", b.total);
           return cr("ap", b.total);
         }
-        dr("cogs", b.subTotal + (b.shippingCharge || 0));
+        const direct = lineAccounts(b.lineItems);
+        for (const [acct, amt] of direct) dr(acct, amt);
+        dr("cogs", b.subTotal - sumOf(direct) + (b.shippingCharge || 0));
         drB("cogs", -inv("Bill", b._id));
         drB("inventory", inv("Bill", b._id));
         dr("input_cgst", b.cgst);
         dr("input_sgst", b.sgst);
         dr("input_igst", b.igst);
-        dr("adjustments", b.adjustment || 0);
+        dr(b.adjustmentAccount || "adjustments", b.adjustment || 0);
         cr("ap", b.total);
       },
     });
@@ -242,13 +252,15 @@ async function buildEntries(org, { to } = {}) {
       build: (dr, cr, drB, crB) => {
         dr("ap", c.total);
         if (c.opening) return cr("opening_equity", c.total);
-        cr("cogs", c.subTotal + (c.shippingCharge || 0));
+        const direct = lineAccounts(c.lineItems);
+        for (const [acct, amt] of direct) cr(acct, amt);
+        cr("cogs", c.subTotal - sumOf(direct) + (c.shippingCharge || 0));
         crB("cogs", inv("Vendor Credit", c._id));
         drB("inventory", inv("Vendor Credit", c._id));
         cr("input_cgst", c.cgst);
         cr("input_sgst", c.sgst);
         cr("input_igst", c.igst);
-        cr("adjustments", c.adjustment || 0);
+        cr(c.adjustmentAccount || "adjustments", c.adjustment || 0);
       },
     });
     for (const r of c.refunds || []) {

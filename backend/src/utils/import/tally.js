@@ -51,6 +51,16 @@ function normalise(xml, known = {}) {
     }
     return null;
   };
+  // Is `group` (a ledger's parent) Stock-in-Hand or under it?
+  const underStock = (group) => {
+    let g = clean(group).toLowerCase();
+    for (let i = 0; i < 20 && g; i++) {
+      if (g === "stock-in-hand") return true;
+      g = groups.get(g) ?? RESERVED_PARENT[g] ?? "";
+    }
+    return false;
+  };
+  const stockLedgers = [];
 
   const out = { accounts: [], customers: [], vendors: [], invoices: [], bills: [], creditNotes: [], vendorCredits: [], payments: [], vendorPayments: [], journals: [], stockAdjustments: [] };
   const ledgerGroup = new Map(); // ledger name → OrdexaGo group / "debtors" / "creditors"
@@ -87,7 +97,11 @@ function normalise(xml, known = {}) {
         openingBills: bills.map((b) => ({ ...b, amount: kind === "customer" ? -b.amount : b.amount })),
       });
     } else {
-      out.accounts.push({ name, code: text(l.ALIAS) || "", type: parent, group: grp, description: text(l.DESCRIPTION) || text(l.NARRATION), parent: "", opening: -ob });
+      // Stock-in-Hand ledgers (Opening Stock, Closing Stock): with inventory kept item-wise their value
+      // comes from the stock items (Stock Summary import), so a ledger balance here would count stock twice.
+      const stock = underStock(parent);
+      if (stock && ob) stockLedgers.push(name);
+      out.accounts.push({ name, code: text(l.ALIAS) || "", type: parent, group: grp, description: text(l.DESCRIPTION) || text(l.NARRATION), parent: "", opening: stock ? 0 : -ob });
     }
   }
 
@@ -186,13 +200,38 @@ function normalise(xml, known = {}) {
         const amount = Math.abs(num(text(it.AMOUNT)));
         return { name: text(it.STOCKITEMNAME) || "Item", description: "", hsnSac: text(it.GSTHSNNAME) || text(it.HSNCODE) || "", unit: clean(qtyText.replace(/[-\d.,\s]+/, "")).toLowerCase() || "", quantity: qty, rate: C.round2(amount / qty), discount: 0, taxRate: 0, stock: !!text(it.STOCKITEMNAME) };
       });
-      if (!lines.length) lines = incomeSide.map((e) => ({ name: e.ledger, description: "", hsnSac: "", unit: "", quantity: 1, rate: C.round2(e.debit + e.credit), discount: 0, taxRate: 0 }));
+      const ledgerLine = (e, amt) => ({ name: e.ledger, description: "", hsnSac: "", unit: "", quantity: 1, rate: C.round2(amt), discount: 0, taxRate: 0, ledger: e.ledger });
+      if (!lines.length) lines = incomeSide.map((e) => ledgerLine(e, e.debit + e.credit));
+      // Purchases: expense ledgers on the voucher (advertising, shipping, freight, commission…) are bill lines
+      // posted to their own account, not an adjustment. Unknown ledgers are treated as expenses too.
+      const purchaseLedger = (e) => {
+        const g = groupOf(e.ledger);
+        return !g || ["Expense", "Other Expense", "Cost Of Goods Sold", "Fixed Asset"].includes(g);
+      };
+      if (!sales && inv.length)
+        for (const e of entries) {
+          const amt = (kind === "bills" ? e.debit - e.credit : e.credit - e.debit);
+          if (e === partyEntry || isTax(e.ledger) || isRound(e.ledger) || e.fromInventory || amt <= 0 || !purchaseLedger(e)) continue;
+          lines.push(ledgerLine(e, amt));
+          e.asLine = true;
+        }
+      if (!sales && !inv.length)
+        for (const e of entries) {
+          const amt = (kind === "bills" ? e.debit - e.credit : e.credit - e.debit);
+          if (e === partyEntry || isTax(e.ledger) || isRound(e.ledger) || incomeSide.includes(e) || amt <= 0 || groupOf(e.ledger)) continue;
+          lines.push(ledgerLine(e, amt));
+          e.asLine = true;
+        }
       const taxable = lines.reduce((s, l) => s + l.quantity * l.rate, 0);
       const rate = taxable ? C.snapRate((tax / taxable) * 100) : 0;
       lines.forEach((l) => (l.taxRate = rate));
       // Freight, discounts, round-off and anything else become the adjustment, so totals match Tally.
-      const other = entries.filter((e) => e.ledger !== partyEntry.ledger && !isTax(e.ledger) && !incomeSide.includes(e) && !e.fromInventory);
+      const other = entries.filter((e) => e.ledger !== partyEntry.ledger && !isTax(e.ledger) && !incomeSide.includes(e) && !e.fromInventory && !e.asLine && (e.debit || e.credit));
       const otherSigned = other.reduce((s, e) => s + (sales ? e.credit - e.debit : e.debit - e.credit), 0);
+      // When the whole adjustment is one real ledger (TDS deducted on a bill), post it there instead of Rounding.
+      const adjLedgers = [...new Set(other.filter((e) => !isRound(e.ledger)).map((e) => e.ledger))];
+      const roundOff = other.filter((e) => isRound(e.ledger)).reduce((s, e) => s + Math.abs(e.debit - e.credit), 0);
+      const adjustmentLedger = !sales && adjLedgers.length === 1 && roundOff < 1 ? adjLedgers[0] : "";
       out[kind].push({
         number,
         date: d,
@@ -204,6 +243,7 @@ function normalise(xml, known = {}) {
         lines,
         shippingCharge: 0,
         adjustment: C.round2(otherSigned),
+        adjustmentLedger,
         total: C.round2(total),
         notes: narration,
         linked: (partyEntry.bills.find((b) => /agst/i.test(b.type)) || {}).name || "",
@@ -232,6 +272,7 @@ function normalise(xml, known = {}) {
         });
     } else asJournal();
   }
+  if (stockLedgers.length) warnings.push(`Opening balance on stock ledger(s) ${stockLedgers.join(", ")} was left out: stock value comes from your items' opening stock (import Tally's Stock Summary), so it isn't counted twice`);
   if (stockOnly.length) warnings.push(`${stockOnly.length} voucher(s) with neither accounting entries nor stock lines were skipped: ${stockOnly.slice(0, 8).join(", ")}${stockOnly.length > 8 ? "…" : ""}`);
   if (twoWay.size) warnings.push(`${twoWay.size} party ledger(s) are used on both sides (sold to and bought from), so they get both a customer and a vendor record: ${[...twoWay].slice(0, 8).join(", ")}`);
   if (guessed.size) warnings.push(`${guessed.size} party ledger(s) weren't in the file or in OrdexaGo and were taken from the voucher type: ${[...guessed].slice(0, 10).join(", ")}${guessed.size > 10 ? "…" : ""}`);

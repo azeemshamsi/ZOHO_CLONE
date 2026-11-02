@@ -106,6 +106,16 @@ async function commit(ctx, data, opts, progress) {
     return accByName.get(n) || taxCode(n) || accByName.get(n.replace(/\s*\(.*\)$/, "")) || null;
   };
 
+  // The account a purchase line's ledger posts to; ledgers not in OrdexaGo yet become Expense accounts.
+  const expenseAccount = async (name) => {
+    const code = lookupAccount(name);
+    if (code) return ["ar", "ap"].includes(code) ? "" : code;
+    const d = await Account.create({ organization: ctx.org, name: clean(name), group: "Expense" });
+    accByName.set(clean(name).toLowerCase(), String(d._id));
+    warnings.push(`Account "${clean(name)}" was created as an Expense (from a Tally purchase voucher) — change its type in Chart of Accounts if needed`);
+    return String(d._id);
+  };
+
   /* ---------- 1. Accounts ---------- */
   for (const a of data.records.accounts || []) {
     progress();
@@ -351,11 +361,17 @@ async function commit(ctx, data, opts, progress) {
           placeOfSupply: pos,
           lineItems: await (async () => {
             const out = [];
-            for (const { stock, ...l } of d.lines) out.push({ ...l, item: stock && l.name ? String((await itemFor(l, type === "invoices" || type === "creditNotes" ? "sale" : "purchase"))._id) : null });
+            const purchase = type === "bills" || type === "vendorCredits";
+            for (const { stock, ledger, ...l } of d.lines) {
+              const line = { ...l, item: stock && l.name ? String((await itemFor(l, purchase ? "purchase" : "sale"))._id) : null };
+              if (purchase && ledger && !stock) line.account = await expenseAccount(ledger);
+              out.push(line);
+            }
             return out;
           })(),
           shippingCharge: d.shippingCharge || 0,
           adjustment,
+          ...((type === "bills" || type === "vendorCredits") && d.adjustmentLedger && adjustment ? { adjustmentAccount: lookupAccount(d.adjustmentLedger) || "" } : {}),
           customerNotes: d.notes || "",
           terms: d.terms || "",
         };

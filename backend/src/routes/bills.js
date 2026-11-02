@@ -18,6 +18,7 @@ const schema = Joi.object({
   lineItems: Joi.array().items(lineItemJoi).min(1).required().label("Items"),
   shippingCharge: Joi.number().min(0),
   adjustment: Joi.number(),
+  adjustmentAccount: Joi.string().allow(""),
   customerNotes: Joi.string().allow(""),
   terms: Joi.string().allow(""),
   status: Joi.string().valid("draft", "open"),

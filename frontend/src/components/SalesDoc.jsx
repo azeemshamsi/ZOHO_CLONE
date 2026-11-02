@@ -98,6 +98,7 @@ const cleanLine = (l) => ({
   rate: l.rate,
   discount: l.discount || 0,
   taxRate: l.taxRate || 0,
+  ...(l.account ? { account: l.account } : {}), // imported purchase lines keep their expense account
 });
 
 function calc(lines, orgState, pos, shipping, adjustment) {
@@ -197,6 +198,7 @@ export function DocForm({ kind, recurring = false }) {
           lineItems: data.lineItems.map(cleanLine),
           shippingCharge: data.shippingCharge,
           adjustment: data.adjustment,
+          adjustmentAccount: data.adjustmentAccount || "",
           customerNotes: data.customerNotes,
           terms: data.terms,
           status: data.status,
@@ -340,6 +342,7 @@ export function DocForm({ kind, recurring = false }) {
         ...(!isVendor && form.billingAddress ? { billingAddress: form.billingAddress, shipTo: form.shipTo } : {}),
         shippingCharge: Number(form.shippingCharge || 0),
         adjustment: Number(form.adjustment || 0),
+        ...(isVendor && form.adjustmentAccount ? { adjustmentAccount: form.adjustmentAccount } : {}),
         customerNotes: form.customerNotes,
         terms: form.terms,
         branch: form.branch || null,
