@@ -30,8 +30,8 @@ async function blockedQty(org, store) {
   return m;
 }
 
-function shopifyQty(item, onHand, blocked) {
-  if (item.shopifySync === false) return null;
+function shopifyQty(item, onHand, blocked, { ignoreSync = false } = {}) {
+  if (item.shopifySync !== true && !ignoreSync) return null;
   const virtual = Math.max(0, item.virtualStock || 0);
   if (!item.trackInventory) return Math.max(0, Math.floor(virtual - blocked));
   const free = onHand - (item.bufferStock || 0) - blocked;
@@ -104,7 +104,7 @@ async function stockView(org, { itemIds } = {}) {
       rate: it.rate,
       active: it.active !== false,
       trackInventory: !!it.trackInventory,
-      shopifySync: it.shopifySync !== false,
+      shopifySync: it.shopifySync === true,
       onHand,
       value: r2(s?.value || 0),
       blocked: b,
@@ -112,6 +112,7 @@ async function stockView(org, { itemIds } = {}) {
       virtual: it.virtualStock || 0,
       available: r2(onHand - b - (it.bufferStock || 0)),
       shopify: sq,
+      shopifyIfOn: shopifyQty(it, onHand, b, { ignoreSync: true }), // what Shopify would get with sync on
       oversold: it.trackInventory ? b > onHand + (it.virtualStock || 0) : b > (it.virtualStock || 0),
       warehouses: byWh.map(([k, q]) => ({ warehouse: k, warehouseName: whName(k), qty: r2(q) })),
       racks: rackRows,

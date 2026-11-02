@@ -523,7 +523,13 @@ export function Inventory() {
                   <td data-label="Buffer" className="num">{num(r.buffer)}</td>
                   <td data-label="Virtual" className="num">{num(r.virtual)}</td>
                   <td data-label="Shopify" className="num">
-                    <strong>{r.shopify ?? "—"}</strong>
+                    {r.shopify !== null && r.shopify !== undefined ? (
+                      <strong>{r.shopify}</strong>
+                    ) : (
+                      <span className="muted" title="Sync is off for this item — this is what Shopify would get">
+                        {r.shopifyIfOn ?? "—"}
+                      </span>
+                    )}
                   </td>
                   <td data-label="Sync" onClick={(e) => e.stopPropagation()}>
                     <label className="toggle" title={r.shopifyVariantId || r.links.length ? "Push this item's stock to Shopify" : "Not on Shopify — link a listing first"}>

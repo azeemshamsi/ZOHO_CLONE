@@ -74,7 +74,7 @@ async function pushOrg(org, { force = false, itemIds } = {}) {
   const errors = [];
   let pushed = 0;
   try {
-    const items = await Item.find({ organization: org, shopifySync: { $ne: false }, $or: [{ shopifyVariantId: { $nin: ["", null] } }, { "shopifyLinks.0": { $exists: true } }], ...(itemIds ? { _id: { $in: itemIds } } : {}) });
+    const items = await Item.find({ organization: org, shopifySync: true, $or: [{ shopifyVariantId: { $nin: ["", null] } }, { "shopifyLinks.0": { $exists: true } }], ...(itemIds ? { _id: { $in: itemIds } } : {}) });
     if (!items.length) return { pushed: 0 };
     await resolveInventoryItems(store, items);
     const { rows } = await stockView(org, { itemIds: items.map((i) => i._id) });

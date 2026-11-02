@@ -168,6 +168,7 @@ router.put(
       }),
       req.body
     );
+    if (d.shopifySync !== undefined) d.shopifySyncByUser = true;
     const it = await Item.findOneAndUpdate({ _id: req.params.id, organization: req.org }, d, { new: true });
     if (!it) throw new HttpError(404, "Item not found");
     res.send(it);

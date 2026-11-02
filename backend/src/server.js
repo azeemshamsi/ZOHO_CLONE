@@ -3,7 +3,8 @@ const connectDatabase = require("./config/database");
 const app = require("./app");
 
 connectDatabase()
-  .then(() => {
+  .then(async () => {
+    await require("./utils/migrations").runMigrations();
     app.listen(env.PORT, () => console.log(`OrdexaGo running on port ${env.PORT}`));
     require("./utils/recurring").startScheduler();
   })
