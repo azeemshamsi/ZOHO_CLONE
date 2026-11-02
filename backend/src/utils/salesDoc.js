@@ -29,6 +29,7 @@ const baseDocJoi = {
   shippingCharge: Joi.number().min(0),
   adjustment: Joi.number(),
   adjustmentAccount: Joi.string().allow(""),
+  ledger: Joi.string().allow(""),
   customerNotes: Joi.string().allow(""),
   terms: Joi.string().allow(""),
   branch: Joi.string().allow(null, ""),
@@ -87,6 +88,11 @@ async function prepareDoc(req, data, party = "customer") {
   ]);
   if (!customer) throw new HttpError(400, `Choose a valid ${party}`);
   const { branch, warehouse } = await resolveLocation(req, data);
+  if (data.ledger) {
+    const acc = (await require("./ledger").chartOfAccounts(req.org)).find((a) => a.code === data.ledger);
+    const ok = acc && (party === "vendor" ? ["Cost Of Goods Sold", "Expense", "Other Expense"] : ["Income", "Other Income"]).includes(acc.group);
+    if (!ok) throw new HttpError(400, `Choose a valid ${party === "vendor" ? "purchase" : "sales"} ledger`);
+  }
   const homeState = branch?.state || org.state; // GST is worked out from the branch's state
   const placeOfSupply = data.placeOfSupply || customer.placeOfSupply || homeState;
   const totals = computeTotals({

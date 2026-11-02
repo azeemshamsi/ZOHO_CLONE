@@ -20,8 +20,8 @@ function AccountModal({ open, account, onClose, onSaved }) {
     if (open)
       setF(
         account
-          ? { name: account.name, group: account.group, accountCode: account.accountCode || "", description: account.description || "", active: account.active !== false }
-          : { name: "", group: "Expense", accountCode: "", description: "", active: true }
+          ? { name: account.name, group: account.group, accountCode: account.accountCode || "", description: account.description || "", active: account.active !== false, ledgerKind: account.ledgerKind || "" }
+          : { name: "", group: "Expense", accountCode: "", description: "", active: true, ledgerKind: "" }
       );
   }, [open, account]);
   const save = async (e) => {
@@ -57,6 +57,14 @@ function AccountModal({ open, account, onClose, onSaved }) {
         <Field label="Description">
           <textarea rows={2} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
         </Field>
+        {(["Income", "Other Income"].includes(f.group) || ["Cost Of Goods Sold", "Expense", "Other Expense"].includes(f.group)) && (
+          <Field label="Use as" hint="Sales ledgers are offered on invoices, purchase ledgers on bills">
+            <select value={f.ledgerKind || ""} onChange={(e) => setF({ ...f, ledgerKind: e.target.value })}>
+              <option value="">Not a sales / purchase ledger</option>
+              {["Income", "Other Income"].includes(f.group) ? <option value="sales">Sales ledger</option> : <option value="purchase">Purchase ledger</option>}
+            </select>
+          </Field>
+        )}
         {account && (
           <label className="check">
             <input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> Active

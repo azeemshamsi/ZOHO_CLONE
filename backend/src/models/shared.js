@@ -57,6 +57,7 @@ const salesDocFields = (party = "customer") => ({
   shippingCharge: { type: Number, default: 0 },
   adjustment: { type: Number, default: 0 },
   adjustmentAccount: { type: String, default: "" }, // purchases: account the adjustment posts to (blank = Rounding & Adjustments)
+  ledger: { type: String, default: "" }, // sales ledger (invoices, credit notes) / purchase ledger (bills, vendor credits): account code; blank = Sales / Cost of Goods Sold
   adjustmentRoundOff: { type: Number, default: 0 }, // purchases with an adjustment account: the round-off part of the adjustment, posted to Rounding & Adjustments
   total: { type: Number, default: 0 },
   customerNotes: { type: String, default: "" },

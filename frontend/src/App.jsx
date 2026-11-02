@@ -16,6 +16,7 @@ import { BillList, BillForm, BillView } from "./pages/Bills";
 import { VendorPaymentList, VendorPaymentForm, VendorPaymentView } from "./pages/VendorPayments";
 import { ExpenseList, ExpenseForm } from "./pages/Expenses";
 import { AccountList, AccountDetail } from "./pages/Accounts";
+import { LedgerList } from "./pages/Ledgers";
 import { JournalList, JournalForm, JournalView } from "./pages/Journals";
 import { ReportsHome, ReportPage } from "./pages/Reports";
 import { AdjustmentList, AdjustmentForm, AdjustmentView } from "./pages/InventoryAdjustments";
@@ -155,6 +156,8 @@ export default function App() {
           <Route path="expenses/new" element={<ExpenseForm />} />
           <Route path="expenses/:id/edit" element={<ExpenseForm />} />
           <Route path="chart-of-accounts" element={<AccountList />} />
+          <Route path="sales-ledgers" element={<LedgerList kind="sales" key="sales" />} />
+          <Route path="purchase-ledgers" element={<LedgerList kind="purchase" key="purchase" />} />
           <Route path="chart-of-accounts/:code" element={<AccountDetail />} />
           <Route path="journals" element={<JournalList />} />
           <Route path="journals/new" element={<JournalForm />} />

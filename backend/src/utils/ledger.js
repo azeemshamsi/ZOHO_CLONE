@@ -58,6 +58,7 @@ async function chartOfAccounts(org) {
       name: a.name,
       group: a.group,
       type: GROUP_TYPE(a.group),
+      ledgerKind: a.ledgerKind || "",
       accountCode: a.accountCode,
       description: a.description,
       active: a.active,
@@ -157,7 +158,7 @@ async function buildEntries(org, { to } = {}) {
         if (i.opening) return cr("opening_equity", i.total); // balance brought forward from another system
         const income = incomeAccounts(i.lineItems);
         for (const [acct, amt] of income) cr(acct, amt);
-        cr("sales", i.subTotal - sumOf(income));
+        cr(i.ledger || "sales", i.subTotal - sumOf(income));
         cr("output_cgst", i.cgst);
         cr("output_sgst", i.sgst);
         cr("output_igst", i.igst);
@@ -192,7 +193,7 @@ async function buildEntries(org, { to } = {}) {
         }
         const income = incomeAccounts(c.lineItems);
         for (const [acct, amt] of income) dr(acct, amt);
-        dr("sales", c.subTotal - sumOf(income));
+        dr(c.ledger || "sales", c.subTotal - sumOf(income));
         dr("output_cgst", c.cgst);
         dr("output_sgst", c.sgst);
         dr("output_igst", c.igst);
@@ -223,8 +224,8 @@ async function buildEntries(org, { to } = {}) {
         }
         const direct = lineAccounts(b.lineItems);
         for (const [acct, amt] of direct) dr(acct, amt);
-        dr("cogs", b.subTotal - sumOf(direct) + (b.shippingCharge || 0));
-        drB("cogs", -inv("Bill", b._id));
+        dr(b.ledger || "cogs", b.subTotal - sumOf(direct) + (b.shippingCharge || 0));
+        drB(b.ledger || "cogs", -inv("Bill", b._id));
         drB("inventory", inv("Bill", b._id));
         dr("input_cgst", b.cgst);
         dr("input_sgst", b.sgst);
@@ -269,8 +270,8 @@ async function buildEntries(org, { to } = {}) {
         if (c.opening) return cr("opening_equity", c.total);
         const direct = lineAccounts(c.lineItems);
         for (const [acct, amt] of direct) cr(acct, amt);
-        cr("cogs", c.subTotal - sumOf(direct) + (c.shippingCharge || 0));
-        crB("cogs", inv("Vendor Credit", c._id));
+        cr(c.ledger || "cogs", c.subTotal - sumOf(direct) + (c.shippingCharge || 0));
+        crB(c.ledger || "cogs", inv("Vendor Credit", c._id));
         drB("inventory", inv("Vendor Credit", c._id));
         cr("input_cgst", c.cgst);
         cr("input_sgst", c.sgst);

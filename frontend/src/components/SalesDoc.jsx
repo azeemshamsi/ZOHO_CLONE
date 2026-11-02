@@ -137,6 +137,16 @@ export function DocForm({ kind, recurring = false }) {
   const [autoNumber, setAutoNumber] = useState("");
   const { branches, warehouses } = useLocations();
   const [currencies, setCurrencies] = useState([]);
+  const [ledgers, setLedgers] = useState([]);
+  // Sales ledger (invoices, credit notes) / purchase ledger (bills, vendor credits), as in Tally.
+  const ledgerKind = recurring ? "" : ["invoice", "creditNote"].includes(kind.key) ? "sales" : ["bill", "vendorCredit"].includes(kind.key) ? "purchase" : "";
+  useEffect(() => {
+    if (!ledgerKind) return;
+    api
+      .get("/accounts")
+      .then((r) => setLedgers(r.data.filter((a) => a.ledgerKind === ledgerKind && a.active !== false)))
+      .catch(() => {});
+  }, [ledgerKind]);
   useEffect(() => {
     api.get("/currencies").then((r) => setCurrencies(r.data)).catch(() => {});
   }, []);
@@ -199,6 +209,7 @@ export function DocForm({ kind, recurring = false }) {
           shippingCharge: data.shippingCharge,
           adjustment: data.adjustment,
           adjustmentAccount: data.adjustmentAccount || "",
+          ledger: data.ledger || "",
           customerNotes: data.customerNotes,
           terms: data.terms,
           status: data.status,
@@ -343,6 +354,7 @@ export function DocForm({ kind, recurring = false }) {
         shippingCharge: Number(form.shippingCharge || 0),
         adjustment: Number(form.adjustment || 0),
         ...(isVendor && form.adjustmentAccount ? { adjustmentAccount: form.adjustmentAccount } : {}),
+        ...(ledgerKind ? { ledger: form.ledger || "" } : {}),
         customerNotes: form.customerNotes,
         terms: form.terms,
         branch: form.branch || null,
@@ -429,16 +441,46 @@ export function DocForm({ kind, recurring = false }) {
               <AddressEditor label="Ship To" withName value={form.shipTo} onChange={(v) => setForm({ ...form, shipTo: v })} />
             </div>
           )}
-          <Field label={isVendor ? "Source of Supply" : "Place of Supply"} required>
-            <select value={form.placeOfSupply} onChange={set("placeOfSupply")} required>
-              <option value="">Select</option>
-              {STATES.map(([c, n]) => (
-                <option key={c} value={c}>
-                  [{c}] {n}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <div className={ledgerKind ? "row-2" : ""}>
+            <Field label={isVendor ? "Source of Supply" : "Place of Supply"} required>
+              <select value={form.placeOfSupply} onChange={set("placeOfSupply")} required>
+                <option value="">Select</option>
+                {STATES.map(([c, n]) => (
+                  <option key={c} value={c}>
+                    [{c}] {n}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {ledgerKind && (
+              <Field
+                label={ledgerKind === "sales" ? "Sales Ledger" : "Purchase Ledger"}
+                hint={
+                  ledgers.length ? undefined : (
+                    <>
+                      None yet — <Link to={ledgerKind === "sales" ? "/sales-ledgers" : "/purchase-ledgers"}>create ledgers</Link>
+                    </>
+                  )
+                }
+              >
+                <select
+                  value={form.ledger || ""}
+                  onChange={(e) =>
+                    // Picking a ledger on a sales document moves every line to it (imported lines can carry their own).
+                    setForm({ ...form, ledger: e.target.value, ...(ledgerKind === "sales" ? { lineItems: form.lineItems.map(({ account, ...l }) => l) } : {}) })
+                  }
+                >
+                  <option value="">{ledgerKind === "sales" ? "Sales (default)" : "Cost of Goods Sold (default)"}</option>
+                  {ledgers.map((a) => (
+                    <option key={a.code} value={a.code}>
+                      {a.name}
+                    </option>
+                  ))}
+                  {form.ledger && !ledgers.some((a) => a.code === form.ledger) && <option value={form.ledger}>(current ledger)</option>}
+                </select>
+              </Field>
+            )}
+          </div>
           {(branches.some((b) => b.active) || (stockKind && warehouses.length > 1)) && (
             <div className="row-2">
               {branches.some((b) => b.active) && (

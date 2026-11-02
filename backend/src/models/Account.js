@@ -25,6 +25,8 @@ const accountSchema = new mongoose.Schema(
     accountCode: { type: String, default: "" },
     description: { type: String, default: "" },
     active: { type: Boolean, default: true },
+    // Sales / purchase ledger (as in Tally): offered on invoices and credit notes / bills and vendor credits.
+    ledgerKind: { type: String, enum: ["", "sales", "purchase"], default: "" },
   },
   { timestamps: true }
 );

@@ -122,14 +122,17 @@ function normalise(xml, known = {}) {
     return null;
   };
   // Is `group` (a ledger's parent) Stock-in-Hand or under it?
-  const underStock = (group) => {
+  const under = (group, target) => {
     let g = clean(group).toLowerCase();
     for (let i = 0; i < 20 && g; i++) {
-      if (g === "stock-in-hand") return true;
+      if (g === target) return true;
       g = groups.get(g) ?? RESERVED_PARENT[g] ?? "";
     }
     return false;
   };
+  const underStock = (group) => under(group, "stock-in-hand");
+  // Tally's Sales Accounts / Purchase Accounts ledgers become OrdexaGo sales / purchase ledgers.
+  const ledgerKindOf = (group) => (under(group, "sales accounts") ? "sales" : under(group, "purchase accounts") ? "purchase" : "");
   const stockLedgers = [];
   const billMismatch = [];
   const billPartial = [];
@@ -188,7 +191,7 @@ function normalise(xml, known = {}) {
       // comes from the stock items (Stock Summary import), so a ledger balance here would count stock twice.
       const stock = underStock(parent);
       if (stock && ob) stockLedgers.push(name);
-      out.accounts.push({ name, code: text(l.ALIAS) || "", type: parent, group: grp, description: text(l.DESCRIPTION) || text(l.NARRATION), parent: "", opening: stock ? 0 : -ob });
+      out.accounts.push({ name, code: text(l.ALIAS) || "", type: parent, group: grp, ledgerKind: ledgerKindOf(parent), description: text(l.DESCRIPTION) || text(l.NARRATION), parent: "", opening: stock ? 0 : -ob });
     }
   }
 
@@ -348,6 +351,11 @@ function normalise(xml, known = {}) {
         total: C.round2(total),
         notes: narration,
         linked: (partyEntry.bills.find((b) => /agst/i.test(b.type)) || {}).name || "",
+        // The voucher's sales / purchase ledger, when its stock lines all use one.
+        ledger: (() => {
+          const s = [...new Set(lines.filter((l) => l.stock && l.ledger).map((l) => l.ledger))];
+          return s.length === 1 ? s[0] : "";
+        })(),
       });
     };
 

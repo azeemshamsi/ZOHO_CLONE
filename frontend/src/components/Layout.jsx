@@ -30,6 +30,7 @@ const NAV = [
       { to: "/recurring-invoices", label: "Recurring Invoices" },
       { to: "/payments", label: "Payments Received" },
       { to: "/credit-notes", label: "Credit Notes" },
+      { to: "/sales-ledgers", label: "Sales Ledgers" },
     ],
   },
   {
@@ -45,6 +46,7 @@ const NAV = [
       { to: "/recurring-bills", label: "Recurring Bills" },
       { to: "/payments-made", label: "Payments Made" },
       { to: "/vendor-credits", label: "Vendor Credits" },
+      { to: "/purchase-ledgers", label: "Purchase Ledgers" },
     ],
   },
   {

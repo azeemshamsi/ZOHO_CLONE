@@ -14,6 +14,7 @@ const schema = Joi.object({
   accountCode: Joi.string().allow(""),
   description: Joi.string().allow(""),
   active: Joi.boolean(),
+  ledgerKind: Joi.string().valid("", "sales", "purchase"),
 });
 
 router.get("/types", (req, res) => res.send(Object.keys(ACCOUNT_TYPES)));

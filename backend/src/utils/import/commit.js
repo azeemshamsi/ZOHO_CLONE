@@ -122,7 +122,10 @@ async function commit(ctx, data, opts, progress) {
   for (const a of data.records.accounts || []) {
     progress();
     try {
-      if (lookupAccount(a.name, { exact: true })) {
+      const have = lookupAccount(a.name, { exact: true });
+      if (have) {
+        // Accounts from an earlier import learn whether they're a sales / purchase ledger.
+        if (a.ledgerKind && /^[0-9a-f]{24}$/i.test(have)) await Account.updateOne({ _id: have, organization: ctx.org, ledgerKind: { $in: ["", null] } }, { ledgerKind: a.ledgerKind });
         R_("accounts").skipped++;
         continue;
       }
@@ -136,7 +139,7 @@ async function commit(ctx, data, opts, progress) {
         group = "Other Current Asset";
         warnings.push(`Account "${a.name}" (type "${a.type || "?"}") was put under Other Current Asset — change it in Chart of Accounts if needed`);
       }
-      const doc = await Account.create({ organization: ctx.org, name: a.name, group, accountCode: a.code || "", description: a.description || "" });
+      const doc = await Account.create({ organization: ctx.org, name: a.name, group, accountCode: a.code || "", description: a.description || "", ledgerKind: a.ledgerKind || "" });
       accByName.set(a.name.toLowerCase(), String(doc._id));
       R_("accounts").created++;
     } catch (e) {
@@ -431,6 +434,12 @@ async function commit(ctx, data, opts, progress) {
           shippingCharge: d.shippingCharge || 0,
           adjustment,
           ...((type === "bills" || type === "vendorCredits") && d.adjustmentLedger && adjustment ? { adjustmentAccount: lookupAccount(d.adjustmentLedger) || "" } : {}),
+          ...(() => {
+            // The voucher's sales / purchase ledger, when it's an account of the right kind.
+            const code = d.ledger ? lookupAccount(d.ledger) : "";
+            const groups = type === "bills" || type === "vendorCredits" ? ["Cost Of Goods Sold", "Expense", "Other Expense"] : ["Income", "Other Income"];
+            return code && code !== "sales" && code !== "cogs" && groups.includes(incomeGroup.get(code)) ? { ledger: code } : {};
+          })(),
           customerNotes: d.notes || "",
           terms: d.terms || "",
         };
