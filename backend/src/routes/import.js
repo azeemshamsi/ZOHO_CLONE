@@ -252,16 +252,20 @@ function undoQuery(req, q) {
   const date = {};
   if (q.from) date.$gte = new Date(`${q.from}T00:00:00Z`);
   if (q.to) date.$lte = new Date(`${q.to}T23:59:59Z`);
-  return { src, date: Object.keys(date).length ? date : null };
+  return { src, date: Object.keys(date).length ? date : null, opening: q.opening === true || q.opening === "true" || q.opening === "1" };
 }
 async function undoTargets(req, q) {
-  const { src, date } = undoQuery(req, q);
+  const { src, date, opening } = undoQuery(req, q);
+  const rx = (s) => `^${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`;
   const out = [];
   for (const [type, model] of UNDO) {
     const M = require(`../models/${model}`);
-    const esc = `${src}:${IMPORT_TYPE[type]}:`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const filter = { organization: req.org, importRef: { $regex: `^${esc}` }, opening: { $ne: true }, ...(date ? { date } : {}) };
+    const filter = { organization: req.org, importRef: { $regex: rx(`${src}:${IMPORT_TYPE[type]}:`) }, opening: { $ne: true }, ...(date ? { date } : {}) };
     const ids = (await M.find(filter, { _id: 1 }).lean()).map((d) => String(d._id));
+    // Opening balances (opening invoices/bills/notes per party, and the opening journal) only when asked, whatever their date.
+    if (opening && ["invoices", "bills", "creditNotes", "vendorCredits"].includes(type))
+      ids.push(...(await M.find({ organization: req.org, importRef: { $regex: rx(`${src}:ob-`) } }, { _id: 1 }).lean()).map((d) => String(d._id)));
+    if (opening && type === "journals") ids.push(...(await M.find({ organization: req.org, importRef: { $regex: rx(`${src}:opening:`) } }, { _id: 1 }).lean()).map((d) => String(d._id)));
     out.push({ type, label: LABELS[type], ids });
   }
   return out;

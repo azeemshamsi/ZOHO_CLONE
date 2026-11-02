@@ -247,6 +247,14 @@ async function commit(ctx, data, opts, progress) {
       fail("openingBalances", "Opening balances", e);
     }
   }
+  const obSeq = {};
+  const obNumber = async (M, prefix, field = "number") => {
+    for (;;) {
+      obSeq[prefix] = (obSeq[prefix] || 0) + 1;
+      const n = `${prefix}${String(obSeq[prefix]).padStart(2, "0")}`;
+      if (!(await M.exists({ organization: ctx.org, [field]: n }))) return n;
+    }
+  };
   if (openingDate)
     for (const c of contactOpenings) {
       progress();
@@ -270,15 +278,16 @@ async function commit(ctx, data, opts, progress) {
           const pos = p.placeOfSupply || org.state;
           let doc;
           if (c.kind === "customer" && !isCredit) {
-            let no = b.number ? clean(b.number).slice(0, 30) : "";
+            let no = b.number ? clean(b.number).slice(0, 30) : await obNumber(Invoice, "OB-INV-", "invoiceNumber");
             if (no && (await Invoice.exists({ organization: ctx.org, invoiceNumber: no }))) no = `${no}-OB`;
             doc = await call(R("invoices"), "POST", "/", ctx, { customer: String(p._id), invoiceNumber: no, date: iso(d), dueDate: due, status: "sent", placeOfSupply: pos, lineItems: line });
           } else if (c.kind === "vendor" && !isCredit) {
             doc = await call(R("bills"), "POST", "/", ctx, { vendor: String(p._id), billNumber: b.number || `OB-${iso(openingDate)}-${i + 1}`, date: iso(d), dueDate: due, status: "open", placeOfSupply: pos, lineItems: line });
           } else if (c.kind === "customer") {
-            doc = await call(R("creditNotes"), "POST", "/", ctx, { customer: String(p._id), date: iso(d), status: "open", reason: "Opening balance", placeOfSupply: pos, lineItems: line });
+            // Own number series, so they don't take the numbers of real credit notes imported later.
+            doc = await call(R("creditNotes"), "POST", "/", ctx, { customer: String(p._id), number: await obNumber(CreditNote, "OB-CN-"), date: iso(d), status: "open", reason: "Opening balance", placeOfSupply: pos, lineItems: line });
           } else {
-            doc = await call(R("vendorCredits"), "POST", "/", ctx, { vendor: String(p._id), date: iso(d), status: "open", reason: "Opening balance", placeOfSupply: pos, lineItems: line });
+            doc = await call(R("vendorCredits"), "POST", "/", ctx, { vendor: String(p._id), number: await obNumber(VendorCredit, "OB-DN-"), date: iso(d), status: "open", reason: "Opening balance", placeOfSupply: pos, lineItems: line });
           }
           await M.updateOne({ _id: doc._id }, { opening: true, importRef: key });
           R_("openingBalances").created++;

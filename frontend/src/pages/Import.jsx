@@ -334,7 +334,7 @@ export function Import() {
 // Remove transactions brought in by an earlier import (e.g. to import the same vouchers again, correctly).
 function UndoImport() {
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ source: "tally", from: "", to: "" });
+  const [f, setF] = useState({ source: "tally", from: "", to: "", opening: false });
   const [counts, setCounts] = useState(null);
   const [job, setJob] = useState(null);
   const check = async () => {
@@ -348,10 +348,10 @@ function UndoImport() {
   };
   useEffect(() => {
     if (open) check();
-  }, [open, f.source, f.from, f.to]);
+  }, [open, f.source, f.from, f.to, f.opening]);
   const run = async () => {
     const n = counts.reduce((s, c) => s + c.count, 0);
-    if (!window.confirm(`Delete ${n} imported transaction(s)? Customers, vendors, accounts and opening balances stay. This can't be undone.`)) return;
+    if (!window.confirm(`Delete ${n} imported transaction(s)? Customers, vendors and accounts stay${f.opening ? "" : ", and so do opening balances"}. This can't be undone.`)) return;
     try {
       const { data } = await api.post("/import/undo", f);
       setJob({ status: "running", done: 0, total: data.total });
@@ -398,6 +398,9 @@ function UndoImport() {
           <input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} />
         </Field>
       </div>
+      <label className="check small" style={{ margin: "4px 0 10px" }}>
+        <input type="checkbox" checked={f.opening} onChange={(e) => setF({ ...f, opening: e.target.checked })} /> Also delete imported opening balances (customer/vendor openings and the opening balances journal), to import the masters again
+      </label>
       {job?.status === "running" ? (
         <p>
           Deleting… {job.done} of {job.total}

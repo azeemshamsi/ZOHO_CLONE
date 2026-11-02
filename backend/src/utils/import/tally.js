@@ -61,6 +61,7 @@ function normalise(xml, known = {}) {
     return false;
   };
   const stockLedgers = [];
+  const billMismatch = [];
 
   const out = { accounts: [], customers: [], vendors: [], invoices: [], bills: [], creditNotes: [], vendorCredits: [], payments: [], vendorPayments: [], journals: [], stockAdjustments: [] };
   const ledgerGroup = new Map(); // ledger name → OrdexaGo group / "debtors" / "creditors"
@@ -78,7 +79,14 @@ function normalise(xml, known = {}) {
       const g = gstin(text(reg.GSTIN) || text(l.PARTYGSTIN) || text(l.GSTIN));
       const addr = [...arr(mail["ADDRESS.LIST"]), ...arr(l["ADDRESS.LIST"])].flatMap((x) => arr(x.ADDRESS)).map(text).filter(Boolean);
       const state = stateCode(text(mail.STATE) || text(l.LEDSTATENAME) || text(l.STATENAME) || text(reg.STATE), g);
-      const bills = arr(l["BILLALLOCATIONS.LIST"]).map((b) => ({ number: text(b.NAME), date: date(text(b.BILLDATE)), amount: num(text(b.OPENINGBALANCE)) })).filter((b) => b.amount);
+      let bills = arr(l["BILLALLOCATIONS.LIST"]).map((b) => ({ number: text(b.NAME), date: date(text(b.BILLDATE)), amount: num(text(b.OPENINGBALANCE)) })).filter((b) => b.amount);
+      // Tally's bill-wise details can be stale (bills never knocked off, a wrong amount). The ledger's
+      // opening balance is what the trial balance uses, so when the bills don't add up to it, use it alone.
+      const billSum = C.round2(bills.reduce((s, b) => s + b.amount, 0));
+      if (bills.length && Math.abs(billSum - ob) > 1) {
+        billMismatch.push(`${name} (bills ₹${Math.abs(billSum).toLocaleString("en-IN")}, ledger ₹${Math.abs(ob).toLocaleString("en-IN")})`);
+        bills = [];
+      }
       out[kind === "customer" ? "customers" : "vendors"].push({
         kind,
         displayName: name,
@@ -272,6 +280,7 @@ function normalise(xml, known = {}) {
         });
     } else asJournal();
   }
+  if (billMismatch.length) warnings.push(`${billMismatch.length} party ledger(s) have bill-wise opening details in Tally that don't add up to the ledger's opening balance, so the ledger balance was used as one opening amount: ${billMismatch.slice(0, 10).join(", ")}${billMismatch.length > 10 ? "…" : ""}`);
   if (stockLedgers.length) warnings.push(`Opening balance on stock ledger(s) ${stockLedgers.join(", ")} was left out: stock value comes from your items' opening stock (import Tally's Stock Summary), so it isn't counted twice`);
   if (stockOnly.length) warnings.push(`${stockOnly.length} voucher(s) with neither accounting entries nor stock lines were skipped: ${stockOnly.slice(0, 8).join(", ")}${stockOnly.length > 8 ? "…" : ""}`);
   if (twoWay.size) warnings.push(`${twoWay.size} party ledger(s) are used on both sides (sold to and bought from), so they get both a customer and a vendor record: ${[...twoWay].slice(0, 8).join(", ")}`);
