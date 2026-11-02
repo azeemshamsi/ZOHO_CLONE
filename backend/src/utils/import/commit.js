@@ -542,6 +542,34 @@ async function commit(ctx, data, opts, progress) {
     }
   }
 
+  /* ---------- 9. Opening stock (Tally Stock Summary) ---------- */
+  if ((data.records.openingStock || []).length) {
+    const when = openingDate || new Date();
+    for (const o of data.records.openingStock) {
+      progress();
+      try {
+        const k = clean(o.name).toLowerCase();
+        let it = items.get(k);
+        const fields = { openingStock: o.quantity, openingStockRate: o.rate, openingStockDate: when, trackInventory: true };
+        if (!it) {
+          it = (await Item.create({ organization: ctx.org, type: "goods", name: clean(o.name), unit: o.unit || "pcs", purchaseRate: o.rate || 0, taxRate: 0, ...fields })).toObject();
+          items.set(k, it);
+          warnings.push(`Item "${o.name}" was created with its opening stock (check its HSN and GST rate)`);
+          R_("openingStock").created++;
+        } else {
+          if (it.openingStock === o.quantity && Math.abs((it.openingStockRate || 0) - o.rate) < 0.0001 && it.openingStockDate && +new Date(it.openingStockDate) === +when) {
+            R_("openingStock").skipped++;
+            continue;
+          }
+          await Item.updateOne({ _id: it._id }, fields);
+          R_("openingStock").created++;
+        }
+      } catch (e) {
+        fail("openingStock", o.name, e);
+      }
+    }
+  }
+
   return { results, warnings: [...new Set(warnings)] };
 }
 

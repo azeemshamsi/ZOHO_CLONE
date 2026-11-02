@@ -36,6 +36,7 @@ const LABELS = {
   expenses: "Expenses",
   journals: "Journals",
   stockAdjustments: "Stock journals / manufacturing (inventory adjustments)",
+  openingStock: "Opening stock (items)",
 };
 const TYPES = Object.keys(LABELS);
 
@@ -57,6 +58,8 @@ function sample(type, r) {
     case "creditNotes":
     case "vendorCredits":
       return { Number: r.number, Date: iso(r.date), Party: r.party, Lines: r.lines.length, Total: r.total, Status: r.status };
+    case "openingStock":
+      return { Item: r.name, Quantity: r.quantity, Rate: r.rate, Value: r.value };
     case "stockAdjustments":
       return { Number: r.number, Date: iso(r.date), Type: r.reason, In: r.lines.filter((l) => l.quantity > 0).map((l) => `${l.quantity} ${l.unit} ${l.name}`).join(", ").slice(0, 80), Out: r.lines.filter((l) => l.quantity < 0).map((l) => `${-l.quantity} ${l.unit} ${l.name}`).join(", ").slice(0, 80) };
     case "payments":
@@ -85,6 +88,24 @@ router.post(
       }
     }
     if (!buf.length) throw new HttpError(400, "The file is empty");
+    // Tally Stock Summary (Excel) → opening stock per item
+    const SS = require("../utils/import/stockSummary");
+    if (/\.xlsx?$/i.test(fileName) && SS.isStockSummary(buf)) {
+      let ss;
+      try {
+        ss = SS.parseStockSummary(buf);
+      } catch (e) {
+        throw new HttpError(400, `Couldn't read this Stock Summary: ${e.message}`);
+      }
+      if (!ss.items.length) throw new HttpError(400, "No stock items with a quantity were found in this Stock Summary. Export it with all levels expanded (Alt+F5).");
+      const records = emptyRecords();
+      records.openingStock = ss.items;
+      const id = crypto.randomUUID();
+      const next = ss.asOn ? new Date(ss.asOn.getTime() + 86400000) : null;
+      const warnings = [...ss.warnings, `Stock as on ${ss.asOn ? iso(ss.asOn) : "?"}: ${ss.items.length} items worth ₹${ss.items.reduce((t, i) => t + i.value, 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}. It becomes each item's opening stock on the opening date below.`];
+      previews.set(id, { org: String(req.org), at: Date.now(), data: { source: "tally", records, ledgerGroup: null, warnings } });
+      return res.send({ id, source: "tally", fileName, sheets: ["Stock Summary"], datasets: [{ type: "openingStock", label: LABELS.openingStock, count: ss.items.length, sample: ss.items.slice(0, 5).map((r) => sample("openingStock", r)) }], warnings, hasOpening: true, firstDate: next ? iso(next) : null, openingDefault: next ? iso(next) : null });
+    }
     let parsed;
     try {
       parsed = parseFile(fileName, buf);
