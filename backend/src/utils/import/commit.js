@@ -483,6 +483,48 @@ async function commit(ctx, data, opts, progress) {
     }
   }
 
+  /* ---------- 8. Stock journals / manufacturing → inventory adjustments ---------- */
+  if ((data.records.stockAdjustments || []).length) {
+    const Item = require("../../models/Item");
+    const InventoryAdjustment = require("../../models/InventoryAdjustment");
+    const items = new Map((await Item.find({ organization: ctx.org }).lean()).map((i) => [i.name.trim().toLowerCase(), i]));
+    const itemFor = async (l) => {
+      const k = clean(l.name).toLowerCase();
+      let it = items.get(k);
+      if (!it) {
+        it = (await Item.create({ organization: ctx.org, type: "goods", name: clean(l.name), unit: l.unit || "pcs", purchaseRate: l.rate || 0, trackInventory: true, taxRate: 0 })).toObject();
+        items.set(k, it);
+        warnings.push(`Item "${l.name}" wasn't in OrdexaGo, so it was created (check its HSN and GST rate)`);
+      } else if (!it.trackInventory) {
+        await Item.updateOne({ _id: it._id }, { trackInventory: true });
+        it.trackInventory = true;
+      }
+      return it;
+    };
+    for (const a of data.records.stockAdjustments) {
+      progress();
+      const label = `${a.number} ${iso(a.date)}`;
+      const key = ref("stockAdjustment", `${a.number}|${iso(a.date)}`);
+      try {
+        if (!a.date) throw new Error("Missing date");
+        if (await InventoryAdjustment.exists({ organization: ctx.org, importRef: key })) {
+          R_("stockAdjustments").skipped++;
+          continue;
+        }
+        const lines = [];
+        for (const l of a.lines) {
+          const it = await itemFor(l);
+          lines.push({ item: String(it._id), quantityAdjusted: l.quantity, costPrice: l.quantity > 0 ? l.rate : 0 });
+        }
+        const doc = await call(R("inventoryAdjustments"), "POST", "/", ctx, { mode: "quantity", date: iso(a.date), reference: a.number.slice(0, 60), reason: a.reason, account: "cogs", description: a.notes || "", status: "adjusted", lines });
+        await InventoryAdjustment.updateOne({ _id: doc._id }, { importRef: key });
+        R_("stockAdjustments").created++;
+      } catch (e) {
+        fail("stockAdjustments", label, e);
+      }
+    }
+  }
+
   return { results, warnings: [...new Set(warnings)] };
 }
 

@@ -52,7 +52,7 @@ function normalise(xml, known = {}) {
     return null;
   };
 
-  const out = { accounts: [], customers: [], vendors: [], invoices: [], bills: [], creditNotes: [], vendorCredits: [], payments: [], vendorPayments: [], journals: [] };
+  const out = { accounts: [], customers: [], vendors: [], invoices: [], bills: [], creditNotes: [], vendorCredits: [], payments: [], vendorPayments: [], journals: [], stockAdjustments: [] };
   const ledgerGroup = new Map(); // ledger name → OrdexaGo group / "debtors" / "creditors"
   for (const l of collect(xml, "LEDGER")) {
     const name = nameOf(l);
@@ -138,7 +138,24 @@ function normalise(xml, known = {}) {
     const drSum = entries.reduce((t, e) => t + e.debit, 0);
     const crSum = entries.reduce((t, e) => t + e.credit, 0);
     if (!entries.some((e) => e.debit || e.credit) || (stockType && Math.abs(drSum - crSum) > 0.05)) {
-      stockOnly.push(`${text(v.VOUCHERTYPENAME) || "Voucher"} ${number}`);
+      // Stock moves: items in (produced / transferred to) and out (consumed / transferred from).
+      const move = (list, sign) =>
+        list.map((it) => {
+          const qtyText = text(it.ACTUALQTY) || text(it.BILLEDQTY);
+          const qty = Math.abs(num(qtyText));
+          const amount = Math.abs(num(text(it.AMOUNT)));
+          return { name: text(it.STOCKITEMNAME), unit: clean(qtyText.replace(/[-\d.,\s]+/, "")).toLowerCase(), quantity: sign * qty, rate: qty ? C.round2(amount / qty) : 0, godown: text(it.GODOWNNAME) || text(arr(it["BATCHALLOCATIONS.LIST"])[0]?.GODOWNNAME) };
+        });
+      const lines = [
+        ...move(arr(v["INVENTORYENTRIESIN.LIST"]), 1),
+        ...move(arr(v["INVENTORYENTRIESOUT.LIST"]), -1),
+        ...move(inv.filter((it) => /yes/i.test(text(it.ISDEEMEDPOSITIVE))), 1),
+        ...move(inv.filter((it) => !/yes/i.test(text(it.ISDEEMEDPOSITIVE))), -1),
+      ].filter((l) => l.name && l.quantity);
+      if (lines.length) {
+        const kind = /manufactur/.test(vtype) ? "Manufacturing" : /physical/.test(vtype) ? "Stocktaking results" : "Stock journal";
+        out.stockAdjustments.push({ number: `${text(v.VOUCHERTYPENAME) || "Stock Journal"} ${number}`.trim(), date: d, reason: kind, notes: text(v.NARRATION) || `${text(v.VOUCHERTYPENAME)} ${number} (Tally)`, lines });
+      } else stockOnly.push(`${text(v.VOUCHERTYPENAME) || "Voucher"} ${number}`);
       continue;
     }
     const narration = text(v.NARRATION);
@@ -211,7 +228,7 @@ function normalise(xml, known = {}) {
         });
     } else asJournal();
   }
-  if (stockOnly.length) warnings.push(`${stockOnly.length} stock-only voucher(s) skipped (stock journal / manufacturing — no accounting entries): ${stockOnly.slice(0, 8).join(", ")}${stockOnly.length > 8 ? "…" : ""}. Record stock movements with Inventory Adjustments.`);
+  if (stockOnly.length) warnings.push(`${stockOnly.length} voucher(s) with neither accounting entries nor stock lines were skipped: ${stockOnly.slice(0, 8).join(", ")}${stockOnly.length > 8 ? "…" : ""}`);
   if (guessed.size) warnings.push(`${guessed.size} party ledger(s) weren't in the file or in OrdexaGo and were taken from the voucher type: ${[...guessed].slice(0, 10).join(", ")}${guessed.size > 10 ? "…" : ""}`);
   return { records: out, ledgerGroup: Object.fromEntries(ledgerGroup), warnings };
 }

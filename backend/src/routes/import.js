@@ -35,6 +35,7 @@ const LABELS = {
   vendorPayments: "Vendor payments",
   expenses: "Expenses",
   journals: "Journals",
+  stockAdjustments: "Stock journals / manufacturing (inventory adjustments)",
 };
 const TYPES = Object.keys(LABELS);
 
@@ -56,6 +57,8 @@ function sample(type, r) {
     case "creditNotes":
     case "vendorCredits":
       return { Number: r.number, Date: iso(r.date), Party: r.party, Lines: r.lines.length, Total: r.total, Status: r.status };
+    case "stockAdjustments":
+      return { Number: r.number, Date: iso(r.date), Type: r.reason, In: r.lines.filter((l) => l.quantity > 0).map((l) => `${l.quantity} ${l.unit} ${l.name}`).join(", ").slice(0, 80), Out: r.lines.filter((l) => l.quantity < 0).map((l) => `${-l.quantity} ${l.unit} ${l.name}`).join(", ").slice(0, 80) };
     case "payments":
     case "vendorPayments":
       return { Number: r.number, Date: iso(r.date), Party: r.party, Amount: r.amount, Against: (r.allocations || []).map((a) => a.number).join(", ") };
@@ -216,11 +219,12 @@ const UNDO = [
   ["vendorCredits", "VendorCredit", "/vendor-credits", "number"],
   ["expenses", "Expense", "/expenses", "reference"],
   ["journals", "Journal", "/journals", "number"],
+  ["stockAdjustments", "InventoryAdjustment", "/inventory-adjustments", "number"],
   ["invoices", "Invoice", "/invoices", "invoiceNumber"],
   ["bills", "Bill", "/bills", "billNumber"],
 ];
-const ROUTER = { payments: "payments", vendorPayments: "vendorPayments", creditNotes: "creditNotes", vendorCredits: "vendorCredits", expenses: "expenses", journals: "journals", invoices: "invoices", bills: "bills" };
-const IMPORT_TYPE = { payments: "payments", vendorPayments: "vendorPayments", creditNotes: "creditNotes", vendorCredits: "vendorCredits", expenses: "expense", journals: "journal", invoices: "invoices", bills: "bills" };
+const ROUTER = { stockAdjustments: "inventoryAdjustments", payments: "payments", vendorPayments: "vendorPayments", creditNotes: "creditNotes", vendorCredits: "vendorCredits", expenses: "expenses", journals: "journals", invoices: "invoices", bills: "bills" };
+const IMPORT_TYPE = { stockAdjustments: "stockAdjustment", payments: "payments", vendorPayments: "vendorPayments", creditNotes: "creditNotes", vendorCredits: "vendorCredits", expenses: "expense", journals: "journal", invoices: "invoices", bills: "bills" };
 function undoQuery(req, q) {
   const src = ["tally", "zoho", "sheet"].includes(q.source) ? q.source : null;
   if (!src) throw new HttpError(400, "Choose where the data came from");

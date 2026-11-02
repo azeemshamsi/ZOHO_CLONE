@@ -25,6 +25,7 @@ const adjustmentSchema = new mongoose.Schema(
     description: { type: String, default: "" },
     status: { type: String, enum: ["draft", "adjusted"], default: "adjusted" },
     lines: { type: [lineSchema], default: [] },
+    importRef: { type: String, index: true }, // set by the importer (Tally stock journals)
   },
   { timestamps: true }
 );
