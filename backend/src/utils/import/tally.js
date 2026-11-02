@@ -208,7 +208,7 @@ function normalise(xml, known = {}) {
     const d = date(text(v.DATE));
     const number = text(v.VOUCHERNUMBER) || text(v.REFERENCE) || `${vtype}-${text(v.DATE)}-${text(v["@_REMOTEID"]).slice(-6)}`;
     // Tally vouchers can have no number at all (manual numbering left blank): OrdexaGo numbers those
-    // invoices/credit notes from its own series; `number` stays as the import key.
+    // invoices/credit notes as INV01, INV02… (CN01… for credit notes); `number` stays as the import key.
     const autoNumber = !text(v.VOUCHERNUMBER) && !text(v.REFERENCE);
     const entries = [...arr(v["ALLLEDGERENTRIES.LIST"]), ...arr(v["LEDGERENTRIES.LIST"])].map((e) => {
       const amt = num(text(e.AMOUNT));
