@@ -145,7 +145,7 @@ router.post(
 router.get(
   "/verify/:id/:token",
   ah(async (req, res) => {
-    const token = await Token.findOne({ userId: req.params.id, token: req.params.token, purpose: "verify" });
+    const token = await Token.findOne({ userId: req.params.id, token: req.params.token, purpose: "verify", createdAt: { $gte: new Date(Date.now() - 3600 * 1000) } });
     if (!token) throw new HttpError(400, "This link is invalid or has expired");
     await User.updateOne({ _id: req.params.id }, { verified: true });
     await token.deleteOne();
@@ -174,7 +174,7 @@ router.post(
   "/reset-password/:id/:token",
   ah(async (req, res) => {
     const data = validate(Joi.object({ password }), req.body);
-    const token = await Token.findOne({ userId: req.params.id, token: req.params.token, purpose: "reset" });
+    const token = await Token.findOne({ userId: req.params.id, token: req.params.token, purpose: "reset", createdAt: { $gte: new Date(Date.now() - 3600 * 1000) } });
     if (!token) throw new HttpError(400, "This link is invalid or has expired");
     await User.updateOne(
       { _id: req.params.id },
