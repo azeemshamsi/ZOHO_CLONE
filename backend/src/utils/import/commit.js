@@ -445,10 +445,11 @@ async function commit(ctx, data, opts, progress) {
         const party_ = await party(kind, p.party, type, label);
         let left = p.amount;
         const allocations = [];
+        const notFound = [];
         for (const a of p.allocations || []) {
           const d = await DocM.findOne({ organization: ctx.org, [docNum]: a.number, [kind]: party_._id });
           if (!d) {
-            warnings.push(`${label}: ${kind === "customer" ? "invoice" : "bill"} ${a.number} not found, so that part stays as an advance`);
+            notFound.push(a.number);
             continue;
           }
           const amt = round2(Math.min(a.amount, d.balance, left));
@@ -457,16 +458,20 @@ async function commit(ctx, data, opts, progress) {
             left = round2(left - amt);
           }
         }
-        // No bill-wise details in the source (Tally "On Account"): settle the oldest open documents first.
-        if (!(p.allocations || []).length && left > 0) {
+        // No bill-wise details in the source (Tally "On Account"), or bills that aren't here (an opening balance
+        // brought in as one amount): settle the oldest open documents first, opening balances included.
+        if ((!(p.allocations || []).length || notFound.length) && left > 0) {
+          const taken = new Set(allocations.map((a) => a[kind === "customer" ? "invoice" : "bill"]));
           const open = await DocM.find({ organization: ctx.org, [kind]: party_._id, balance: { $gt: 0 }, status: { $nin: ["draft", "void"] }, date: { $lte: p.date } }).sort({ date: 1 });
           for (const d of open) {
+            if (taken.has(String(d._id))) continue;
             const amt = round2(Math.min(d.balance, left));
             if (amt <= 0) break;
             allocations.push({ [kind === "customer" ? "invoice" : "bill"]: String(d._id), amount: amt });
             left = round2(left - amt);
           }
         }
+        if (notFound.length) warnings.push(`${label}: ${kind === "customer" ? "invoice" : "bill"}(s) ${notFound.join(", ")} not in OrdexaGo, so the amount went to the oldest open ${kind === "customer" ? "invoices" : "bills"}${left > 0 ? "; the rest stays as an advance" : ""}`);
         let bankAccount = "";
         const code = p.depositTo ? lookupAccount(p.depositTo) : "";
         if (code && isBank(code)) bankAccount = code;
