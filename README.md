@@ -40,6 +40,10 @@ Built with MongoDB, Express, React (Vite) and Node.js. One Node server runs the 
 
 These modules already appear in the sidebar marked **Soon**.
 
+## Deploy on Oracle Cloud (free)
+
+OrdexaGo runs on an Oracle Cloud Always Free server with an Always Free Autonomous Database (through Oracle's MongoDB API). Step-by-step guide: [`deploy/oracle/README.md`](deploy/oracle/README.md). The server is set up with `deploy/oracle/setup.sh`, updated by `deploy/oracle/update.sh`, and redeployed on every push by `.github/workflows/deploy-oracle.yml` once the `ORACLE_*` secrets are set. `npm run dbcheck` (in `backend`) checks that a database supports everything OrdexaGo uses.
+
 ## Deploy on Render (free)
 
 ### 1. Create a free MongoDB database (MongoDB Atlas)

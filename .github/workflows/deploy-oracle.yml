@@ -1,0 +1,28 @@
+name: Deploy to Oracle Cloud
+
+# After every push to main, log in to the Oracle server and run deploy/oracle/update.sh.
+# Needs repository secrets ORACLE_HOST (server IP), ORACLE_USER (ubuntu) and ORACLE_SSH_KEY (private key).
+# Does nothing until those secrets exist.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HOST: ${{ secrets.ORACLE_HOST }}
+    steps:
+      - name: Skip when the Oracle server isn't set up yet
+        if: env.HOST == ''
+        run: echo "ORACLE_HOST secret not set — skipping deploy."
+      - name: Deploy
+        if: env.HOST != ''
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 20m
+          script: bash /opt/ordexago/deploy/oracle/update.sh
