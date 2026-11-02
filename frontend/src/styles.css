@@ -676,7 +676,7 @@ address { font-style: normal; line-height: 1.6; }
 .scan-actions .btn { height: 48px; font-size: 15px; justify-content: center; }
 .scan-camera { position: relative; margin-top: 12px; background: #000; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
 .scan-camera video { width: 100%; max-height: 60vh; object-fit: cover; }
-.scan-camera .scan-frame { position: absolute; left: 10%; right: 10%; top: 30%; height: 30%; border: 3px solid rgba(255, 255, 255, .85); border-radius: 12px; pointer-events: none; }
+.scan-camera .scan-frame { position: absolute; left: 6%; right: 6%; top: 22%; height: 32%; border: 3px solid rgba(255, 255, 255, .85); border-radius: 12px; pointer-events: none; }
 .scan-camera .btn { margin: 8px; }
 .scan-log { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
 .scan-result { display: flex; gap: 10px; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
@@ -830,3 +830,6 @@ tr.clickable:hover td { background: var(--brand-50); }
 }
 .bank-card.inactive { opacity: .6; }
 .danger-zone { border-color: #f3c2c4; }
+.scan-cam-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #111; flex-wrap: wrap; }
+.scan-cam-bar .muted { color: #cfd6e4; flex: 1; min-width: 160px; }
+.scan-cam-bar .btn { margin: 0; }

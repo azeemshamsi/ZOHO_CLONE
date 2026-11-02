@@ -86,12 +86,10 @@ async function creditNoteFor(ctx, order) {
   return cn;
 }
 
-async function markReturnClosed(ctx, order, store) {
-  if (order.status === "returned") return { already: true };
-  if (!["shipped", "delivered", "rto", "return_created", "ready_to_ship"].includes(order.status)) throw new Error(`Order is ${order.status.replace(/_/g, " ")}, not out for delivery or returned`);
-  const was = order.status;
+// The part that talks to Shopify and makes the credit note (slow: several network calls).
+async function finishReturn(ctx, order, store, was) {
   const out = { warning: "" };
-  if (store?.connected && order.status !== "ready_to_ship")
+  if (store?.connected && was !== "ready_to_ship")
     try {
       const id = order.shopifyReturnId || (await createInShopify(store, order, was === "rto" ? "RTO — returned by courier" : "Returned"));
       order.shopifyReturnId = id;
@@ -100,31 +98,78 @@ async function markReturnClosed(ctx, order, store) {
       out.warning = `Closed in OrdexaGo; Shopify: ${e.message}`;
     }
   if (order.invoice && store?.returnCreditNote !== false && !order.returnCreditNote) {
-    const cn = await creditNoteFor({ ...ctx, org: order.invoiceOrg || ctx.org }, order);
-    if (cn) {
-      order.returnCreditNote = cn._id;
-      out.creditNote = cn.number;
+    try {
+      const cn = await creditNoteFor({ ...ctx, org: order.invoiceOrg || ctx.org }, order);
+      if (cn) {
+        order.returnCreditNote = cn._id;
+        out.creditNote = cn.number;
+      }
+    } catch (e) {
+      out.error = `Credit note not made: ${e.message}`;
     }
   }
-  order.status = "returned";
-  order.returnedAt = new Date();
-  order.statusChangedAt = new Date();
-  await order.save();
-  return { ...out, was };
+  return out;
 }
 
-// Find an order from a scanned AWB / order number.
-async function findByCode(org, code) {
-  const c = String(code || "").trim();
-  if (!c) return null;
-  const bare = c.replace(/^#/, "");
-  return (
-    (await ShopifyOrder.findOne({ organization: org, "shipment.awb": c })) ||
-    (await ShopifyOrder.findOne({ organization: org, "shipment.awb": new RegExp(`^${bare.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") })) ||
-    (await ShopifyOrder.findOne({ organization: org, name: `#${bare}` })) ||
-    (await ShopifyOrder.findOne({ organization: org, name: bare })) ||
-    (/^\d+$/.test(bare) ? await ShopifyOrder.findOne({ organization: org, orderNumber: Number(bare) }) : null)
-  );
+/**
+ * Close a return. With { background: true } the order is marked returned straight away and the
+ * Shopify return + credit note are finished afterwards (result saved in order.returnSync).
+ */
+async function markReturnClosed(ctx, order, store, { background = false } = {}) {
+  const retry = order.status === "returned" && order.returnSync?.state === "error";
+  if (order.status === "returned" && !retry) return { already: true };
+  if (!retry && !["shipped", "delivered", "rto", "return_created", "ready_to_ship"].includes(order.status)) throw new Error(`Order is ${order.status.replace(/_/g, " ")}, not out for delivery or returned`);
+  const was = retry ? order.returnSync?.was || "returned" : order.status;
+  order.status = "returned";
+  if (!retry) order.returnedAt = new Date();
+  order.statusChangedAt = new Date();
+  const run = async () => {
+    const r = await finishReturn(ctx, order, store, was);
+    order.returnSync = { state: r.error ? "error" : "done", message: [r.warning, r.error].filter(Boolean).join(" · "), creditNoteNumber: r.creditNote || order.returnSync?.creditNoteNumber || "", at: new Date(), was };
+    order.markModified("returnSync");
+    await order.save();
+    return r;
+  };
+  if (background) {
+    order.returnSync = { state: "pending", message: "", at: new Date(), was };
+    order.markModified("returnSync");
+    await order.save();
+    setImmediate(() => run().catch(async (e) => {
+      console.error(`Return ${order.name} sync failed:`, e.message);
+      await ShopifyOrder.updateOne({ _id: order._id }, { returnSync: { state: "error", message: e.message, at: new Date(), was } }).catch(() => {});
+    }));
+    return { was, pending: true };
+  }
+  const r = await run();
+  if (r.error) throw new Error(r.error);
+  return { ...r, was };
+}
+
+// Find an order from scanned AWB / order numbers, in one query (a label can hold several barcodes).
+async function findByCode(org, codes) {
+  const list = (Array.isArray(codes) ? codes : [codes]).map((c) => String(c || "").trim()).filter(Boolean).slice(0, 10);
+  if (!list.length) return null;
+  const awbs = new Set();
+  const names = new Set();
+  const nums = new Set();
+  for (const c of list) {
+    const bare = c.replace(/^#/, "");
+    [c, bare, bare.toUpperCase(), bare.toLowerCase()].forEach((x) => awbs.add(x));
+    [`#${bare}`, bare].forEach((x) => names.add(x));
+    if (/^\d{1,12}$/.test(bare)) nums.add(Number(bare));
+  }
+  const found = await ShopifyOrder.find({
+    organization: org,
+    $or: [{ "shipment.awb": { $in: [...awbs] } }, { name: { $in: [...names] } }, ...(nums.size ? [{ orderNumber: { $in: [...nums] } }] : [])],
+  }).limit(10);
+  if (!found.length) return null;
+  // Prefer an AWB match (in the order the codes were given), then an order number.
+  for (const c of list) {
+    const bare = c.replace(/^#/, "").toUpperCase();
+    const byAwb = found.find((o) => String(o.shipment?.awb || "").toUpperCase() === bare);
+    if (byAwb) return byAwb;
+  }
+  return found[0];
 }
 
 module.exports = { markReturnCreated, markReturnClosed, findByCode };

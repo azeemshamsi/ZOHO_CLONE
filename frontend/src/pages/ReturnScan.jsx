@@ -19,42 +19,118 @@ function beep(ok) {
   } catch {}
 }
 
-function Camera({ onCode, onClose }) {
+// Barcode types found on courier labels and Shopify packing slips.
+const NATIVE_FORMATS = ["code_128", "code_39", "code_93", "codabar", "itf", "ean_13", "ean_8", "upc_a", "qr_code", "data_matrix", "pdf417"];
+
+// Camera scanner. Uses the phone's built-in barcode detector when there is one (Chrome on Android:
+// fast and good with long courier barcodes), otherwise ZXing (iPhone / other browsers).
+function Camera({ onCodes, onClose }) {
   const video = useRef();
   const [err, setErr] = useState("");
+  const [engine, setEngine] = useState("");
+  const [torch, setTorch] = useState(null); // null = not supported
+  const [seen, setSeen] = useState("");
+  const trackRef = useRef(null);
   useEffect(() => {
-    let controls;
     let stopped = false;
+    let stream;
+    let zx;
+    let timer;
     let last = "";
+    let lastAt = 0;
+    const emit = (codes) => {
+      const list = [...new Set(codes.map((c) => String(c || "").trim()).filter((c) => c.length >= 4))];
+      if (!list.length) return;
+      // Longest first: the AWB is usually the longest barcode on a label.
+      list.sort((a, b) => b.length - a.length);
+      const key = list.join("|");
+      if (key === last && Date.now() - lastAt < 3000) return; // same label still in view
+      last = key;
+      lastAt = Date.now();
+      setSeen(list[0]);
+      onCodes(list);
+    };
     (async () => {
       try {
-        const { BrowserMultiFormatReader } = await import("@zxing/browser");
-        const reader = new BrowserMultiFormatReader();
-        controls = await reader.decodeFromConstraints({ video: { facingMode: { ideal: "environment" } } }, video.current, (result) => {
-          if (!result || stopped) return;
-          const text = result.getText();
-          if (text && text !== last) {
-            last = text;
-            onCode(text);
-            setTimeout(() => (last = ""), 2500); // the same label isn't read twice in a row
-          }
+        if (!window.isSecureContext) throw new Error("The camera only works on https:// — open https://ordexago.com");
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         });
+        if (stopped) return stream.getTracks().forEach((t) => t.stop());
+        const track = stream.getVideoTracks()[0];
+        trackRef.current = track;
+        const caps = track.getCapabilities?.() || {};
+        const adv = [];
+        if (caps.focusMode?.includes("continuous")) adv.push({ focusMode: "continuous" });
+        if (adv.length) await track.applyConstraints({ advanced: adv }).catch(() => {});
+        if (caps.torch) setTorch(false);
+        video.current.srcObject = stream;
+        await video.current.play().catch(() => {});
+
+        let native = null;
+        if ("BarcodeDetector" in window) {
+          const supported = await window.BarcodeDetector.getSupportedFormats().catch(() => []);
+          const formats = NATIVE_FORMATS.filter((f) => supported.includes(f));
+          if (formats.length) native = new window.BarcodeDetector({ formats });
+        }
+        if (native) {
+          setEngine("built-in");
+          const tick = async () => {
+            if (stopped) return;
+            try {
+              if (video.current?.readyState >= 2) {
+                const found = await native.detect(video.current);
+                if (found.length) emit(found.map((b) => b.rawValue));
+              }
+            } catch {}
+            timer = setTimeout(tick, 120);
+          };
+          tick();
+        } else {
+          setEngine("zxing");
+          const { BrowserMultiFormatReader } = await import("@zxing/browser");
+          const { DecodeHintType, BarcodeFormat } = await import("@zxing/library");
+          const hints = new Map();
+          hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93, BarcodeFormat.ITF, BarcodeFormat.CODABAR, BarcodeFormat.EAN_13, BarcodeFormat.QR_CODE, BarcodeFormat.DATA_MATRIX]);
+          hints.set(DecodeHintType.TRY_HARDER, true);
+          const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 80, delayBetweenScanSuccess: 400 });
+          zx = await reader.decodeFromStream(stream, video.current, (result) => {
+            if (result && !stopped) emit([result.getText()]);
+          });
+        }
       } catch (e) {
-        setErr(/Permission|NotAllowed/i.test(e?.name || e?.message) ? "Camera permission was refused. Allow camera access for this site in your browser settings." : `Couldn't start the camera: ${e?.message || e}`);
+        const m = e?.name || e?.message || String(e);
+        setErr(/Permission|NotAllowed/i.test(m) ? "Camera permission was refused. Allow camera access for this site in your browser settings, then try again." : /NotFound|Overconstrained/i.test(m) ? "No camera found on this device." : e?.message || `Couldn't start the camera: ${m}`);
       }
     })();
     return () => {
       stopped = true;
-      controls?.stop();
+      clearTimeout(timer);
+      zx?.stop?.();
+      stream?.getTracks().forEach((t) => t.stop());
     };
   }, []);
+  const toggleTorch = async () => {
+    const on = !torch;
+    await trackRef.current?.applyConstraints({ advanced: [{ torch: on }] }).catch(() => {});
+    setTorch(on);
+  };
   return (
     <div className="scan-camera">
-      {err ? <div className="alert alert-error">{err}</div> : <video ref={video} playsInline muted />}
-      <div className="scan-frame" />
-      <button className="btn" onClick={onClose}>
-        Close camera
-      </button>
+      {err ? <div className="alert alert-error">{err}</div> : <video ref={video} playsInline muted autoPlay />}
+      {!err && <div className="scan-frame" />}
+      <div className="scan-cam-bar">
+        <span className="muted small">{seen ? `Read: ${seen}` : engine ? "Hold the barcode flat, 10–20 cm away, filling the box" : "Starting camera…"}</span>
+        {torch !== null && (
+          <button className="btn btn-sm" onClick={toggleTorch}>
+            {torch ? "Light off" : "Light on"}
+          </button>
+        )}
+        <button className="btn btn-sm" onClick={onClose}>
+          Close camera
+        </button>
+      </div>
     </div>
   );
 }
@@ -68,20 +144,39 @@ export function ReturnScan() {
   const focus = () => setTimeout(() => input.current?.focus(), 50);
   useEffect(focus, []);
 
+  const busyRef = useRef(false);
+  // Shopify return + credit note finish in the background: check back a few times.
+  const follow = (id, at) => {
+    let n = 0;
+    const check = async () => {
+      n += 1;
+      try {
+        const { data } = await api.get(`/shopify/returns/${id}/sync`);
+        if (data.state === "pending" && n < 8) return setTimeout(check, 2500);
+        setLog((l) => l.map((x) => (x.at === at ? { ...x, sync: data } : x)));
+      } catch {}
+    };
+    setTimeout(check, 2000);
+  };
   const submit = async (value) => {
-    const c = String(value ?? code).trim();
-    if (!c || busy) return;
+    const codes = (Array.isArray(value) ? value : [String(value ?? code)]).map((x) => x.trim()).filter(Boolean);
+    if (!codes.length || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setCode("");
+    const at = new Date();
+    const shown = codes[0];
     try {
-      const { data } = await api.post("/shopify/returns/scan", { code: c });
+      const { data } = await api.post("/shopify/returns/scan", { codes });
       const kind = data.already ? "warn" : "ok";
       beep(!data.already);
-      setLog((l) => [{ code: c, kind, ...data, at: new Date() }, ...l].slice(0, 50));
+      setLog((l) => [{ code: data.order?.awb && codes.includes(data.order.awb) ? data.order.awb : shown, kind, ...data, at }, ...l].slice(0, 50));
+      if (data.pending && data.order?._id) follow(data.order._id, at);
     } catch (e) {
       beep(false);
-      setLog((l) => [{ code: c, kind: "bad", message: errMsg(e), at: new Date() }, ...l].slice(0, 50));
+      setLog((l) => [{ code: shown, kind: "bad", message: errMsg(e), at }, ...l].slice(0, 50));
     }
+    busyRef.current = false;
     setBusy(false);
     if (!camera) focus();
   };
@@ -108,7 +203,7 @@ export function ReturnScan() {
         </div>
         <p className="muted small">A barcode scanner works here too — it types the number and presses Enter.</p>
       </form>
-      {camera && <Camera onCode={(t) => submit(t)} onClose={() => setCamera(false)} />}
+      {camera && <Camera onCodes={(list) => submit(list)} onClose={() => setCamera(false)} />}
       {log.length > 0 && (
         <div className="scan-log">
           <div className="label-sm">
@@ -126,6 +221,9 @@ export function ReturnScan() {
                   </div>
                 )}
                 {x.warning && <div className="small text-amber">{x.warning}</div>}
+                {x.pending && !x.sync && <div className="muted small">Updating Shopify and the books…</div>}
+                {x.sync?.state === "done" && <div className="small text-paid">{x.sync.creditNoteNumber ? `Credit note ${x.sync.creditNoteNumber} made` : "Shopify updated"}{x.sync.message ? ` · ${x.sync.message}` : ""}</div>}
+                {x.sync?.state === "error" && <div className="small text-amber">{x.sync.message} — scan again to retry</div>}
                 <div className="muted small">
                   Scanned "{x.code}" at {x.at.toLocaleTimeString("en-IN")}
                 </div>

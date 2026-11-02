@@ -402,22 +402,33 @@ router.post(
   })
 );
 
-// Scan an AWB or order number to close a return.
+// Scan an AWB or order number to close a return. Answers at once; Shopify + credit note finish in the background.
 router.post(
   "/returns/scan",
   ah(async (req, res) => {
-    const { code } = validate(Joi.object({ code: Joi.string().trim().required().label("AWB or order number") }), req.body);
-    const o = await R.findByCode(req.storeOrg, code);
-    if (!o) throw new HttpError(404, `No order with AWB or order number "${code}"`);
-    const store = await storeOf(req, false);
+    const d = validate(Joi.object({ code: Joi.string().trim().allow(""), codes: Joi.array().items(Joi.string().trim().max(80)).max(10) }).or("code", "codes"), req.body);
+    const codes = d.codes?.length ? d.codes : [d.code];
+    const o = await R.findByCode(req.storeOrg, codes);
+    if (!o) throw new HttpError(404, `No order with AWB or order number "${codes.join('" / "')}"`);
     const summary = { _id: o._id, name: o.name, customer: o.customer?.name, awb: o.shipment?.awb, courier: o.shipment?.courierName, total: o.total, items: o.lines.filter((l) => l.quantity > 0).map((l) => `${l.quantity} × ${l.title}${l.variantTitle ? ` (${l.variantTitle})` : ""}`), image: o.lines.find((l) => l.image)?.image || "" };
-    if (o.status === "returned") return res.send({ order: summary, already: true, message: `${o.name} was already closed as returned${o.returnedAt ? ` on ${new Date(o.returnedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}` });
+    if (o.status === "returned" && o.returnSync?.state !== "error") return res.send({ order: summary, already: true, message: `${o.name} was already closed as returned${o.returnedAt ? ` on ${new Date(o.returnedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}` });
+    const store = await storeOf(req, false);
     try {
-      const r = await R.markReturnClosed(ctxOf(req), o, store);
-      res.send({ order: summary, closed: true, was: r.was, creditNote: r.creditNote, warning: r.warning, message: `${o.name} return closed${r.creditNote ? ` · credit note ${r.creditNote}` : ""}` });
+      const r = await R.markReturnClosed(ctxOf(req), o, store, { background: true });
+      res.send({ order: summary, closed: true, was: r.was, pending: true, message: `${o.name} return closed` });
     } catch (e) {
       throw new HttpError(400, `${o.name}: ${e.message}`);
     }
+  })
+);
+
+// How the background Shopify return / credit note went, for the scan screen.
+router.get(
+  "/returns/:id/sync",
+  ah(async (req, res) => {
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg }, { returnSync: 1, name: 1 }).lean();
+    if (!o) throw new HttpError(404, "Order not found");
+    res.send(o.returnSync || { state: "done" });
   })
 );
 

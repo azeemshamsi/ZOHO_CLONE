@@ -76,6 +76,8 @@ const shopifyOrderSchema = new mongoose.Schema(
     returnedAt: Date,
     returnNote: String,
     returnCreditNote: { type: mongoose.Schema.Types.ObjectId, ref: "CreditNote" },
+    // Shopify return + credit note, finished in the background after a scan.
+    returnSync: { state: String, message: String, creditNoteNumber: String, at: Date },
     statusChangedAt: Date,
     shipment: {
       account: { type: mongoose.Schema.Types.ObjectId, ref: "CourierAccount" },
@@ -109,5 +111,7 @@ shopifyOrderSchema.index({ organization: 1, shopifyId: 1 }, { unique: true });
 shopifyOrderSchema.index({ organization: 1, status: 1, orderDate: -1 });
 shopifyOrderSchema.index({ organization: 1, orderDate: -1 });
 shopifyOrderSchema.index({ organization: 1, "shipment.awb": 1 });
+shopifyOrderSchema.index({ organization: 1, name: 1 });
+shopifyOrderSchema.index({ organization: 1, orderNumber: 1 });
 
 module.exports = mongoose.model("ShopifyOrder", shopifyOrderSchema);
