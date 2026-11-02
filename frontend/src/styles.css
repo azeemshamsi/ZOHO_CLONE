@@ -676,7 +676,7 @@ address { font-style: normal; line-height: 1.6; }
 .scan-actions .btn { height: 48px; font-size: 15px; justify-content: center; }
 .scan-camera { position: relative; margin-top: 12px; background: #000; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
 .scan-camera video { width: 100%; max-height: 60vh; object-fit: cover; }
-.scan-camera .scan-frame { position: absolute; left: 6%; right: 6%; top: 22%; height: 32%; border: 3px solid rgba(255, 255, 255, .85); border-radius: 12px; pointer-events: none; }
+.scan-camera .scan-frame { position: absolute; left: 6%; right: 6%; top: 32%; height: 30%; border: 3px solid rgba(255, 255, 255, .85); border-radius: 12px; pointer-events: none; }
 .scan-camera .btn { margin: 8px; }
 .scan-log { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
 .scan-result { display: flex; gap: 10px; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
@@ -833,3 +833,10 @@ tr.clickable:hover td { background: var(--brand-50); }
 .scan-cam-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #111; flex-wrap: wrap; }
 .scan-cam-bar .muted { color: #cfd6e4; flex: 1; min-width: 160px; }
 .scan-cam-bar .btn { margin: 0; }
+.scan-banner { position: absolute; left: 8px; right: 8px; top: 8px; z-index: 2; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; color: #fff; font-size: 13px; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+.scan-banner strong { font-size: 15px; }
+.scan-banner.ok { background: rgba(0, 140, 90, .95); }
+.scan-banner.warn { background: rgba(196, 128, 0, .95); }
+.scan-banner.bad { background: rgba(200, 40, 50, .95); }
+.scan-banner.busy { background: rgba(21, 101, 192, .92); }
+@media (max-width: 760px) { .scan-camera video { max-height: 52vh; } }

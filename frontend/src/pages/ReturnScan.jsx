@@ -24,7 +24,7 @@ const NATIVE_FORMATS = ["code_128", "code_39", "code_93", "codabar", "itf", "ean
 
 // Camera scanner. Uses the phone's built-in barcode detector when there is one (Chrome on Android:
 // fast and good with long courier barcodes), otherwise ZXing (iPhone / other browsers).
-function Camera({ onCodes, onClose }) {
+function Camera({ onCodes, onClose, last, busy }) {
   const video = useRef();
   const [err, setErr] = useState("");
   const [engine, setEngine] = useState("");
@@ -120,6 +120,29 @@ function Camera({ onCodes, onClose }) {
     <div className="scan-camera">
       {err ? <div className="alert alert-error">{err}</div> : <video ref={video} playsInline muted autoPlay />}
       {!err && <div className="scan-frame" />}
+      {(busy || last) && (
+        <div className={`scan-banner ${busy ? "busy" : last.kind}`}>
+          {busy ? (
+            <strong>Checking…</strong>
+          ) : (
+            <>
+              <strong>
+                {last.kind === "ok" ? "✓ " : last.kind === "warn" ? "! " : "✕ "}
+                {last.message}
+              </strong>
+              {last.order && (
+                <span>
+                  {last.order.customer} · {last.order.awb} · {money(last.order.total)}
+                </span>
+              )}
+              {last.pending && !last.sync && <span>Updating Shopify and the books…</span>}
+              {last.sync?.state === "done" && last.sync.creditNoteNumber && <span>Credit note {last.sync.creditNoteNumber} made</span>}
+              {last.sync?.state === "error" && <span>{last.sync.message} — scan again to retry</span>}
+              {last.warning && <span>{last.warning}</span>}
+            </>
+          )}
+        </div>
+      )}
       <div className="scan-cam-bar">
         <span className="muted small">{seen ? `Read: ${seen}` : engine ? "Hold the barcode flat, 10–20 cm away, filling the box" : "Starting camera…"}</span>
         {torch !== null && (
@@ -203,7 +226,7 @@ export function ReturnScan() {
         </div>
         <p className="muted small">A barcode scanner works here too — it types the number and presses Enter.</p>
       </form>
-      {camera && <Camera onCodes={(list) => submit(list)} onClose={() => setCamera(false)} />}
+      {camera && <Camera onCodes={(list) => submit(list)} onClose={() => setCamera(false)} last={log[0]} busy={busy} />}
       {log.length > 0 && (
         <div className="scan-log">
           <div className="label-sm">
