@@ -9,6 +9,9 @@ const { ah, round2 } = require("../utils/http");
 const { istToday, istEndOfToday } = require("../utils/time");
 const { chartOfAccounts, buildEntries, movements, naturalBalance, fiscalYear, parseRange } = require("../utils/ledger");
 
+const TV = require("../utils/tallyView");
+const isTally = (req) => req.query.view === "tally";
+
 const DAY = 24 * 60 * 60 * 1000;
 const sum = (xs, f) => round2(xs.reduce((s, x) => s + (Number(f(x)) || 0), 0));
 const inRange = (d, from, to) => (!from || new Date(d) >= from) && (!to || new Date(d) <= to);
@@ -39,7 +42,23 @@ router.get(
   ah(async (req, res) => {
     const { from, to } = parseRange(req.query);
     const [accounts, entries] = await Promise.all([chartOfAccounts(req.org), buildEntries(req.org, { to })]);
-    res.send({ from, to, ...profitAndLoss(accounts, movements(entries, { from, to })) });
+    if (!isTally(req)) return res.send({ from, to, view: "live", ...profitAndLoss(accounts, movements(entries, { from, to })) });
+    // Tally view: Cost of Goods Sold = Opening Stock + purchases − Closing Stock.
+    const tAcc = TV.tallyAccounts(accounts);
+    const mv = movements(TV.tallyEntries(entries), { from, to });
+    const opening = round2((from ? TV.stockValue(entries, new Date(from.getTime() - 1)) : 0) + naturalBalance(TV.OPENING_STOCK, mv[TV.OPENING_STOCK.code]));
+    const closing = TV.stockValue(entries, to);
+    const p = profitAndLoss(tAcc, mv);
+    const rows = [
+      ...(opening ? [{ code: "_opening_stock", name: "Opening Stock", amount: opening }] : []),
+      ...p.cogs.rows,
+      ...(closing ? [{ code: "_closing_stock", name: "Less: Closing Stock", amount: -closing }] : []),
+    ];
+    p.cogs = { rows, total: sum(rows, (r) => r.amount) };
+    p.grossProfit = round2(p.operatingIncome.total - p.cogs.total);
+    p.operatingProfit = round2(p.grossProfit - p.operatingExpense.total);
+    p.netProfit = round2(p.operatingProfit + p.otherIncome.total - p.otherExpense.total);
+    res.send({ from, to, view: "tally", openingStock: opening, closingStock: closing, ...p });
   })
 );
 
@@ -60,12 +79,15 @@ router.get(
     const currentYear = profitAndLoss(accounts, movements(entries, { from: fy.from, to })).netProfit;
     if (retained) equity.rows.push({ code: "_retained", name: "Retained Earnings", amount: retained });
     if (currentYear) equity.rows.push({ code: "_current", name: "Current Year Earnings", amount: currentYear });
+    // Tally view: stock on hand is Closing Stock.
+    if (isTally(req)) currentAssets.rows = currentAssets.rows.map((r) => (r.code === "inventory" ? { ...r, name: "Closing Stock" } : r));
     equity.total = sum(equity.rows, (r) => r.amount);
     const totalAssets = round2(currentAssets.total + fixedAssets.total);
     const totalLiabilities = round2(currentLiabilities.total + longTermLiabilities.total);
     const totalLiabilitiesAndEquity = round2(totalLiabilities + equity.total);
     res.send({
       to,
+      view: isTally(req) ? "tally" : "live",
       currentAssets,
       fixedAssets,
       totalAssets,
@@ -83,7 +105,10 @@ router.get(
   "/trial-balance",
   ah(async (req, res) => {
     const to = req.query.to ? new Date(`${req.query.to}T23:59:59.999Z`) : istEndOfToday();
-    const [accounts, entries] = await Promise.all([chartOfAccounts(req.org), buildEntries(req.org, { to })]);
+    const [accounts0, entries0] = await Promise.all([chartOfAccounts(req.org), buildEntries(req.org, { to })]);
+    // Tally view: purchases in full on their ledgers and Opening Stock instead of Inventory Asset / Cost of Goods Sold.
+    const accounts = isTally(req) ? TV.tallyAccounts(accounts0) : accounts0;
+    const entries = isTally(req) ? TV.tallyEntries(entries0) : entries0;
     const mv = movements(entries);
     const rows = accounts
       .map((a) => {
@@ -92,7 +117,8 @@ router.get(
         return { code: a.code, name: a.name, group: a.group, type: a.type, debit: net > 0 ? net : 0, credit: net < 0 ? -net : 0 };
       })
       .filter((r) => r.debit || r.credit);
-    res.send({ to, rows, totalDebit: sum(rows, (r) => r.debit), totalCredit: sum(rows, (r) => r.credit) });
+    const closingStock = isTally(req) ? TV.stockValue(entries0, to) : undefined;
+    res.send({ to, view: isTally(req) ? "tally" : "live", closingStock, rows, totalDebit: sum(rows, (r) => r.debit), totalCredit: sum(rows, (r) => r.credit) });
   })
 );
 

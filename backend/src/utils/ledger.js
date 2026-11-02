@@ -142,7 +142,13 @@ async function buildEntries(org, { to } = {}) {
     const crB = (account, amt) => drB(account, -(amt || 0));
     const dr = (account, amt) => drB(account, (amt || 0) * rate);
     const cr = (account, amt) => dr(account, -(amt || 0));
-    meta.build(dr, cr, drB, crB);
+    // Stock movements (₹): tagged so the Tally view of reports can leave them out (see utils/tallyView.js).
+    const st = (account, amt, tag = "stock") => {
+      const n = lines.length;
+      drB(account, amt);
+      if (lines.length > n) lines[n][tag] = true;
+    };
+    meta.build(dr, cr, drB, crB, st);
     // Converting each line separately can leave a paisa or two over: post it to rounding.
     const diff = round2(lines.reduce((s, l) => s + l.debit - l.credit, 0));
     if (diff && Math.abs(diff) < 1) crB("adjustments", diff);
@@ -153,7 +159,7 @@ async function buildEntries(org, { to } = {}) {
   for (const i of invoices) {
     add({
       date: i.date, type: "Invoice", id: i._id, number: i.invoiceNumber, party: i.customerName, rate: i.exchangeRate,
-      build: (dr, cr, drB) => {
+      build: (dr, cr, drB, crB, st) => {
         dr("ar", i.total);
         if (i.opening) return cr("opening_equity", i.total); // balance brought forward from another system
         const income = incomeAccounts(i.lineItems);
@@ -164,8 +170,8 @@ async function buildEntries(org, { to } = {}) {
         cr("output_igst", i.igst);
         cr("shipping_income", i.shippingCharge);
         dr("adjustments", -(i.adjustment || 0));
-        drB("cogs", -inv("Invoice", i._id));
-        drB("inventory", inv("Invoice", i._id));
+        st("cogs", -inv("Invoice", i._id));
+        st("inventory", inv("Invoice", i._id));
       },
     });
   }
@@ -186,7 +192,7 @@ async function buildEntries(org, { to } = {}) {
   for (const c of cns) {
     add({
       date: c.date, type: "Credit Note", id: c._id, number: c.number, party: c.customerName, rate: c.exchangeRate,
-      build: (dr, cr, drB, crB) => {
+      build: (dr, cr, drB, crB, st) => {
         if (c.opening) {
           dr("opening_equity", c.total);
           return cr("ar", c.total);
@@ -200,8 +206,8 @@ async function buildEntries(org, { to } = {}) {
         dr("shipping_income", c.shippingCharge);
         cr("adjustments", -(c.adjustment || 0));
         cr("ar", c.total);
-        drB("inventory", inv("Credit Note", c._id));
-        crB("cogs", inv("Credit Note", c._id));
+        st("inventory", inv("Credit Note", c._id));
+        st("cogs", -inv("Credit Note", c._id));
       },
     });
     for (const r of c.refunds || []) {
@@ -217,7 +223,7 @@ async function buildEntries(org, { to } = {}) {
   for (const b of bills) {
     add({
       date: b.date, type: "Bill", id: b._id, number: b.billNumber, party: b.vendorName, rate: b.exchangeRate,
-      build: (dr, cr, drB) => {
+      build: (dr, cr, drB, crB, st) => {
         if (b.opening) {
           dr("opening_equity", b.total);
           return cr("ap", b.total);
@@ -225,8 +231,8 @@ async function buildEntries(org, { to } = {}) {
         const direct = lineAccounts(b.lineItems);
         for (const [acct, amt] of direct) dr(acct, amt);
         dr(b.ledger || "cogs", b.subTotal - sumOf(direct) + (b.shippingCharge || 0));
-        drB(b.ledger || "cogs", -inv("Bill", b._id));
-        drB("inventory", inv("Bill", b._id));
+        st(b.ledger || "cogs", -inv("Bill", b._id));
+        st("inventory", inv("Bill", b._id));
         dr("input_cgst", b.cgst);
         dr("input_sgst", b.sgst);
         dr("input_igst", b.igst);
@@ -265,14 +271,14 @@ async function buildEntries(org, { to } = {}) {
   for (const c of vcs) {
     add({
       date: c.date, type: "Vendor Credit", id: c._id, number: c.number, party: c.vendorName, rate: c.exchangeRate,
-      build: (dr, cr, drB, crB) => {
+      build: (dr, cr, drB, crB, st) => {
         dr("ap", c.total);
         if (c.opening) return cr("opening_equity", c.total);
         const direct = lineAccounts(c.lineItems);
         for (const [acct, amt] of direct) cr(acct, amt);
         cr(c.ledger || "cogs", c.subTotal - sumOf(direct) + (c.shippingCharge || 0));
-        crB(c.ledger || "cogs", inv("Vendor Credit", c._id));
-        drB("inventory", inv("Vendor Credit", c._id));
+        st(c.ledger || "cogs", -inv("Vendor Credit", c._id));
+        st("inventory", inv("Vendor Credit", c._id));
         cr("input_cgst", c.cgst);
         cr("input_sgst", c.sgst);
         cr("input_igst", c.igst);
@@ -296,8 +302,8 @@ async function buildEntries(org, { to } = {}) {
     if (v)
       add({
         date: it.openingStockDate || it.createdAt, type: "Opening Stock", id: it._id, number: it.sku || "", party: it.name,
-        build: (dr, cr) => {
-          dr("inventory", v);
+        build: (dr, cr, drB, crB, st) => {
+          st("inventory", v, "openingStock");
           cr("opening_equity", v);
         },
       });
@@ -305,10 +311,10 @@ async function buildEntries(org, { to } = {}) {
   for (const a of adjustments) {
     add({
       date: a.date, type: "Inventory Adjustment", id: a._id, number: a.reference || a.number, party: a.reason,
-      build: (dr, cr) => {
+      build: (dr, cr, drB, crB, st) => {
         const v = inv("Inventory Adjustment", a._id);
-        dr("inventory", v);
-        cr(a.account || "cogs", v);
+        st("inventory", v);
+        st(a.account || "cogs", -v);
       },
     });
   }

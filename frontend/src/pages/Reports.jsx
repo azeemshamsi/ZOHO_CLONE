@@ -243,6 +243,21 @@ export function ReportPage() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const paper = useRef(null);
+  // Live / Tally view of the Trial Balance, P&L and Balance Sheet (remembered on this device).
+  const hasView = ["trial-balance", "profit-and-loss", "balance-sheet"].includes(key);
+  const [view, setViewState] = useState(() => {
+    try {
+      return localStorage.getItem("reportView") === "tally" ? "tally" : "live";
+    } catch {
+      return "live";
+    }
+  });
+  const setView = (v) => {
+    setViewState(v);
+    try {
+      localStorage.setItem("reportView", v);
+    } catch {}
+  };
 
   useEffect(() => {
     setRange({ key: meta?.period || "this_fy", ...periodRange(meta?.period || "this_fy") });
@@ -258,11 +273,12 @@ export function ReportPage() {
     setError("");
     const params = meta.mode === "range" ? { from: range.from, to: range.to } : meta.mode === "asof" ? { to: asOf } : {};
     if (branch) params.branch = branch;
+    if (hasView && view === "tally") params.view = "tally";
     api
       .get(`/reports/${key}`, { params })
       .then((r) => setData(r.data))
       .catch((e) => setError(errMsg(e)));
-  }, [key, meta, range.from, range.to, asOf, branch]);
+  }, [key, meta, range.from, range.to, asOf, branch, view, hasView]);
 
   if (!meta) return <p>Report not found.</p>;
   const subtitle = meta.mode === "range" ? fmtRange(range.from, range.to) : meta.mode === "asof" ? `As of ${date(asOf)}` : `As of ${date(new Date())}`;
@@ -271,6 +287,18 @@ export function ReportPage() {
   return (
     <>
       <PageHeader title={meta.title} back="/reports">
+        {hasView && (
+          <div className="seg" role="group" aria-label="Report view" title="Live: stock in Inventory Asset and Cost of Goods Sold. Tally: purchases in full, Opening and Closing Stock, as in Tally.">
+            {[
+              ["live", "Live"],
+              ["tally", "Tally"],
+            ].map(([v, l]) => (
+              <button key={v} type="button" className={view === v ? "on" : ""} aria-pressed={view === v} onClick={() => setView(v)}>
+                {l}
+              </button>
+            ))}
+          </div>
+        )}
         {meta.mode === "range" && <PeriodPicker value={range} onChange={setRange} />}
         {meta.mode === "asof" && <AsOfPicker value={asOf} onChange={setAsOf} />}
         {branches.length > 0 && (
@@ -302,6 +330,7 @@ export function ReportPage() {
             <div className="muted small">
               {subtitle}
               {branch && ` · ${branch === "head" ? "Head Office" : branches.find((b) => b._id === branch)?.name}`}
+              {hasView && data.view === "tally" && " · Tally view"}
             </div>
           </div>
           <Body d={data} range={meta.mode === "range" ? range : { from: "2000-01-01", to: asOf }} />
@@ -352,7 +381,7 @@ function ProfitLoss({ d, range }) {
       </thead>
       <tbody>
         <Section title="Operating Income" sec={d.operatingIncome} range={range} />
-        <Section title="Cost of Goods Sold" sec={d.cogs} range={range} />
+        <Section title={d.view === "tally" ? "Cost of Goods Sold (Opening Stock + Purchases − Closing Stock)" : "Cost of Goods Sold"} sec={d.cogs} range={range} totalLabel={d.view === "tally" ? "Total Cost of Goods Sold" : undefined} />
         <tr className="row-total">
           <td>Gross Profit</td>
           <td className="num">{money(d.grossProfit)}</td>
@@ -441,6 +470,15 @@ function TrialBalance({ d, range }) {
           <td className="num">{money(d.totalDebit)}</td>
           <td className="num">{money(d.totalCredit)}</td>
         </tr>
+        {d.view === "tally" && d.closingStock ? (
+          <tr>
+            <td colSpan={2} className="muted">
+              Closing Stock (shown in the P&amp;L, not part of the totals, as in Tally)
+            </td>
+            <td className="num muted">{money(d.closingStock)}</td>
+            <td />
+          </tr>
+        ) : null}
       </tbody>
     </table>
   );
