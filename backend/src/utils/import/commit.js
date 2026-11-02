@@ -302,7 +302,40 @@ async function commit(ctx, data, opts, progress) {
   /* ---------- 4. Invoices, bills, credit notes, vendor credits ---------- */
   /* ---------- Stock items (Tally stock lines are linked to items, so stock moves) ---------- */
   const Item = require("../../models/Item");
-  const items = new Map((await Item.find({ organization: ctx.org }).lean()).map((i) => [i.name.trim().toLowerCase(), i]));
+  const items = new Map((await Item.find({ organization: ctx.org }).lean()).map((i) => [clean(i.name).toLowerCase(), i]));
+  // HSN and GST rate per item, from the source's stock lines (Tally keeps them on every voucher line):
+  // the HSN seen, and the GST rate used most often.
+  const facts = new Map();
+  for (const t of ["invoices", "creditNotes", "bills", "vendorCredits"])
+    for (const d of data.records[t] || [])
+      for (const l of d.lines || []) {
+        if (!l.stock || !l.name) continue;
+        const k = clean(l.name).toLowerCase();
+        const f = facts.get(k) || { hsn: "", rates: new Map() };
+        const hsn = clean(l.hsnSac || "").replace(/[^0-9A-Za-z]/g, "");
+        if (!f.hsn && /^\d{4,8}$/.test(hsn)) f.hsn = hsn;
+        if (l.taxRate > 0) f.rates.set(l.taxRate, (f.rates.get(l.taxRate) || 0) + 1);
+        facts.set(k, f);
+      }
+  const factOf = (k) => {
+    const f = facts.get(k);
+    if (!f) return { hsn: "", rate: 0 };
+    return { hsn: f.hsn, rate: [...f.rates].sort((a, b) => b[1] - a[1])[0]?.[0] || 0 };
+  };
+  // Items already in OrdexaGo (e.g. from the Stock Summary) without HSN / GST rate get them now.
+  let enriched = 0;
+  for (const [k, it] of items) {
+    const f = factOf(k);
+    const set = {};
+    if (f.hsn && !it.hsnSac) set.hsnSac = f.hsn;
+    if (f.rate && !it.taxRate) set.taxRate = f.rate;
+    if (Object.keys(set).length) {
+      await Item.updateOne({ _id: it._id }, set);
+      Object.assign(it, set);
+      enriched++;
+    }
+  }
+  if (enriched) warnings.push(`${enriched} item(s) got their HSN code and/or GST rate from the Tally vouchers`);
   const itemFor = async (l, side) => {
     const k = clean(l.name).toLowerCase();
     let it = items.get(k);
@@ -313,9 +346,9 @@ async function commit(ctx, data, opts, progress) {
           type: "goods",
           name: clean(l.name),
           unit: l.unit || "pcs",
-          hsnSac: l.hsnSac || "",
+          hsnSac: factOf(k).hsn || l.hsnSac || "",
           ...(side === "sale" ? { rate: l.rate || 0 } : { purchaseRate: l.rate || 0 }),
-          taxRate: l.taxRate || 0,
+          taxRate: factOf(k).rate || l.taxRate || 0,
           trackInventory: true,
         })
       ).toObject();
