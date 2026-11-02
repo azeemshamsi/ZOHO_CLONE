@@ -8,6 +8,7 @@ const VendorCredit = require("../models/VendorCredit");
 const PurchaseOrder = require("../models/PurchaseOrder");
 const { ah, validate, HttpError, round2 } = require("../utils/http");
 const { escapeRx } = require("../utils/salesDoc");
+const { journalNet, journalsOf, split } = require("../utils/partyJournals");
 
 const address = Joi.object({
   street: Joi.string().allow(""),
@@ -47,6 +48,8 @@ async function payablesByVendor(org) {
   const bills = await Bill.find({ organization: org, status: { $in: ["open", "partially_paid"] } }, { vendor: 1, balance: 1 }).lean();
   const map = {};
   for (const b of bills) map[String(b.vendor)] = round2((map[String(b.vendor)] || 0) + b.balance);
+  // Journal credits to a vendor are owed too.
+  for (const [k, net] of Object.entries(await journalNet(org, "vendor"))) if (net > 0) map[k] = round2((map[k] || 0) + net);
   return map;
 }
 
@@ -78,18 +81,21 @@ router.get(
   ah(async (req, res) => {
     const vendor = await Vendor.findOne({ _id: req.params.id, organization: req.org }).lean();
     if (!vendor) throw new HttpError(404, "Vendor not found");
-    const [bills, payments, expenses, vendorCredits] = await Promise.all([
+    const [bills, payments, expenses, vendorCredits, journals] = await Promise.all([
       Bill.find({ organization: req.org, vendor: vendor._id }, { lineItems: 0 }).sort({ date: -1 }),
       VendorPayment.find({ organization: req.org, vendor: vendor._id }).sort({ date: -1 }).lean(),
       Expense.find({ organization: req.org, vendor: vendor._id }).sort({ date: -1 }).lean(),
       VendorCredit.find({ organization: req.org, vendor: vendor._id }, { lineItems: 0 }).sort({ date: -1 }).lean(),
+      journalsOf(req.org, "vendor", vendor._id),
     ]);
-    const payables = round2(bills.filter((b) => ["open", "partially_paid"].includes(b.status)).reduce((s, b) => s + b.balance, 0));
+    const j = split(round2(journals.reduce((s, x) => s + x.amount, 0)));
+    const payables = round2(bills.filter((b) => ["open", "partially_paid"].includes(b.status)).reduce((s, b) => s + b.balance, 0) + j.due);
     const unusedCredits = round2(
       payments.reduce((s, p) => s + (p.unusedAmount || 0), 0) +
-        vendorCredits.filter((c) => c.status === "open").reduce((s, c) => s + c.balance, 0)
+        vendorCredits.filter((c) => c.status === "open").reduce((s, c) => s + c.balance, 0) +
+        j.credit
     );
-    res.send({ ...vendor, payables, unusedCredits, bills, payments, expenses, vendorCredits });
+    res.send({ ...vendor, payables, unusedCredits, bills, payments, expenses, vendorCredits, journals });
   })
 );
 
@@ -112,7 +118,8 @@ router.delete(
       (await VendorPayment.exists(q)) ||
       (await Expense.exists(q)) ||
       (await VendorCredit.exists(q)) ||
-      (await PurchaseOrder.exists(q));
+      (await PurchaseOrder.exists(q)) ||
+      (await require("../models/Journal").exists({ organization: req.org, "lines.vendor": req.params.id }));
     if (used) throw new HttpError(400, "This vendor has transactions. Mark them inactive instead of deleting.");
     const r = await Vendor.deleteOne({ _id: req.params.id, organization: req.org });
     if (!r.deletedCount) throw new HttpError(404, "Vendor not found");

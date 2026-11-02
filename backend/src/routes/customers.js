@@ -5,6 +5,7 @@ const Invoice = require("../models/Invoice");
 const Payment = require("../models/Payment");
 const CreditNote = require("../models/CreditNote");
 const { ah, validate, HttpError, round2 } = require("../utils/http");
+const { journalNet, journalsOf, split } = require("../utils/partyJournals");
 
 const address = Joi.object({
   street: Joi.string().allow(""),
@@ -48,6 +49,8 @@ async function receivablesByCustomer(org) {
     const k = String(inv.customer);
     map[k] = round2((map[k] || 0) + inv.balance);
   }
+  // Journal debits to a customer are owed too.
+  for (const [k, net] of Object.entries(await journalNet(org, "customer"))) if (net > 0) map[k] = round2((map[k] || 0) + net);
   return map;
 }
 
@@ -83,19 +86,22 @@ router.get(
   ah(async (req, res) => {
     const customer = await Customer.findOne({ _id: req.params.id, organization: req.org }).lean();
     if (!customer) throw new HttpError(404, "Customer not found");
-    const [invoices, payments, creditNotes] = await Promise.all([
+    const [invoices, payments, creditNotes, journals] = await Promise.all([
       Invoice.find({ organization: req.org, customer: customer._id }, { lineItems: 0 }).sort({ date: -1 }),
       Payment.find({ organization: req.org, customer: customer._id }).sort({ date: -1 }).lean(),
       CreditNote.find({ organization: req.org, customer: customer._id }, { lineItems: 0 }).sort({ date: -1 }),
+      journalsOf(req.org, "customer", customer._id),
     ]);
+    const j = split(round2(journals.reduce((s, x) => s + x.amount, 0)));
     const receivables = round2(
-      invoices.filter((i) => ["sent", "partially_paid"].includes(i.status)).reduce((s, i) => s + i.balance, 0)
+      invoices.filter((i) => ["sent", "partially_paid"].includes(i.status)).reduce((s, i) => s + i.balance, 0) + j.due
     );
     const unusedCredits = round2(
       payments.reduce((s, p) => s + (p.unusedAmount || 0), 0) +
-        creditNotes.filter((c) => c.status === "open").reduce((s, c) => s + c.balance, 0)
+        creditNotes.filter((c) => c.status === "open").reduce((s, c) => s + c.balance, 0) +
+        j.credit
     );
-    res.send({ ...customer, receivables, unusedCredits, invoices, payments, creditNotes });
+    res.send({ ...customer, receivables, unusedCredits, invoices, payments, creditNotes, journals });
   })
 );
 
@@ -119,7 +125,8 @@ router.delete(
       (await Invoice.exists({ organization: req.org, customer: req.params.id })) ||
       (await CreditNote.exists({ organization: req.org, customer: req.params.id })) ||
       (await require("../models/Quote").exists({ organization: req.org, customer: req.params.id })) ||
-      (await require("../models/SalesOrder").exists({ organization: req.org, customer: req.params.id }));
+      (await require("../models/SalesOrder").exists({ organization: req.org, customer: req.params.id })) ||
+      (await require("../models/Journal").exists({ organization: req.org, "lines.customer": req.params.id }));
     if (used) throw new HttpError(400, "This customer has transactions. Mark them inactive instead of deleting.");
     const r = await Customer.deleteOne({ _id: req.params.id, organization: req.org });
     if (!r.deletedCount) throw new HttpError(404, "Customer not found");

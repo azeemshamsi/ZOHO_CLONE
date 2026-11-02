@@ -472,6 +472,7 @@ const REPORTS = {
   },
 
   "customer-balances": async (req) => {
+    const jNet = await require("./partyJournals").journalNet(req.org, "customer");
     const [customers, invoices, payments, credits] = await Promise.all([
       Customer.find({ organization: req.org }).lean(),
       Invoice.find({ organization: req.org, status: live }, { lineItems: 0 }).lean(),
@@ -484,17 +485,19 @@ const REPORTS = {
         const inv = invoices.filter((i) => String(i.customer) === id);
         const pay = payments.filter((p) => String(p.customer) === id);
         const cn = credits.filter((x) => String(x.customer) === id);
+        const journals = jNet[id] || 0;
         return {
           name: c.displayName,
           href: `/customers/${c._id}`,
           invoiced: sum(inv, (i) => i.total),
           received: sum(pay, (p) => p.amount),
           credited: sum(cn, (x) => x.total),
-          balance: sum(inv.filter((i) => ["sent", "partially_paid"].includes(i.status)), (i) => i.balance),
-          available: round2(sum(pay, (p) => p.unusedAmount) + sum(cn.filter((x) => x.status === "open"), (x) => x.balance)),
+          journals,
+          balance: round2(sum(inv.filter((i) => ["sent", "partially_paid"].includes(i.status)), (i) => i.balance) + Math.max(journals, 0)),
+          available: round2(sum(pay, (p) => p.unusedAmount) + sum(cn.filter((x) => x.status === "open"), (x) => x.balance) + Math.max(-journals, 0)),
         };
       })
-      .filter((r) => r.invoiced || r.received || r.credited)
+      .filter((r) => r.invoiced || r.received || r.credited || r.journals)
       .sort((a, b) => b.balance - a.balance);
     return {
       kind: "table",
@@ -503,6 +506,7 @@ const REPORTS = {
         col("invoiced", "Invoiced", "money", { sum: true }),
         col("received", "Received", "money", { sum: true }),
         col("credited", "Credit Notes", "money", { sum: true }),
+        col("journals", "Journals (Dr − Cr)", "money", { sum: true }),
         col("available", "Unused Credits", "money", { sum: true }),
         col("balance", "Balance Due", "money", { sum: true }),
       ],
@@ -559,6 +563,7 @@ const REPORTS = {
     return { kind: "table", groupBy: "party", columns: agingColumns("Vendor", "Bill#"), rows: agingRows(docs, { party: "vendor", number: "billNumber", href: (d) => `/bills/${d._id}` }) };
   },
   "vendor-balances": async (req) => {
+    const jNet = await require("./partyJournals").journalNet(req.org, "vendor");
     const [vendors, bills, payments, credits] = await Promise.all([
       Vendor.find({ organization: req.org }).lean(),
       Bill.find({ organization: req.org, status: live }, { lineItems: 0 }).lean(),
@@ -571,17 +576,19 @@ const REPORTS = {
         const b = bills.filter((x) => String(x.vendor) === id);
         const p = payments.filter((x) => String(x.vendor) === id);
         const c = credits.filter((x) => String(x.vendor) === id);
+        const journals = jNet[id] || 0;
         return {
           name: v.displayName,
           href: `/vendors/${v._id}`,
           billed: sum(b, (x) => x.total),
           paid: sum(p, (x) => x.amount),
           credited: sum(c, (x) => x.total),
-          available: round2(sum(p, (x) => x.unusedAmount) + sum(c.filter((x) => x.status === "open"), (x) => x.balance)),
-          balance: sum(b.filter((x) => ["open", "partially_paid"].includes(x.status)), (x) => x.balance),
+          journals,
+          available: round2(sum(p, (x) => x.unusedAmount) + sum(c.filter((x) => x.status === "open"), (x) => x.balance) + Math.max(-journals, 0)),
+          balance: round2(sum(b.filter((x) => ["open", "partially_paid"].includes(x.status)), (x) => x.balance) + Math.max(journals, 0)),
         };
       })
-      .filter((r) => r.billed || r.paid || r.credited)
+      .filter((r) => r.billed || r.paid || r.credited || r.journals)
       .sort((a, b) => b.balance - a.balance);
     return {
       kind: "table",
@@ -590,6 +597,7 @@ const REPORTS = {
         col("billed", "Billed", "money", { sum: true }),
         col("paid", "Paid", "money", { sum: true }),
         col("credited", "Vendor Credits", "money", { sum: true }),
+        col("journals", "Journals (Cr − Dr)", "money", { sum: true }),
         col("available", "Advances & Credits", "money", { sum: true }),
         col("balance", "Balance Due", "money", { sum: true }),
       ],

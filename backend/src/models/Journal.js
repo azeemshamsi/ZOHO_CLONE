@@ -6,6 +6,10 @@ const lineSchema = new mongoose.Schema(
     description: { type: String, default: "" },
     debit: { type: Number, default: 0 },
     credit: { type: Number, default: 0 },
+    // Accounts Receivable / Payable lines name the customer or vendor whose balance they change.
+    customer: { type: mongoose.Schema.Types.ObjectId, ref: "Customer" },
+    vendor: { type: mongoose.Schema.Types.ObjectId, ref: "Vendor" },
+    contactName: { type: String, default: "" },
   },
   { _id: false }
 );

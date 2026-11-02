@@ -534,19 +534,29 @@ async function commit(ctx, data, opts, progress) {
       }
       const missing = [];
       let touchesParty = false;
-      const lines = j.lines.map((l) => {
+      const lines = [];
+      for (const l of j.lines) {
         let code = lookupAccount(l.account);
-        if (!code && (contacts.customer.has(l.account.toLowerCase()) || l.partyKind === "customer")) code = "ar";
-        if (!code && (contacts.vendor.has(l.account.toLowerCase()) || l.partyKind === "vendor")) code = "ap";
+        if (!code && (contacts.customer.has(clean(l.account).toLowerCase()) || l.partyKind === "customer")) code = "ar";
+        if (!code && (contacts.vendor.has(clean(l.account).toLowerCase()) || l.partyKind === "vendor")) code = "ap";
         if (!code) missing.push(l.account);
-        if (code === "ar" || code === "ap") touchesParty = true;
-        return { account: code, description: l.party || "", debit: round2(l.debit), credit: round2(l.credit) };
-      });
+        const line = { account: code, description: l.party || "", debit: round2(l.debit), credit: round2(l.credit) };
+        // A party ledger on a journal: the line names that customer/vendor, so their balance moves.
+        if (code === "ar" || code === "ap") {
+          const kind = code === "ar" ? "customer" : "vendor";
+          const known = contacts[kind].has(clean(l.account).toLowerCase()) || l.partyKind === kind;
+          if (known) {
+            const p = await party(kind, l.account, "journals", label);
+            Object.assign(line, { [kind]: p._id, contactName: p.displayName });
+          } else touchesParty = true;
+        }
+        lines.push(line);
+      }
       if (missing.length) throw new Error(`Unknown account(s): ${[...new Set(missing)].join(", ")} — import the chart of accounts / Tally masters first`);
       const dr = round2(lines.reduce((s, l) => s + l.debit, 0));
       const cr = round2(lines.reduce((s, l) => s + l.credit, 0));
       if (Math.abs(dr - cr) > 0.05) throw new Error(`Debits ${dr} and credits ${cr} don't match`);
-      if (touchesParty) warnings.push(`${label}: posts to receivables/payables directly — the totals are right, but it isn't linked to a customer's or vendor's balance`);
+      if (touchesParty) warnings.push(`${label}: posts to receivables/payables without a customer/vendor — the totals are right, but no party's balance changes`);
       let number = clean(j.number).slice(0, 40) || (await nextNumber(ctx.org, "journal", org.journalPrefix || "MJ-"));
       if (await Journal.exists({ organization: ctx.org, number })) number = `${number}-${String(Date.now()).slice(-4)}`;
       await Journal.create({ organization: ctx.org, number, date: j.date, reference: j.reference || "", notes: j.notes || "Imported journal", lines, total: dr, importRef: key });

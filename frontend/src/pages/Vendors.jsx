@@ -410,6 +410,21 @@ export function VendorDetail() {
                 ["Amount", (e) => money(e.total), "num"],
               ],
             },
+            ...(v.journals?.length
+              ? [
+                  {
+                    title: "Journals",
+                    rows: v.journals,
+                    to: (j) => `/journals/${j._id}`,
+                    cols: [
+                      ["Date", (j) => date(j.date)],
+                      ["Journal#", (j) => j.number, "link"],
+                      ["Notes", (j) => j.notes],
+                      ["Payable (+) / Advance (−)", (j) => money(j.amount), "num"],
+                    ],
+                  },
+                ]
+              : []),
           ].map((t) => (
             <div className="card flush" key={t.title}>
               <h3 className="card-title">{t.title}</h3>

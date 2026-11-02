@@ -427,7 +427,8 @@ export function CustomerDetail() {
               <h3>Recent activity</h3>
               <ul className="timeline">
                 {[...c.invoices.map((i) => ({ d: i.date, t: `Invoice ${i.invoiceNumber} for ${money(i.total, i.currency)}`, to: `/invoices/${i._id}` })),
-                  ...c.payments.map((p) => ({ d: p.date, t: `Payment ${p.paymentNumber} of ${money(p.amount, p.currency)} received`, to: `/payments/${p._id}` }))]
+                  ...c.payments.map((p) => ({ d: p.date, t: `Payment ${p.paymentNumber} of ${money(p.amount, p.currency)} received`, to: `/payments/${p._id}` })),
+                  ...(c.journals || []).map((j) => ({ d: j.date, t: `Journal ${j.number}: ${money(Math.abs(j.amount))} ${j.amount >= 0 ? "receivable" : "credit"}`, to: `/journals/${j._id}` }))]
                   .sort((a, b) => new Date(b.d) - new Date(a.d))
                   .slice(0, 8)
                   .map((x, i) => (
@@ -500,6 +501,31 @@ export function CustomerDetail() {
                       </td>
                       <td className="num">{money(n.total)}</td>
                       <td className="num">{money(n.balance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {c.journals?.length > 0 && (
+            <div className="card flush">
+              <h3 className="card-title">Journals</h3>
+              <table className="table table-click">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Journal#</th>
+                    <th>Notes</th>
+                    <th className="num">Receivable (+) / Credit (−)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {c.journals.map((j) => (
+                    <tr key={j._id} onClick={() => navigate(`/journals/${j._id}`)}>
+                      <td>{date(j.date)}</td>
+                      <td className="link">{j.number}</td>
+                      <td className="clamp">{j.notes}</td>
+                      <td className="num">{money(j.amount)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -63,20 +63,26 @@ export function JournalList() {
   );
 }
 
-const blank = () => ({ account: "", description: "", debit: "", credit: "" });
+const blank = () => ({ account: "", description: "", debit: "", credit: "", customer: "", vendor: "" });
+const PARTY = { ar: ["customer", "customers"], ap: ["vendor", "vendors"] };
 
 export function JournalForm() {
   const { branches } = useLocations();
   const { id } = useParams();
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState([]);
+  const [parties, setParties] = useState({ customers: [], vendors: [] });
   const [form, setForm] = useState(null);
   const [auto, setAuto] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api.get("/accounts").then((r) => setAccounts(r.data.filter((a) => !["ar", "ap"].includes(a.code) && a.active !== false)));
+    api.get("/accounts").then((r) => setAccounts(r.data.filter((a) => a.active !== false)));
+    // Accounts Receivable / Payable lines name a customer / vendor.
+    Promise.all([api.get("/customers", { params: { status: "active" } }), api.get("/vendors", { params: { status: "active" } })])
+      .then(([c, v]) => setParties({ customers: c.data, vendors: v.data }))
+      .catch(() => {});
     if (id) {
       api.get(`/journals/${id}`).then(({ data }) =>
         setForm({
@@ -85,7 +91,7 @@ export function JournalForm() {
           reference: data.reference,
           branch: data.branch || "",
           notes: data.notes,
-          lines: data.lines.map((l) => ({ account: l.account, description: l.description, debit: l.debit || "", credit: l.credit || "" })),
+          lines: data.lines.map((l) => ({ account: l.account, description: l.description, debit: l.debit || "", credit: l.credit || "", customer: l.customer || "", vendor: l.vendor || "" })),
         })
       );
     } else {
@@ -113,7 +119,7 @@ export function JournalForm() {
         branch: form.branch || null,
         lines: form.lines
           .filter((l) => l.account && (Number(l.debit) || Number(l.credit)))
-          .map((l) => ({ ...l, debit: Number(l.debit) || 0, credit: Number(l.credit) || 0 })),
+          .map((l) => ({ ...l, debit: Number(l.debit) || 0, credit: Number(l.credit) || 0, customer: l.account === "ar" ? l.customer || null : null, vendor: l.account === "ap" ? l.vendor || null : null })),
       };
       const { data } = id ? await api.put(`/journals/${id}`, body) : await api.post("/journals", body);
       toast(id ? "Journal updated" : "Journal created");
@@ -186,6 +192,21 @@ export function JournalForm() {
                         </optgroup>
                       ))}
                     </select>
+                    {PARTY[l.account] && (
+                      <select
+                        style={{ marginTop: 6 }}
+                        required
+                        value={l[PARTY[l.account][0]]}
+                        onChange={(e) => setLine(i, { [PARTY[l.account][0]]: e.target.value })}
+                      >
+                        <option value="">Select a {PARTY[l.account][0]}</option>
+                        {parties[PARTY[l.account][1]].map((p) => (
+                          <option key={p._id} value={p._id}>
+                            {p.displayName}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </td>
                   <td>
                     <input value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} />
@@ -285,6 +306,11 @@ export function JournalView() {
               <tr key={i}>
                 <td>
                   <Link to={`/chart-of-accounts/${encodeURIComponent(l.account)}`}>{l.accountName}</Link>
+                  {(l.customer || l.vendor) && (
+                    <div className="small">
+                      <Link to={l.customer ? `/customers/${l.customer}` : `/vendors/${l.vendor}`}>{l.contactName || (l.customer ? "Customer" : "Vendor")}</Link>
+                    </div>
+                  )}
                 </td>
                 <td>{l.description}</td>
                 <td className="num">{l.debit ? money(l.debit) : ""}</td>

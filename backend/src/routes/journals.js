@@ -20,6 +20,8 @@ const schema = Joi.object({
         description: Joi.string().allow(""),
         debit: Joi.number().min(0).default(0),
         credit: Joi.number().min(0).default(0),
+        customer: Joi.string().allow(null, ""),
+        vendor: Joi.string().allow(null, ""),
       })
     )
     .min(2)
@@ -32,15 +34,23 @@ const prefix = (org) => org.journalPrefix || "MJ-";
 async function check(req, data) {
   const accounts = await chartOfAccounts(req.org);
   const codes = new Set(accounts.map((a) => a.code));
-  // Accounts receivable/payable belong to customers and vendors; post those through invoices and bills.
+  // Accounts Receivable lines need a customer and Accounts Payable lines a vendor, so their balances stay right.
   const lines = data.lines
-    .map((l) => ({ ...l, debit: round2(l.debit), credit: round2(l.credit) }))
+    .map(({ customer, vendor, ...l }) => ({ ...l, debit: round2(l.debit), credit: round2(l.credit), ...(l.account === "ar" && customer ? { customer } : {}), ...(l.account === "ap" && vendor ? { vendor } : {}) }))
     .filter((l) => l.debit > 0 || l.credit > 0);
   if (lines.length < 2) throw new HttpError(400, "A journal needs at least two lines with amounts");
+  const Customer = require("../models/Customer");
+  const Vendor = require("../models/Vendor");
   for (const l of lines) {
     if (!codes.has(l.account)) throw new HttpError(400, "One of the accounts doesn't exist");
-    if (["ar", "ap"].includes(l.account)) throw new HttpError(400, "Use invoices, bills and payments for Accounts Receivable and Payable");
     if (l.debit > 0 && l.credit > 0) throw new HttpError(400, "A line can have a debit or a credit, not both");
+    if (l.account === "ar" || l.account === "ap") {
+      const kind = l.account === "ar" ? "customer" : "vendor";
+      const M = kind === "customer" ? Customer : Vendor;
+      const p = l[kind] && /^[0-9a-f]{24}$/i.test(l[kind]) ? await M.findOne({ _id: l[kind], organization: req.org }, { displayName: 1 }).lean() : null;
+      if (!p) throw new HttpError(400, `Choose the ${kind} for the ${kind === "customer" ? "Accounts Receivable" : "Accounts Payable"} line`);
+      l.contactName = p.displayName;
+    }
   }
   const dr = round2(lines.reduce((s, l) => s + l.debit, 0));
   const cr = round2(lines.reduce((s, l) => s + l.credit, 0));
