@@ -9,6 +9,7 @@ import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Conf
 import Icon from "../components/Icon";
 import { DocEmail } from "../components/EmailDoc";
 import BankAccountSelect from "../components/BankAccountSelect";
+import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
 
 
 export function PaymentList() {
@@ -170,14 +171,7 @@ export function PaymentForm() {
       <form className="card form" onSubmit={submit}>
         <div className="form-grid">
           <Field label="Customer Name" required>
-            <select required value={form.customer} onChange={set("customer")}>
-              <option value="">Select a customer</option>
-              {customers.map((c) => (
-                <option key={c._id} value={c._id}>
-                  {c.displayName}
-                </option>
-              ))}
-            </select>
+            <SearchSelect required value={form.customer} options={partyOptions(customers)} onChange={(v) => set("customer")({ target: { value: v } })} placeholder="Search customers by name, GSTIN or phone" />
           </Field>
           <div className="row-2">
             <Field label={`Amount Received (${payCur})`} required>

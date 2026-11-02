@@ -840,3 +840,15 @@ tr.clickable:hover td { background: var(--brand-50); }
 .scan-banner.bad { background: rgba(200, 40, 50, .95); }
 .scan-banner.busy { background: rgba(21, 101, 192, .92); }
 @media (max-width: 760px) { .scan-camera video { max-height: 52vh; } }
+
+/* Searchable picker */
+.ss { position: relative; width: 100%; }
+.ss > input:first-child { width: 100%; }
+.ss-req { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.ss-list { position: absolute; z-index: 60; left: 0; right: 0; top: calc(100% + 4px); background: var(--card); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(20, 23, 43, 0.12); max-height: 300px; overflow-y: auto; min-width: 240px; }
+.ss-opt { padding: 7px 10px; cursor: pointer; display: flex; flex-direction: column; gap: 1px; font-size: 14px; }
+.ss-opt.active { background: var(--brand-50); }
+.ss-opt.on { font-weight: 600; }
+.ss-sub { font-size: 12px; color: var(--muted); font-weight: 400; }
+.ss-empty { padding: 8px 10px; color: var(--muted); font-size: 13px; }
+.ss-foot { border-top: 1px solid var(--line); padding: 6px 10px; font-size: 13px; }

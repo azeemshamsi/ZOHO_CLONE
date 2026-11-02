@@ -7,6 +7,7 @@ import { GST_RATES } from "../lib/constants";
 import { PERIODS, periodRange } from "../lib/period";
 import { PageHeader, Spinner, Empty, Field, Modal, Confirm, toast } from "../components/ui";
 import Icon from "../components/Icon";
+import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
 
 const METHODS = [
   ["project_hours", "Based on Project Hours", "One hourly rate for the whole project"],
@@ -182,14 +183,7 @@ export function ProjectForm() {
             </Field>
           </div>
           <Field label="Customer" required>
-            <select required value={form.customer} onChange={set("customer")}>
-              <option value="">Select a customer</option>
-              {customers.map((c) => (
-                <option key={c._id} value={c._id}>
-                  {c.displayName}
-                </option>
-              ))}
-            </select>
+            <SearchSelect required value={form.customer} options={partyOptions(customers)} onChange={(v) => set("customer")({ target: { value: v } })} placeholder="Search customers by name, GSTIN or phone" />
           </Field>
           <Field label="Billing Method" required>
             <div className="role-grid">

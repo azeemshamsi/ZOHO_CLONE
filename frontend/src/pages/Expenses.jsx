@@ -11,6 +11,7 @@ import Icon from "../components/Icon";
 import { ScheduleFields } from "../components/Schedule";
 import { useLocations } from "../lib/locations";
 import BankAccountSelect from "../components/BankAccountSelect";
+import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
 
 
 export function ExpenseList() {
@@ -317,14 +318,7 @@ export function ExpenseForm({ recurring = false }) {
               </Field>
             )}
             <Field label="Vendor" hint="Optional">
-              <select value={form.vendor} onChange={pickVendor}>
-                <option value="">None</option>
-                {vendors.map((v) => (
-                  <option key={v._id} value={v._id}>
-                    {v.displayName}
-                  </option>
-                ))}
-              </select>
+              <SearchSelect value={form.vendor} options={partyOptions(vendors)} onChange={(v) => pickVendor({ target: { value: v } })} placeholder="None — or search vendors" />
             </Field>
           </div>
           <div className="row-2">

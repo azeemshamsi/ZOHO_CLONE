@@ -5,6 +5,7 @@ import { date, isoDate } from "../lib/format";
 import { useLocations } from "../lib/locations";
 import { PageHeader, Spinner, Empty, Field, Confirm, toast } from "../components/ui";
 import Icon from "../components/Icon";
+import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
 
 export function TransferList() {
   const [rows, setRows] = useState(null);
@@ -149,14 +150,7 @@ export function TransferForm() {
               return (
                 <tr key={i}>
                   <td>
-                    <select value={l.item} onChange={(e) => setLine(i, "item", e.target.value)}>
-                      <option value="">Select an item</option>
-                      {items.map((x) => (
-                        <option key={x._id} value={x._id}>
-                          {x.name}
-                        </option>
-                      ))}
-                    </select>
+                    <SearchSelect value={l.item} options={itemOptions(items)} onChange={(v) => setLine(i, "item", v)} placeholder="Search items by name, SKU or HSN…" />
                   </td>
                   <td className="num">{form.from && have(it, form.from)}</td>
                   <td className="num">{form.to && have(it, form.to)}</td>

@@ -9,6 +9,7 @@ import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Conf
 import Icon from "../components/Icon";
 import { DocEmail } from "../components/EmailDoc";
 import BankAccountSelect from "../components/BankAccountSelect";
+import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
 
 
 export function VendorPaymentList() {
@@ -170,14 +171,7 @@ export function VendorPaymentForm() {
       <form className="card form" onSubmit={submit}>
         <div className="form-grid">
           <Field label="Vendor Name" required>
-            <select required value={form.vendor} onChange={set("vendor")}>
-              <option value="">Select a vendor</option>
-              {vendors.map((c) => (
-                <option key={c._id} value={c._id}>
-                  {c.displayName}
-                </option>
-              ))}
-            </select>
+            <SearchSelect required value={form.vendor} options={partyOptions(vendors)} onChange={(v) => set("vendor")({ target: { value: v } })} placeholder="Search vendors by name, GSTIN or phone" />
           </Field>
           <div className="row-2">
             <Field label={`Amount Paid (${payCur})`} required>

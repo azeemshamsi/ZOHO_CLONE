@@ -6,6 +6,7 @@ import { money, amount, date, isoDate, round2 } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, toast, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
 import { useLocations } from "../lib/locations";
+import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
 
 export function JournalList() {
   const [rows, setRows] = useState(null);
@@ -193,19 +194,15 @@ export function JournalForm() {
                       ))}
                     </select>
                     {PARTY[l.account] && (
-                      <select
-                        style={{ marginTop: 6 }}
-                        required
-                        value={l[PARTY[l.account][0]]}
-                        onChange={(e) => setLine(i, { [PARTY[l.account][0]]: e.target.value })}
-                      >
-                        <option value="">Select a {PARTY[l.account][0]}</option>
-                        {parties[PARTY[l.account][1]].map((p) => (
-                          <option key={p._id} value={p._id}>
-                            {p.displayName}
-                          </option>
-                        ))}
-                      </select>
+                      <div style={{ marginTop: 6 }}>
+                        <SearchSelect
+                          required
+                          value={l[PARTY[l.account][0]]}
+                          options={partyOptions(parties[PARTY[l.account][1]])}
+                          onChange={(v) => setLine(i, { [PARTY[l.account][0]]: v })}
+                          placeholder={`Search ${PARTY[l.account][0]}s`}
+                        />
+                      </div>
                     )}
                   </td>
                   <td>

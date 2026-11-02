@@ -5,6 +5,7 @@ import { money, date, isoDate } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, toast, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
 import { useLocations } from "../lib/locations";
+import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
 
 const accountName = (accounts, code) => (accounts.find((a) => a.code === code) || { name: code }).name;
 
@@ -222,15 +223,7 @@ export function AdjustmentForm() {
               return (
                 <tr key={i}>
                   <td>
-                    <select value={l.item} onChange={(e) => setLine(i, "item", e.target.value)}>
-                      <option value="">Select an item</option>
-                      {items.map((x) => (
-                        <option key={x._id} value={x._id}>
-                          {x.name}
-                          {x.sku ? ` (${x.sku})` : ""}
-                        </option>
-                      ))}
-                    </select>
+                    <SearchSelect value={l.item} options={itemOptions(items)} onChange={(v) => setLine(i, "item", v)} placeholder="Search items by name, SKU or HSN…" />
                   </td>
                   <td className="num">{it ? `${onHand} ${it.unit}` : ""}</td>
                   {form.mode === "quantity" ? (

@@ -9,6 +9,7 @@ import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Stat
 import Icon from "./Icon";
 import { useLocations } from "../lib/locations";
 import { QrImage } from "./GstPanel";
+import SearchSelect, { partyOptions, itemOptions } from "./SearchSelect";
 
 /* ======================= List ======================= */
 export function DocList({ kind, filters, columns, emptyText, summary, headerExtra }) {
@@ -314,6 +315,8 @@ export function DocForm({ kind, recurring = false }) {
   if (!form) return <Spinner />;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const customer = customers.find((c) => c._id === form.customer);
+  const partyOpts = partyOptions(customers);
+  const itemOpts = itemOptions(items);
   const cur = customer?.currency || "INR";
   const curRate = currencies.find((c) => c.code === cur)?.rate;
 
@@ -410,14 +413,14 @@ export function DocForm({ kind, recurring = false }) {
         <div className="form-grid">
           <Field label={isVendor ? "Vendor Name" : "Customer Name"} required>
             <div className="inline-add">
-              <select required value={form.customer} onChange={pickCustomer}>
-                <option value="">Select or add a {party}</option>
-                {customers.map((c) => (
-                  <option key={c._id} value={c._id}>
-                    {c.displayName}
-                  </option>
-                ))}
-              </select>
+              <SearchSelect
+                required
+                value={form.customer}
+                options={partyOpts}
+                onChange={(v) => pickCustomer({ target: { value: v } })}
+                placeholder={`Search ${party}s by name, GSTIN or phone`}
+                emptyText={`No ${party} found — add one with +`}
+              />
               <Link to={`${partyApi}/new`} className="btn btn-sm" title={`New ${party}`}>
                 <Icon name="plus" size={14} />
               </Link>
@@ -686,14 +689,7 @@ export function DocForm({ kind, recurring = false }) {
               {form.lineItems.map((l, i) => (
                 <tr key={i}>
                   <td>
-                    <select className="item-pick" value={l.item} onChange={(e) => pickItem(i, e.target.value)}>
-                      <option value="">Type or pick an item…</option>
-                      {items.map((it) => (
-                        <option key={it._id} value={it._id}>
-                          {it.name}
-                        </option>
-                      ))}
-                    </select>
+                    <SearchSelect className="item-pick" value={l.item} options={itemOpts} onChange={(v) => pickItem(i, v)} placeholder="Search items by name, SKU or HSN…" emptyText="No item found — type the name below" />
                     <input placeholder="Item name" value={l.name} onChange={(e) => setLine(i, { name: e.target.value })} required={i === 0} />
                     <input className="small-input" placeholder="Description" value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} />
                     <input className="small-input mono" placeholder="HSN/SAC" value={l.hsnSac} onChange={(e) => setLine(i, { hsnSac: e.target.value })} />

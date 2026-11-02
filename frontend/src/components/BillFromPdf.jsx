@@ -4,6 +4,7 @@ import api, { errMsg } from "../lib/api";
 import { money } from "../lib/format";
 import { STATES, GST_RATES } from "../lib/constants";
 import { Modal, Field, Spinner, toast } from "./ui";
+import SearchSelect, { partyOptions, itemOptions } from "./SearchSelect";
 
 const readB64 = (file) =>
   new Promise((resolve, reject) => {
@@ -135,15 +136,12 @@ export default function BillFromPdf({ kind = "bill", onClose }) {
           )}
           <div className="row-2">
             <Field label="Supplier" required={kind === "bill"} hint={f.vendorId ? "Existing vendor" : f.vendorName ? "Will be created as a new vendor" : ""}>
-              <select value={f.vendorId} onChange={(e) => setF({ ...f, vendorId: e.target.value, vendorName: e.target.value ? vendors.find((v) => v._id === e.target.value)?.displayName || "" : f.vendorName })}>
-                <option value="">{f.vendorName ? `New: ${f.vendorName}` : "Choose…"}</option>
-                {vendors.map((v) => (
-                  <option key={v._id} value={v._id}>
-                    {v.displayName}
-                    {v.gstin ? ` (${v.gstin})` : ""}
-                  </option>
-                ))}
-              </select>
+              <SearchSelect
+                value={f.vendorId}
+                options={partyOptions(vendors)}
+                onChange={(id) => setF({ ...f, vendorId: id, vendorName: id ? vendors.find((v) => v._id === id)?.displayName || "" : f.vendorName })}
+                placeholder={f.vendorName ? `New: ${f.vendorName} — or search vendors` : "Search vendors by name or GSTIN"}
+              />
             </Field>
             {!f.vendorId && (
               <div className="row-2">
