@@ -73,6 +73,15 @@ function lineAccounts(lines = []) {
   return [...m];
 }
 const sumOf = (pairs) => pairs.reduce((s, [, a]) => s + a, 0);
+// Sales lines with their own income account (e.g. Tally sales ledgers), item lines included.
+function incomeAccounts(lines = []) {
+  const m = new Map();
+  for (const l of lines) if (l.account) m.set(l.account, (m.get(l.account) || 0) + (l.amount || 0));
+  return [...m];
+}
+
+// A purchase adjustment posted to its own account (TDS) can include a few paise of round-off, which goes to Rounding.
+const roundOffPart = (d) => (d.adjustmentAccount && Math.abs(d.adjustmentRoundOff || 0) < 1 && Math.abs(d.adjustmentRoundOff || 0) < Math.abs(d.adjustment || 0) ? d.adjustmentRoundOff || 0 : 0);
 
 // The cash/bank account money went through: the one picked, else by payment mode.
 const modeAccount = (mode, bankAccount) => bankAccount || (mode === "cash" ? "cash" : "bank");
@@ -146,7 +155,9 @@ async function buildEntries(org, { to } = {}) {
       build: (dr, cr, drB) => {
         dr("ar", i.total);
         if (i.opening) return cr("opening_equity", i.total); // balance brought forward from another system
-        cr("sales", i.subTotal);
+        const income = incomeAccounts(i.lineItems);
+        for (const [acct, amt] of income) cr(acct, amt);
+        cr("sales", i.subTotal - sumOf(income));
         cr("output_cgst", i.cgst);
         cr("output_sgst", i.sgst);
         cr("output_igst", i.igst);
@@ -179,7 +190,9 @@ async function buildEntries(org, { to } = {}) {
           dr("opening_equity", c.total);
           return cr("ar", c.total);
         }
-        dr("sales", c.subTotal);
+        const income = incomeAccounts(c.lineItems);
+        for (const [acct, amt] of income) dr(acct, amt);
+        dr("sales", c.subTotal - sumOf(income));
         dr("output_cgst", c.cgst);
         dr("output_sgst", c.sgst);
         dr("output_igst", c.igst);
@@ -216,7 +229,9 @@ async function buildEntries(org, { to } = {}) {
         dr("input_cgst", b.cgst);
         dr("input_sgst", b.sgst);
         dr("input_igst", b.igst);
-        dr(b.adjustmentAccount || "adjustments", b.adjustment || 0);
+        const ro = roundOffPart(b);
+        dr(b.adjustmentAccount || "adjustments", (b.adjustment || 0) - ro);
+        dr("adjustments", ro);
         cr("ap", b.total);
       },
     });
@@ -260,7 +275,9 @@ async function buildEntries(org, { to } = {}) {
         cr("input_cgst", c.cgst);
         cr("input_sgst", c.sgst);
         cr("input_igst", c.igst);
-        cr(c.adjustmentAccount || "adjustments", c.adjustment || 0);
+        const ro = roundOffPart(c);
+        cr(c.adjustmentAccount || "adjustments", (c.adjustment || 0) - ro);
+        cr("adjustments", ro);
       },
     });
     for (const r of c.refunds || []) {

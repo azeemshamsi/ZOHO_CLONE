@@ -6,6 +6,8 @@ const C = require("./common");
 const { clean, num, date, stateCode, gstin, gstTreatment, terms } = C;
 const { mapGroup } = require("./sheets");
 
+// Unit rate with enough decimals that quantity × rate gives back Tally's amount to the paisa.
+const rate6 = (r) => Math.round(r * 1e6) / 1e6;
 const arr = (v) => (v === undefined || v === null ? [] : Array.isArray(v) ? v : [v]);
 const text = (v) => {
   if (v === undefined || v === null) return "";
@@ -29,6 +31,74 @@ const RESERVED_PARENT = {
   "bank accounts": "current assets", "cash-in-hand": "current assets", "deposits (asset)": "current assets", "loans & advances (asset)": "current assets", "stock-in-hand": "current assets", "sundry debtors": "current assets",
   "duties & taxes": "current liabilities", "provisions": "current liabilities", "sundry creditors": "current liabilities", "bank od a/c": "loans (liability)", "secured loans": "loans (liability)", "unsecured loans": "loans (liability)", "reserves & surplus": "capital account",
 };
+
+// GST rate per line. Tally keeps one tax ledger per rate ("IGST 5%", "Input CGST 9%"), so a voucher
+// with goods at 5% and 18% says how much tax each rate carries; pick the rate of each line so the
+// tax per rate matches. Without rates in the ledger names, look for the rates that make the total match.
+const STD_RATES = [0, 5, 12, 18, 28];
+function lineRates(amounts, taxes) {
+  const n = amounts.length;
+  const total = C.round2(taxes.reduce((s, t) => s + t.amount, 0));
+  const taxable = amounts.reduce((s, a) => s + a, 0);
+  const byRate = new Map();
+  let named = taxes.length > 0;
+  for (const t of taxes) {
+    const m = t.ledger.match(/(\d+(?:\.\d+)?)\s*%/);
+    if (!m || /cess/i.test(t.ledger)) {
+      named = false;
+      break;
+    }
+    const r = C.round2(Number(m[1]) * (/igst/i.test(t.ledger) ? 1 : /cgst|sgst|utgst/i.test(t.ledger) ? 2 : 1));
+    byRate.set(r, C.round2((byRate.get(r) || 0) + t.amount));
+  }
+  const taxOf = (a, r) => C.round2((a * r) / 100);
+  const single = taxable ? C.snapRate((total / taxable) * 100) : 0;
+  const errOf = (rates) => {
+    if (named) {
+      const got = new Map();
+      rates.forEach((r, i) => r && got.set(r, (got.get(r) || 0) + taxOf(amounts[i], r)));
+      let e = 0;
+      for (const r of new Set([...byRate.keys(), ...got.keys()])) e += Math.abs((got.get(r) || 0) - (byRate.get(r) || 0));
+      return e;
+    }
+    return Math.abs(rates.reduce((s, r, i) => s + taxOf(amounts[i], r), 0) - total);
+  };
+  const tol = 0.05 + 0.02 * n;
+  const flat = Array(n).fill(named && byRate.size === 1 ? [...byRate.keys()][0] : single);
+  if (!n || errOf(flat) <= tol) return flat;
+  const cands = named ? [...new Set([...byRate.keys(), 0])] : STD_RATES;
+  let best = flat;
+  let bestErr = errOf(flat);
+  if (cands.length ** n <= 200000) {
+    const cur = Array(n).fill(0);
+    const walk = (i) => {
+      if (bestErr <= 0.01) return;
+      if (i === n) {
+        const e = errOf(cur);
+        if (e < bestErr - 0.005) [best, bestErr] = [[...cur], e];
+        return;
+      }
+      for (const r of cands) {
+        cur[i] = r;
+        walk(i + 1);
+      }
+    };
+    walk(0);
+  } else if (named) {
+    // Too many lines to try every mix: biggest lines first, each to the rate with the most taxable value left.
+    const need = new Map([...byRate].map(([r, t]) => [r, r ? (t * 100) / r : 0]));
+    const out = Array(n).fill(0);
+    [...amounts.keys()].sort((x, y) => amounts[y] - amounts[x]).forEach((i) => {
+      let pick = 0;
+      let room = amounts[i] * 0.5;
+      for (const [r, left] of need) if (r && left > room) [pick, room] = [r, left];
+      out[i] = pick;
+      if (pick) need.set(pick, need.get(pick) - amounts[i]);
+    });
+    if (errOf(out) < bestErr) best = out;
+  }
+  return best;
+}
 
 function isTally(xml) {
   return collect(xml, "TALLYMESSAGE").length > 0 || collect(xml, "VOUCHER").length > 0 || collect(xml, "LEDGER").length > 0;
@@ -199,14 +269,20 @@ function normalise(xml, known = {}) {
       if (pg !== partyGroup) twoWay.add(`${partyEntry.ledger} (${partyGroup === "debtors" ? "also a customer" : "also a vendor"})`);
       const sales = kind === "invoices" || kind === "creditNotes";
       const total = partyEntry.debit || partyEntry.credit;
-      const tax = entries.filter((e) => e.ledger !== partyEntry.ledger && isTax(e.ledger)).reduce((s, e) => s + e.debit + e.credit, 0);
       const igst = entries.some((e) => /igst/i.test(e.ledger) && (e.debit || e.credit));
+      const localTax = entries.some((e) => /cgst|sgst|utgst/i.test(e.ledger) && (e.debit || e.credit));
+      // Where the voucher says the supply went (marketplace sales go all over India under one party).
+      // Purchases follow the vendor's state, as OrdexaGo works out GST on bills from it.
+      const partyState = stateCode(text(v.STATENAME) || text(v.PARTYSTATENAME));
+      const supplyState = stateCode(text(v.PLACEOFSUPPLY) || text(v.CONSIGNEESTATENAME)) || partyState;
+      const docState = sales ? supplyState : partyState || supplyState;
       const incomeSide = entries.filter((e) => e.ledger !== partyEntry.ledger && !isTax(e.ledger) && !isRound(e.ledger) && ["Income", "Other Income", "Cost Of Goods Sold", "Expense", "Other Expense", "Fixed Asset"].includes(groupOf(e.ledger) || (e.fromInventory ? "Income" : "")));
       let lines = inv.map((it) => {
         const qtyText = text(it.BILLEDQTY) || text(it.ACTUALQTY);
         const qty = Math.abs(num(qtyText)) || 1;
         const amount = Math.abs(num(text(it.AMOUNT)));
-        return { name: text(it.STOCKITEMNAME) || "Item", description: "", hsnSac: text(it.GSTHSNNAME) || text(it.HSNCODE) || "", unit: clean(qtyText.replace(/[-\d.,\s]+/, "")).toLowerCase() || "", quantity: qty, rate: C.round2(amount / qty), discount: 0, taxRate: 0, stock: !!text(it.STOCKITEMNAME) };
+        const ledger = text(arr(it["ACCOUNTINGALLOCATIONS.LIST"])[0]?.LEDGERNAME);
+        return { name: text(it.STOCKITEMNAME) || "Item", description: "", hsnSac: text(it.GSTHSNNAME) || text(it.HSNCODE) || "", unit: clean(qtyText.replace(/[-\d.,\s]+/, "")).toLowerCase() || "", quantity: qty, rate: rate6(amount / qty), discount: 0, taxRate: 0, stock: !!text(it.STOCKITEMNAME), ...(ledger ? { ledger } : {}) };
       });
       const ledgerLine = (e, amt) => ({ name: e.ledger, description: "", hsnSac: "", unit: "", quantity: 1, rate: C.round2(amt), discount: 0, taxRate: 0, ledger: e.ledger });
       if (!lines.length) lines = incomeSide.map((e) => ledgerLine(e, e.debit + e.credit));
@@ -230,9 +306,9 @@ function normalise(xml, known = {}) {
           lines.push(ledgerLine(e, amt));
           e.asLine = true;
         }
-      const taxable = lines.reduce((s, l) => s + l.quantity * l.rate, 0);
-      const rate = taxable ? C.snapRate((tax / taxable) * 100) : 0;
-      lines.forEach((l) => (l.taxRate = rate));
+      const taxes = entries.filter((e) => e.ledger !== partyEntry.ledger && isTax(e.ledger) && (e.debit || e.credit)).map((e) => ({ ledger: e.ledger, amount: Math.abs(e.debit - e.credit) }));
+      const rates = lineRates(lines.map((l) => C.round2(l.quantity * l.rate)), taxes);
+      lines.forEach((l, i) => (l.taxRate = rates[i]));
       // Freight, discounts, round-off and anything else become the adjustment, so totals match Tally.
       const other = entries.filter((e) => e.ledger !== partyEntry.ledger && !isTax(e.ledger) && !incomeSide.includes(e) && !e.fromInventory && !e.asLine && (e.debit || e.credit));
       const otherSigned = other.reduce((s, e) => s + (sales ? e.credit - e.debit : e.debit - e.credit), 0);
@@ -240,18 +316,22 @@ function normalise(xml, known = {}) {
       const adjLedgers = [...new Set(other.filter((e) => !isRound(e.ledger)).map((e) => e.ledger))];
       const roundOff = other.filter((e) => isRound(e.ledger)).reduce((s, e) => s + Math.abs(e.debit - e.credit), 0);
       const adjustmentLedger = !sales && adjLedgers.length === 1 && roundOff < 1 ? adjLedgers[0] : "";
+      const roundSigned = other.filter((e) => isRound(e.ledger)).reduce((t, e) => t + (sales ? e.credit - e.debit : e.debit - e.credit), 0);
       out[kind].push({
         number,
         date: d,
         dueDate: null,
         party: partyEntry.ledger,
         status: sales ? "sent" : "open",
-        placeOfSupply: "",
+        placeOfSupply: docState,
+        partyState,
         interState: igst,
+        localTax,
         lines,
         shippingCharge: 0,
         adjustment: C.round2(otherSigned),
         adjustmentLedger,
+        adjustmentRoundOff: adjustmentLedger ? C.round2(roundSigned) : 0,
         total: C.round2(total),
         notes: narration,
         linked: (partyEntry.bills.find((b) => /agst/i.test(b.type)) || {}).name || "",
@@ -288,4 +368,4 @@ function normalise(xml, known = {}) {
   return { records: out, ledgerGroup: Object.fromEntries(ledgerGroup), warnings };
 }
 
-module.exports = { isTally, normalise };
+module.exports = { isTally, normalise, lineRates };

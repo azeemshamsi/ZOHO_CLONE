@@ -100,10 +100,12 @@ async function commit(ctx, data, opts, progress) {
   await refreshAccounts();
   const accounts = await chartOfAccounts(ctx.org);
   const groupOfCode = (code) => accounts.find((a) => a.code === code)?.group || "";
-  const lookupAccount = (name) => {
+  // `exact`: only the same name (or a built-in account's usual names / a GST ledger), so two Tally
+  // ledgers that differ only by a bracketed suffix ("… (Un Reg.)") stay separate accounts.
+  const lookupAccount = (name, { exact = false } = {}) => {
     const n = clean(name).toLowerCase();
     if (!n) return null;
-    return accByName.get(n) || taxCode(n) || accByName.get(n.replace(/\s*\(.*\)$/, "")) || null;
+    return accByName.get(n) || taxCode(n) || (exact ? null : accByName.get(n.replace(/\s*\(.*\)$/, ""))) || null;
   };
 
   // The account a purchase line's ledger posts to; ledgers not in OrdexaGo yet become Expense accounts.
@@ -120,7 +122,7 @@ async function commit(ctx, data, opts, progress) {
   for (const a of data.records.accounts || []) {
     progress();
     try {
-      if (lookupAccount(a.name)) {
+      if (lookupAccount(a.name, { exact: true })) {
         R_("accounts").skipped++;
         continue;
       }
@@ -326,6 +328,7 @@ async function commit(ctx, data, opts, progress) {
     return it;
   };
 
+  const incomeGroup = new Map((await chartOfAccounts(ctx.org)).map((a) => [a.code, a.group]));
   const docTypes = [
     ["invoices", "customer", Invoice, "invoices", "invoiceNumber"],
     ["bills", "vendor", Bill, "bills", "billNumber"],
@@ -351,14 +354,22 @@ async function commit(ctx, data, opts, progress) {
           R_(type).skipped++;
           continue;
         }
-        const pos = d.placeOfSupply || p.placeOfSupply || org.state;
+        let pos = d.placeOfSupply || p.placeOfSupply || org.state;
+        // The source's GST ledgers decide: IGST only → another state; CGST/SGST only → your state.
+        if (d.localTax && !d.interState && pos !== org.state) pos = org.state;
+        if (d.interState && !d.localTax && pos === org.state) {
+          const other = [d.partyState, p.placeOfSupply].find((x) => x && x !== org.state);
+          if (other) pos = other;
+        }
         // Make OrdexaGo's total match the source: put any difference in Adjustment.
         let adjustment = round2(d.adjustment || 0);
+        let roundOff = round2(d.adjustmentRoundOff || 0);
         if (d.total) {
           const t = computeTotals({ lineItems: d.lines, orgState: org.state, placeOfSupply: pos, shippingCharge: d.shippingCharge || 0, adjustment });
           const diff = round2(d.total - t.total);
           if (diff) {
             adjustment = round2(adjustment + diff);
+            if (d.adjustmentLedger && Math.abs(diff) < 1) roundOff = round2(roundOff + diff);
             if (Math.abs(diff) > 1) warnings.push(`${label}: total differs from the source by ₹${diff} (mixed GST rates or charges); the difference is in Adjustment`);
           }
         }
@@ -374,6 +385,11 @@ async function commit(ctx, data, opts, progress) {
             for (const { stock, ledger, ...l } of d.lines) {
               const line = { ...l, item: stock && l.name ? String((await itemFor(l, purchase ? "purchase" : "sale"))._id) : null };
               if (purchase && ledger && !stock) line.account = await expenseAccount(ledger);
+              // Sales lines keep their own sales ledger (Tally "OutState Sales 5%"…), so income shows per ledger as in Tally.
+              if (!purchase && ledger) {
+                const code = lookupAccount(ledger);
+                if (code && code !== "sales" && ["Income", "Other Income"].includes(incomeGroup.get(code))) line.account = code;
+              }
               out.push(line);
             }
             return out;
@@ -395,7 +411,7 @@ async function commit(ctx, data, opts, progress) {
           }
         }
         const doc = await call(R(routeName), "POST", "/", ctx, body);
-        await M.updateOne({ _id: doc._id }, { importRef: key });
+        await M.updateOne({ _id: doc._id }, { importRef: key, ...(body.adjustmentAccount && roundOff ? { adjustmentRoundOff: roundOff } : {}) });
         R_(type).created++;
       } catch (e) {
         fail(type, label, e);
@@ -458,7 +474,7 @@ async function commit(ctx, data, opts, progress) {
         const body = { [kind]: String(party_._id), date: iso(p.date), amount: p.amount, mode: p.mode || "bank_transfer", reference: (p.reference || p.number || "").slice(0, 100), bankAccount, allocations };
         if (p.exchangeRate && party_.currency && party_.currency !== "INR") body.exchangeRate = p.exchangeRate;
         const doc = await call(R(routeName), "POST", "/", ctx, body);
-        await M.updateOne({ _id: doc._id }, { importRef: key });
+        await M.updateOne({ _id: doc._id }, { importRef: key, ...(body.adjustmentAccount && roundOff ? { adjustmentRoundOff: roundOff } : {}) });
         R_(type).created++;
       } catch (e) {
         fail(type, label, e);
