@@ -192,6 +192,7 @@ export function Import() {
           </div>
         </div>
       )}
+      {!preview && !job && <UndoImport />}
 
       {preview && !job && (
         <div className="card" style={{ marginTop: 18 }}>
@@ -327,5 +328,98 @@ export function Import() {
         </div>
       )}
     </>
+  );
+}
+
+// Remove transactions brought in by an earlier import (e.g. to import the same vouchers again, correctly).
+function UndoImport() {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ source: "tally", from: "", to: "" });
+  const [counts, setCounts] = useState(null);
+  const [job, setJob] = useState(null);
+  const check = async () => {
+    setCounts(null);
+    try {
+      const { data } = await api.get("/import/undo", { params: f });
+      setCounts(data.counts);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  useEffect(() => {
+    if (open) check();
+  }, [open, f.source, f.from, f.to]);
+  const run = async () => {
+    const n = counts.reduce((s, c) => s + c.count, 0);
+    if (!window.confirm(`Delete ${n} imported transaction(s)? Customers, vendors, accounts and opening balances stay. This can't be undone.`)) return;
+    try {
+      const { data } = await api.post("/import/undo", f);
+      setJob({ status: "running", done: 0, total: data.total });
+      const poll = async () => {
+        const { data: j } = await api.get(`/import/jobs/${data.jobId}`);
+        setJob(j);
+        if (j.status === "running") setTimeout(poll, 1500);
+        else check();
+      };
+      poll();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  if (!open)
+    return (
+      <p className="muted small" style={{ marginTop: 14 }}>
+        Imported transactions the wrong way?{" "}
+        <button className="link-btn small" onClick={() => setOpen(true)}>
+          Undo an import
+        </button>
+      </p>
+    );
+  const total = (counts || []).reduce((s, c) => s + c.count, 0);
+  return (
+    <div className="card" style={{ marginTop: 18 }}>
+      <h3 className="card-title pad">Undo an import</h3>
+      <p className="muted small">
+        Deletes the invoices, bills, credit/debit notes, payments, expenses and journals that an import created. Customers, vendors, the chart of accounts and opening balances are kept, so you can then import the
+        transactions again.
+      </p>
+      <div className="row-3">
+        <Field label="Imported from">
+          <select value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })}>
+            <option value="tally">Tally</option>
+            <option value="zoho">Zoho Books</option>
+            <option value="sheet">Spreadsheet / CSV</option>
+          </select>
+        </Field>
+        <Field label="Transactions dated from" hint="Leave empty for all">
+          <input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} />
+        </Field>
+        <Field label="to">
+          <input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} />
+        </Field>
+      </div>
+      {job?.status === "running" ? (
+        <p>
+          Deleting… {job.done} of {job.total}
+        </p>
+      ) : job?.status === "done" ? (
+        <div className="alert alert-success">
+          {job.results.map((r) => `${r.label}: ${r.deleted} deleted${r.failed.length ? `, ${r.failed.length} couldn't be (${[...new Set(r.failed)].slice(0, 2).join("; ")})` : ""}`).join(" · ")}
+        </div>
+      ) : null}
+      {counts && (
+        <p className="small">
+          {total ? `Found: ${counts.map((c) => `${c.count} ${c.label.toLowerCase()}`).join(", ")}.` : "Nothing imported from there in these dates."}
+        </p>
+      )}
+      <div className="row-actions">
+        <button className="btn btn-danger" disabled={!total || job?.status === "running"} onClick={run}>
+          Delete {total || ""} imported transactions
+        </button>
+        <button className="btn" onClick={() => setOpen(false)}>
+          Close
+        </button>
+      </div>
+    </div>
   );
 }

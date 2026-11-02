@@ -34,7 +34,7 @@ function isTally(xml) {
   return collect(xml, "TALLYMESSAGE").length > 0 || collect(xml, "VOUCHER").length > 0 || collect(xml, "LEDGER").length > 0;
 }
 
-function normalise(xml) {
+function normalise(xml, known = {}) {
   const warnings = [];
   const groups = new Map(); // name(lower) → parent(lower)
   for (const g of collect(xml, "GROUP")) {
@@ -91,10 +91,14 @@ function normalise(xml) {
     }
   }
 
+  // Ledgers already in OrdexaGo (e.g. masters imported earlier) count when this file has no masters.
+  for (const [name, g] of Object.entries(known.ledgers || {})) if (!ledgerGroup.has(name)) ledgerGroup.set(name, g);
   const groupOf = (ledger) => ledgerGroup.get(clean(ledger).toLowerCase());
   const isTax = (ledger) => /\b(c|s|i|ut)gst\b|cgst|sgst|igst|utgst|cess/i.test(ledger);
   const isRound = (ledger) => /round|rounding/i.test(ledger);
 
+  const guessed = new Set();
+  const stockOnly = [];
   for (const v of collect(xml, "VOUCHER")) {
     if (/yes/i.test(text(v.ISCANCELLED)) || /yes/i.test(text(v.ISOPTIONAL)) || /yes/i.test(text(v.ISDELETED))) continue;
     const vtype = (text(v.VOUCHERTYPENAME) || text(v["@_VCHTYPE"])).toLowerCase();
@@ -107,14 +111,36 @@ function normalise(xml) {
     });
     const inv = [...arr(v["ALLINVENTORYENTRIES.LIST"]), ...arr(v["INVENTORYENTRIES.LIST"])];
     // Inventory entries' accounting allocations (sales/purchase ledgers) are part of the entries.
+    // Several stock lines usually share one sales/purchase ledger: add their amounts together.
+    const alloc = new Map();
     for (const it of inv)
       for (const a of arr(it["ACCOUNTINGALLOCATIONS.LIST"])) {
-        const amt = num(text(a.AMOUNT));
-        if (!entries.some((e) => e.ledger === text(a.LEDGERNAME))) entries.push({ ledger: text(a.LEDGERNAME), debit: amt < 0 ? -amt : 0, credit: amt > 0 ? amt : 0, bills: [], fromInventory: true });
+        const name = text(a.LEDGERNAME);
+        if (!name || entries.some((e) => e.ledger === name && !e.fromInventory)) continue;
+        alloc.set(name, (alloc.get(name) || 0) + num(text(a.AMOUNT)));
       }
+    for (const [name, amt] of alloc) entries.push({ ledger: name, debit: amt < 0 ? -amt : 0, credit: amt > 0 ? amt : 0, bills: [], fromInventory: true });
     const partyName = text(v.PARTYLEDGERNAME) || text(v.PARTYNAME);
     const partyEntry = entries.find((e) => e.ledger === partyName) || entries.find((e) => ["debtors", "creditors"].includes(groupOf(e.ledger)));
-    const pg = partyEntry ? groupOf(partyEntry.ledger) : null;
+    let pg = partyEntry ? groupOf(partyEntry.ledger) : null;
+    // No masters for the party: on a sales/purchase voucher the party ledger is the customer/vendor,
+    // unless it's a known bank/cash/income/expense ledger (cash sales etc.).
+    if (partyEntry && !pg && partyEntry.ledger === partyName && !isTax(partyName) && !/\bbank\b|\bcash\b|a\/c\b|account|card/i.test(partyName)) {
+      if (["sales", "credit note"].includes(base)) pg = "debtors";
+      else if (["purchase", "debit note"].includes(base)) pg = "creditors";
+      if (pg) {
+        ledgerGroup.set(partyName.toLowerCase(), pg);
+        guessed.add(`${partyName} (${pg === "debtors" ? "customer" : "vendor"})`);
+      }
+    }
+    // Stock-only vouchers (stock journal, manufacturing, delivery/receipt notes) have no accounting effect here.
+    const stockType = /stock|manufactur|delivery note|receipt note|physical|rejection|material/.test(vtype);
+    const drSum = entries.reduce((t, e) => t + e.debit, 0);
+    const crSum = entries.reduce((t, e) => t + e.credit, 0);
+    if (!entries.some((e) => e.debit || e.credit) || (stockType && Math.abs(drSum - crSum) > 0.05)) {
+      stockOnly.push(`${text(v.VOUCHERTYPENAME) || "Voucher"} ${number}`);
+      continue;
+    }
     const narration = text(v.NARRATION);
 
     const asJournal = () =>
@@ -185,6 +211,8 @@ function normalise(xml) {
         });
     } else asJournal();
   }
+  if (stockOnly.length) warnings.push(`${stockOnly.length} stock-only voucher(s) skipped (stock journal / manufacturing — no accounting entries): ${stockOnly.slice(0, 8).join(", ")}${stockOnly.length > 8 ? "…" : ""}. Record stock movements with Inventory Adjustments.`);
+  if (guessed.size) warnings.push(`${guessed.size} party ledger(s) weren't in the file or in OrdexaGo and were taken from the voucher type: ${[...guessed].slice(0, 10).join(", ")}${guessed.size > 10 ? "…" : ""}`);
   return { records: out, ledgerGroup: Object.fromEntries(ledgerGroup), warnings };
 }
 

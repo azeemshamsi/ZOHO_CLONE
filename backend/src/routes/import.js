@@ -97,7 +97,15 @@ router.post(
     if (parsed.format === "xml") {
       if (!tally.isTally(parsed.xml)) throw new HttpError(400, "This XML isn't a Tally export. Export from Tally with Format = XML (Data Interchange), or use Excel/CSV.");
       source = "tally";
-      const out = tally.normalise(parsed.xml);
+      // Ledgers already in OrdexaGo (from an earlier masters import) tell us who is a customer/vendor.
+      const Customer = require("../models/Customer");
+      const Vendor = require("../models/Vendor");
+      const { chartOfAccounts } = require("../utils/ledger");
+      const known = {};
+      for (const a of await chartOfAccounts(req.org)) known[a.name.toLowerCase()] = a.group;
+      for (const c of await Customer.find({ organization: req.org }, { displayName: 1 }).lean()) known[c.displayName.toLowerCase()] = "debtors";
+      for (const v of await Vendor.find({ organization: req.org }, { displayName: 1 }).lean()) known[v.displayName.toLowerCase()] = "creditors";
+      const out = tally.normalise(parsed.xml, { ledgers: known });
       Object.assign(records, out.records);
       ledgerGroup = out.ledgerGroup;
       warnings.push(...out.warnings);
@@ -191,6 +199,94 @@ router.get("/templates/:type", (req, res) => {
   res.setHeader("Content-Disposition", `attachment; filename="ordexago-${req.params.type}-template.csv"`);
   res.send("﻿" + t.join("\r\n") + "\r\n");
 });
+
+/**
+ * Undo an import of transactions: deletes the invoices, bills, notes, payments, expenses and journals
+ * that came from a given source (Tally / Zoho / spreadsheet) in a date range. Customers, vendors,
+ * accounts and opening balances stay. Deletion goes through the normal routes, so stock and
+ * balances are reversed exactly as if each were deleted by hand.
+ *   GET  /undo?source=tally&from=&to=   → what would be deleted
+ *   POST /undo {source, from, to}       → delete
+ */
+const UNDO = [
+  // payments first so invoices/bills are free to delete
+  ["payments", "Payment", "/payments", "paymentNumber"],
+  ["vendorPayments", "VendorPayment", "/vendor-payments", "paymentNumber"],
+  ["creditNotes", "CreditNote", "/credit-notes", "number"],
+  ["vendorCredits", "VendorCredit", "/vendor-credits", "number"],
+  ["expenses", "Expense", "/expenses", "reference"],
+  ["journals", "Journal", "/journals", "number"],
+  ["invoices", "Invoice", "/invoices", "invoiceNumber"],
+  ["bills", "Bill", "/bills", "billNumber"],
+];
+const ROUTER = { payments: "payments", vendorPayments: "vendorPayments", creditNotes: "creditNotes", vendorCredits: "vendorCredits", expenses: "expenses", journals: "journals", invoices: "invoices", bills: "bills" };
+const IMPORT_TYPE = { payments: "payments", vendorPayments: "vendorPayments", creditNotes: "creditNotes", vendorCredits: "vendorCredits", expenses: "expense", journals: "journal", invoices: "invoices", bills: "bills" };
+function undoQuery(req, q) {
+  const src = ["tally", "zoho", "sheet"].includes(q.source) ? q.source : null;
+  if (!src) throw new HttpError(400, "Choose where the data came from");
+  const date = {};
+  if (q.from) date.$gte = new Date(`${q.from}T00:00:00Z`);
+  if (q.to) date.$lte = new Date(`${q.to}T23:59:59Z`);
+  return { src, date: Object.keys(date).length ? date : null };
+}
+async function undoTargets(req, q) {
+  const { src, date } = undoQuery(req, q);
+  const out = [];
+  for (const [type, model] of UNDO) {
+    const M = require(`../models/${model}`);
+    const esc = `${src}:${IMPORT_TYPE[type]}:`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const filter = { organization: req.org, importRef: { $regex: `^${esc}` }, opening: { $ne: true }, ...(date ? { date } : {}) };
+    const ids = (await M.find(filter, { _id: 1 }).lean()).map((d) => String(d._id));
+    out.push({ type, label: LABELS[type], ids });
+  }
+  return out;
+}
+
+router.get(
+  "/undo",
+  ah(async (req, res) => {
+    const t = await undoTargets(req, req.query);
+    res.send({ counts: t.filter((x) => x.ids.length).map((x) => ({ type: x.type, label: x.label, count: x.ids.length })) });
+  })
+);
+
+router.post(
+  "/undo",
+  ah(async (req, res) => {
+    const { call } = require("../utils/import/commit");
+    const targets = await undoTargets(req, req.body || {});
+    const total = targets.reduce((n, t) => n + t.ids.length, 0);
+    if (!total) throw new HttpError(400, "Nothing imported from that source in those dates");
+    const ctx = { org: req.org, user: req.user };
+    const jobId = crypto.randomUUID();
+    const job = { kind: "undo", org: String(req.org), at: Date.now(), status: "running", done: 0, total, results: null, warnings: [], error: null };
+    jobs.set(jobId, job);
+    (async () => {
+      const results = [];
+      for (const { type, label, ids } of targets) {
+        if (!ids.length) continue;
+        const r = { type, label, deleted: 0, failed: [] };
+        for (const id of ids) {
+          try {
+            await call(require(`./${ROUTER[type]}`), "DELETE", `/${id}`, ctx);
+            r.deleted++;
+          } catch (e) {
+            r.failed.push(e.message);
+          }
+          job.done++;
+          job.at = Date.now();
+        }
+        results.push(r);
+      }
+      job.results = results;
+      job.status = "done";
+    })().catch((e) => {
+      job.status = "error";
+      job.error = e.message;
+    });
+    res.send({ jobId, total });
+  })
+);
 
 module.exports = router;
 module.exports.LABELS = LABELS;

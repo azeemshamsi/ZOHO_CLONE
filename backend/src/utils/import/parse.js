@@ -70,15 +70,18 @@ function genericXmlSheets(obj) {
  */
 function parseTallyXml(text, parser) {
   const BATCH = 400;
-  if (text.length < 3_000_000) return parser.parse(text);
+  const BATCH_CHARS = 400_000; // vouchers with many stock lines are big: batch by size too
+  if (text.length < 1_500_000) return parser.parse(text);
   const open = /<TALLYMESSAGE\b/g;
   const first = text.search(/<TALLYMESSAGE\b/);
   if (first < 0) return parser.parse(text);
   const messages = [];
   let batch = [];
+  let batchChars = 0;
   let pos = first;
   const flush = () => {
     if (!batch.length) return;
+    batchChars = 0;
     const tree = parser.parse(`<R>${batch.join("")}</R>`);
     const list = tree?.R?.TALLYMESSAGE || [];
     for (const m of Array.isArray(list) ? list : [list]) messages.push(m);
@@ -92,7 +95,8 @@ function parseTallyXml(text, parser) {
     const end = text.indexOf("</TALLYMESSAGE>", start);
     if (end < 0) break;
     batch.push(text.slice(start, end + 15));
-    if (batch.length >= BATCH) flush();
+    batchChars += end + 15 - start;
+    if (batch.length >= BATCH || batchChars >= BATCH_CHARS) flush();
     pos = end + 15;
   }
   flush();
