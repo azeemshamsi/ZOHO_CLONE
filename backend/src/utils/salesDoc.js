@@ -116,7 +116,7 @@ async function prepareDoc(req, data, party = "customer") {
 // The next number without using it up (for showing in the form).
 async function peekNumber(org, key, prefix) {
   const c = await Counter.findOne({ organization: org, key });
-  return `${prefix}${String((c ? c.seq : 0) + 1).padStart(6, "0")}`;
+  return `${prefix}${String((c ? c.seq : 0) + 1).padStart(2, "0")}`;
 }
 
 // Bring an invoice's balance and status in line with payments and credits.

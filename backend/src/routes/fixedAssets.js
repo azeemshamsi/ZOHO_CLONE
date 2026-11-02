@@ -79,7 +79,7 @@ router.post(
   "/",
   ah(async (req, res) => {
     const data = await prepare(req, validate(schema, req.body));
-    const number = await nextNumber(req.org, "fixedAsset", "FA-", 4);
+    const number = await nextNumber(req.org, "fixedAsset", "FA-");
     res.status(201).send(await FixedAsset.create({ ...data, number, organization: req.org }));
   })
 );
