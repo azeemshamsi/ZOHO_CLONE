@@ -247,6 +247,7 @@ Generating directly through the API needs a GST Suvidha Provider (GSP) account; 
 
 Settings → **Import Data** (`/import`, needs the Settings permission) brings over a chart of accounts, customers (debtors), vendors (creditors), opening balances and transactions.
 
+- **Size:** files up to 150 MB. The browser compresses the file before upload (Tally XML shrinks 50–100×), and big Tally XML exports are read in batches.
 - **Formats:** Excel (.xlsx, .xls, .ods, Excel 2003 XML), CSV/TSV (UTF-8 or UTF-16), and XML: Tally's XML (Data Interchange) exports, plus any XML with repeated records.
 - **Zoho Books:** the module exports (Chart of Accounts, Contacts/Vendors, Invoice, Bill, Credit Note, Vendor Credits, Customer Payment, Vendor Payment, Expense, Journal) and the Trial Balance for opening balances. Column names are recognised automatically, and a workbook may hold several sheets.
 - **Tally ERP 9 / TallyPrime:** masters (groups and ledgers, with opening balances and bill-wise outstanding) and Day Book vouchers. Sales and Purchase vouchers become invoices and bills, Credit and Debit Notes become credit notes and vendor credits, Receipts and Payments against parties become payments (settled bill-wise against "Agst Ref", otherwise against the oldest open documents), and everything else becomes a journal. Excel exports of the ledger list or trial balance work too. Cancelled and optional vouchers are skipped.

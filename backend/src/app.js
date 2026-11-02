@@ -14,7 +14,7 @@ const app = express();
 app.disable("x-powered-by");
 app.use(cors());
 app.use("/api/shopify-webhook", express.raw({ type: "*/*", limit: "5mb" }), require("./routes/shopifyWebhook"));
-app.use("/api/import", express.json({ limit: "40mb" }));
+app.use("/api/import", express.json({ limit: "80mb" }));
 app.use(["/api/attachments", "/api/bill-scan", "/api/gst/returns/2b"], express.json({ limit: "15mb" }));
 app.use(express.json({ limit: "1mb" }));
 

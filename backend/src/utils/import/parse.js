@@ -63,6 +63,42 @@ function genericXmlSheets(obj) {
   return rows.length ? [{ name: "Sheet1", rows }] : [];
 }
 
+/**
+ * The XML parser slows down sharply with thousands of sibling records (a 30 MB Tally export took
+ * minutes), so big exports are cut into batches of TALLYMESSAGE blocks, parsed one batch at a time,
+ * and joined back into one tree with the same shape.
+ */
+function parseTallyXml(text, parser) {
+  const BATCH = 400;
+  if (text.length < 3_000_000) return parser.parse(text);
+  const open = /<TALLYMESSAGE\b/g;
+  const first = text.search(/<TALLYMESSAGE\b/);
+  if (first < 0) return parser.parse(text);
+  const messages = [];
+  let batch = [];
+  let pos = first;
+  const flush = () => {
+    if (!batch.length) return;
+    const tree = parser.parse(`<R>${batch.join("")}</R>`);
+    const list = tree?.R?.TALLYMESSAGE || [];
+    for (const m of Array.isArray(list) ? list : [list]) messages.push(m);
+    batch = [];
+  };
+  while (pos >= 0 && pos < text.length) {
+    open.lastIndex = pos;
+    const m = open.exec(text);
+    if (!m) break;
+    const start = m.index;
+    const end = text.indexOf("</TALLYMESSAGE>", start);
+    if (end < 0) break;
+    batch.push(text.slice(start, end + 15));
+    if (batch.length >= BATCH) flush();
+    pos = end + 15;
+  }
+  flush();
+  return { ENVELOPE: { BODY: { IMPORTDATA: { REQUESTDATA: { TALLYMESSAGE: messages } } } } };
+}
+
 function parseFile(fileName, buf) {
   const name = String(fileName || "").toLowerCase();
   const head = decodeText(buf.slice(0, 2000)).trim();
@@ -70,7 +106,7 @@ function parseFile(fileName, buf) {
     // Tally writes control characters as &#4; etc., which aren't valid XML.
     const text = decodeText(buf).replace(/&#(?:[0-8]|1[1-2]|1[4-9]|2[0-9]|3[01]);/g, "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
     const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_", parseTagValue: false, trimValues: true, isArray: (tag) => LISTS.has(tag) });
-    if (/<(ENVELOPE|TALLYMESSAGE|VOUCHER|LEDGER)\b/i.test(text.slice(0, 200000))) return { format: "xml", xml: parser.parse(text) };
+    if (/<(ENVELOPE|TALLYMESSAGE|VOUCHER|LEDGER)\b/i.test(text.slice(0, 200000))) return { format: "xml", xml: parseTallyXml(text, parser) };
     // Excel's "XML Spreadsheet 2003" (Zoho/Tally "Excel XML" exports)
     if (/urn:schemas-microsoft-com:office:spreadsheet|<Workbook\b/i.test(text.slice(0, 5000))) {
       const wb = XLSX.read(text, { type: "string", cellDates: true });

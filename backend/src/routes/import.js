@@ -71,9 +71,16 @@ function sample(type, r) {
 router.post(
   "/preview",
   ah(async (req, res) => {
-    const { fileName, data, type, side } = req.body || {};
+    const { fileName, data, type, side, gzip } = req.body || {};
     if (!fileName || !data) throw new HttpError(400, "Choose a file to import");
-    const buf = Buffer.from(String(data).replace(/^data:.*?;base64,/, ""), "base64");
+    let buf = Buffer.from(String(data).replace(/^data:.*?;base64,/, ""), "base64");
+    if (gzip) {
+      try {
+        buf = require("zlib").gunzipSync(buf, { maxOutputLength: 200 * 1024 * 1024 });
+      } catch (e) {
+        throw new HttpError(400, /maxOutputLength|buffer/i.test(e.message) ? "The file is larger than 200 MB. Split it by date range." : "The upload was damaged — try again");
+      }
+    }
     if (!buf.length) throw new HttpError(400, "The file is empty");
     let parsed;
     try {

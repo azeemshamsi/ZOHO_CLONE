@@ -31,6 +31,15 @@ function readBase64(file) {
   });
 }
 
+// Compress the file in the browser before sending: Tally/Zoho exports (XML, CSV) shrink 10–20×,
+// so big exports upload quickly and stay under the server's request limit.
+async function readForUpload(file) {
+  if (typeof CompressionStream === "undefined") return { data: await readBase64(file), gzip: false };
+  const gz = await new Response(file.stream().pipeThrough(new CompressionStream("gzip"))).blob();
+  return { data: await readBase64(gz), gzip: true };
+}
+const MAX_MB = 150;
+
 function download(type) {
   api.get(`/import/templates/${type}`, { responseType: "blob" }).then((r) => {
     const a = document.createElement("a");
@@ -63,12 +72,12 @@ export function Import() {
 
   const runPreview = async (f = file, t = type) => {
     if (!f) return;
-    if (f.size > 25 * 1024 * 1024) return toast("Files up to 25 MB can be imported. Split bigger exports by date range.", "error");
+    if (f.size > MAX_MB * 1024 * 1024) return toast(`Files up to ${MAX_MB} MB can be imported. Split bigger exports by date range.`, "error");
     setBusy(true);
     setPreview(null);
     try {
-      const data = await readBase64(f);
-      const { data: p } = await api.post("/import/preview", { fileName: f.name, data, type: t || undefined });
+      const { data, gzip } = await readForUpload(f);
+      const { data: p } = await api.post("/import/preview", { fileName: f.name, data, gzip, type: t || undefined }, { timeout: 600000 });
       setPreview(p);
       if (p.hasOpening && !openingDate && p.firstDate) {
         // Default: 1 April of the financial year of the earliest transaction, else the first of this FY.
@@ -142,7 +151,7 @@ export function Import() {
             >
               <Icon name="doc" size={28} />
               <div>{file ? <strong>{file.name}</strong> : "Drop a file here, or click to browse"}</div>
-              <div className="muted small">Excel (.xlsx, .xls), CSV, or XML — up to 25 MB</div>
+              <div className="muted small">Excel (.xlsx, .xls), CSV, or XML — up to 150 MB</div>
               <input ref={input} type="file" hidden accept=".xlsx,.xls,.xlsm,.ods,.csv,.txt,.tsv,.xml" onChange={(e) => pick(e.target.files[0])} />
             </div>
             <Field label="What's in this file?" hint="Leave on automatic — OrdexaGo reads the column names. Change it only if a sheet isn't recognised.">
