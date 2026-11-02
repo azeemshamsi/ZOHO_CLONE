@@ -98,6 +98,7 @@ function normalise(xml, known = {}) {
   const isRound = (ledger) => /round|rounding/i.test(ledger);
 
   const guessed = new Set();
+  const twoWay = new Set();
   const stockOnly = [];
   for (const v of collect(xml, "VOUCHER")) {
     if (/yes/i.test(text(v.ISCANCELLED)) || /yes/i.test(text(v.ISOPTIONAL)) || /yes/i.test(text(v.ISDELETED))) continue;
@@ -170,7 +171,10 @@ function normalise(xml, known = {}) {
       });
 
     const asDoc = (kind, partyGroup) => {
-      if (!partyEntry || pg !== partyGroup) return asJournal();
+      // A party can be both (sister concern / branch kept under Sundry Creditors but also sold to):
+      // a sales voucher still makes an invoice; the importer creates the matching customer if needed.
+      if (!partyEntry || !["debtors", "creditors"].includes(pg)) return asJournal();
+      if (pg !== partyGroup) twoWay.add(`${partyEntry.ledger} (${partyGroup === "debtors" ? "also a customer" : "also a vendor"})`);
       const sales = kind === "invoices" || kind === "creditNotes";
       const total = partyEntry.debit || partyEntry.credit;
       const tax = entries.filter((e) => e.ledger !== partyEntry.ledger && isTax(e.ledger)).reduce((s, e) => s + e.debit + e.credit, 0);
@@ -180,7 +184,7 @@ function normalise(xml, known = {}) {
         const qtyText = text(it.BILLEDQTY) || text(it.ACTUALQTY);
         const qty = Math.abs(num(qtyText)) || 1;
         const amount = Math.abs(num(text(it.AMOUNT)));
-        return { name: text(it.STOCKITEMNAME) || "Item", description: "", hsnSac: text(it.GSTHSNNAME) || text(it.HSNCODE) || "", unit: clean(qtyText.replace(/[-\d.,\s]+/, "")) || "", quantity: qty, rate: C.round2(amount / qty), discount: 0, taxRate: 0 };
+        return { name: text(it.STOCKITEMNAME) || "Item", description: "", hsnSac: text(it.GSTHSNNAME) || text(it.HSNCODE) || "", unit: clean(qtyText.replace(/[-\d.,\s]+/, "")).toLowerCase() || "", quantity: qty, rate: C.round2(amount / qty), discount: 0, taxRate: 0, stock: !!text(it.STOCKITEMNAME) };
       });
       if (!lines.length) lines = incomeSide.map((e) => ({ name: e.ledger, description: "", hsnSac: "", unit: "", quantity: 1, rate: C.round2(e.debit + e.credit), discount: 0, taxRate: 0 }));
       const taxable = lines.reduce((s, l) => s + l.quantity * l.rate, 0);
@@ -229,6 +233,7 @@ function normalise(xml, known = {}) {
     } else asJournal();
   }
   if (stockOnly.length) warnings.push(`${stockOnly.length} voucher(s) with neither accounting entries nor stock lines were skipped: ${stockOnly.slice(0, 8).join(", ")}${stockOnly.length > 8 ? "…" : ""}`);
+  if (twoWay.size) warnings.push(`${twoWay.size} party ledger(s) are used on both sides (sold to and bought from), so they get both a customer and a vendor record: ${[...twoWay].slice(0, 8).join(", ")}`);
   if (guessed.size) warnings.push(`${guessed.size} party ledger(s) weren't in the file or in OrdexaGo and were taken from the voucher type: ${[...guessed].slice(0, 10).join(", ")}${guessed.size > 10 ? "…" : ""}`);
   return { records: out, ledgerGroup: Object.fromEntries(ledgerGroup), warnings };
 }

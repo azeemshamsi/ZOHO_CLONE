@@ -279,6 +279,34 @@ async function commit(ctx, data, opts, progress) {
     }
 
   /* ---------- 4. Invoices, bills, credit notes, vendor credits ---------- */
+  /* ---------- Stock items (Tally stock lines are linked to items, so stock moves) ---------- */
+  const Item = require("../../models/Item");
+  const items = new Map((await Item.find({ organization: ctx.org }).lean()).map((i) => [i.name.trim().toLowerCase(), i]));
+  const itemFor = async (l, side) => {
+    const k = clean(l.name).toLowerCase();
+    let it = items.get(k);
+    if (!it) {
+      it = (
+        await Item.create({
+          organization: ctx.org,
+          type: "goods",
+          name: clean(l.name),
+          unit: l.unit || "pcs",
+          hsnSac: l.hsnSac || "",
+          ...(side === "sale" ? { rate: l.rate || 0 } : { purchaseRate: l.rate || 0 }),
+          taxRate: l.taxRate || 0,
+          trackInventory: true,
+        })
+      ).toObject();
+      items.set(k, it);
+      warnings.push(`Item "${l.name}" wasn't in OrdexaGo, so it was created (check its HSN and GST rate)`);
+    } else if (!it.trackInventory) {
+      await Item.updateOne({ _id: it._id }, { trackInventory: true });
+      it.trackInventory = true;
+    }
+    return it;
+  };
+
   const docTypes = [
     ["invoices", "customer", Invoice, "invoices", "invoiceNumber"],
     ["bills", "vendor", Bill, "bills", "billNumber"],
@@ -321,7 +349,11 @@ async function commit(ctx, data, opts, progress) {
           [kind]: String(p._id),
           date: iso(d.date),
           placeOfSupply: pos,
-          lineItems: d.lines.map((l) => ({ ...l, item: null })),
+          lineItems: await (async () => {
+            const out = [];
+            for (const { stock, ...l } of d.lines) out.push({ ...l, item: stock && l.name ? String((await itemFor(l, type === "invoices" || type === "creditNotes" ? "sale" : "purchase"))._id) : null });
+            return out;
+          })(),
           shippingCharge: d.shippingCharge || 0,
           adjustment,
           customerNotes: d.notes || "",
@@ -485,22 +517,7 @@ async function commit(ctx, data, opts, progress) {
 
   /* ---------- 8. Stock journals / manufacturing → inventory adjustments ---------- */
   if ((data.records.stockAdjustments || []).length) {
-    const Item = require("../../models/Item");
     const InventoryAdjustment = require("../../models/InventoryAdjustment");
-    const items = new Map((await Item.find({ organization: ctx.org }).lean()).map((i) => [i.name.trim().toLowerCase(), i]));
-    const itemFor = async (l) => {
-      const k = clean(l.name).toLowerCase();
-      let it = items.get(k);
-      if (!it) {
-        it = (await Item.create({ organization: ctx.org, type: "goods", name: clean(l.name), unit: l.unit || "pcs", purchaseRate: l.rate || 0, trackInventory: true, taxRate: 0 })).toObject();
-        items.set(k, it);
-        warnings.push(`Item "${l.name}" wasn't in OrdexaGo, so it was created (check its HSN and GST rate)`);
-      } else if (!it.trackInventory) {
-        await Item.updateOne({ _id: it._id }, { trackInventory: true });
-        it.trackInventory = true;
-      }
-      return it;
-    };
     for (const a of data.records.stockAdjustments) {
       progress();
       const label = `${a.number} ${iso(a.date)}`;
