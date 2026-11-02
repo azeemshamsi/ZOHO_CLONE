@@ -132,6 +132,7 @@ function normalise(xml, known = {}) {
   };
   const stockLedgers = [];
   const billMismatch = [];
+  const billPartial = [];
 
   const out = { accounts: [], customers: [], vendors: [], invoices: [], bills: [], creditNotes: [], vendorCredits: [], payments: [], vendorPayments: [], journals: [], stockAdjustments: [] };
   const ledgerGroup = new Map(); // ledger name → OrdexaGo group / "debtors" / "creditors"
@@ -151,11 +152,19 @@ function normalise(xml, known = {}) {
       const state = stateCode(text(mail.STATE) || text(l.LEDSTATENAME) || text(l.STATENAME) || text(reg.STATE), g);
       let bills = arr(l["BILLALLOCATIONS.LIST"]).map((b) => ({ number: text(b.NAME), date: date(text(b.BILLDATE)), amount: num(text(b.OPENINGBALANCE)) })).filter((b) => b.amount);
       // Tally's bill-wise details can be stale (bills never knocked off, a wrong amount). The ledger's
-      // opening balance is what the trial balance uses, so when the bills don't add up to it, use it alone.
+      // opening balance is what the trial balance uses. When the bills cover only part of it, keep them and
+      // add the rest as an opening amount without a bill; when they don't fit at all, use the ledger alone.
       const billSum = C.round2(bills.reduce((s, b) => s + b.amount, 0));
-      if (bills.length && Math.abs(billSum - ob) > 1) {
-        billMismatch.push(`${name} (bills ₹${Math.abs(billSum).toLocaleString("en-IN")}, ledger ₹${Math.abs(ob).toLocaleString("en-IN")})`);
-        bills = [];
+      const rest = C.round2(ob - billSum);
+      if (bills.length && Math.abs(rest) > 1) {
+        const partOf = bills.every((b) => Math.sign(b.amount) === Math.sign(ob)) && Math.abs(billSum) < Math.abs(ob);
+        if (partOf) {
+          bills.push({ number: "", date: null, amount: rest });
+          billPartial.push(`${name} (₹${Math.abs(rest).toLocaleString("en-IN")})`);
+        } else {
+          billMismatch.push(`${name} (bills ₹${Math.abs(billSum).toLocaleString("en-IN")}, ledger ₹${Math.abs(ob).toLocaleString("en-IN")})`);
+          bills = [];
+        }
       }
       out[kind === "customer" ? "customers" : "vendors"].push({
         kind,
@@ -198,6 +207,9 @@ function normalise(xml, known = {}) {
     const base = /credit note/.test(vtype) ? "credit note" : /debit note/.test(vtype) ? "debit note" : /sales|invoice/.test(vtype) ? "sales" : /purchase/.test(vtype) ? "purchase" : /receipt/.test(vtype) ? "receipt" : /payment/.test(vtype) ? "payment" : /contra/.test(vtype) ? "contra" : "journal";
     const d = date(text(v.DATE));
     const number = text(v.VOUCHERNUMBER) || text(v.REFERENCE) || `${vtype}-${text(v.DATE)}-${text(v["@_REMOTEID"]).slice(-6)}`;
+    // Tally vouchers can have no number at all (manual numbering left blank): OrdexaGo numbers those
+    // invoices/credit notes from its own series; `number` stays as the import key.
+    const autoNumber = !text(v.VOUCHERNUMBER) && !text(v.REFERENCE);
     const entries = [...arr(v["ALLLEDGERENTRIES.LIST"]), ...arr(v["LEDGERENTRIES.LIST"])].map((e) => {
       const amt = num(text(e.AMOUNT));
       return { ledger: text(e.LEDGERNAME), debit: amt < 0 ? -amt : 0, credit: amt > 0 ? amt : 0, bills: arr(e["BILLALLOCATIONS.LIST"]).map((b) => ({ name: text(b.NAME), type: text(b.BILLTYPE), amount: Math.abs(num(text(b.AMOUNT))) })) };
@@ -332,6 +344,7 @@ function normalise(xml, known = {}) {
         adjustment: C.round2(otherSigned),
         adjustmentLedger,
         adjustmentRoundOff: adjustmentLedger ? C.round2(roundSigned) : 0,
+        autoNumber,
         total: C.round2(total),
         notes: narration,
         linked: (partyEntry.bills.find((b) => /agst/i.test(b.type)) || {}).name || "",
@@ -360,6 +373,7 @@ function normalise(xml, known = {}) {
         });
     } else asJournal();
   }
+  if (billPartial.length) warnings.push(`${billPartial.length} party ledger(s) have bill-wise opening details in Tally covering only part of the opening balance; the bills were kept and the rest added as an opening amount without a bill: ${billPartial.slice(0, 10).join(", ")}${billPartial.length > 10 ? "…" : ""}`);
   if (billMismatch.length) warnings.push(`${billMismatch.length} party ledger(s) have bill-wise opening details in Tally that don't add up to the ledger's opening balance, so the ledger balance was used as one opening amount: ${billMismatch.slice(0, 10).join(", ")}${billMismatch.length > 10 ? "…" : ""}`);
   if (stockLedgers.length) warnings.push(`Opening balance on stock ledger(s) ${stockLedgers.join(", ")} was left out: stock value comes from your items' opening stock (import Tally's Stock Summary), so it isn't counted twice`);
   if (stockOnly.length) warnings.push(`${stockOnly.length} voucher(s) with neither accounting entries nor stock lines were skipped: ${stockOnly.slice(0, 8).join(", ")}${stockOnly.length > 8 ? "…" : ""}`);

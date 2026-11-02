@@ -350,7 +350,8 @@ async function commit(ctx, data, opts, progress) {
         if (!d.lines.length) throw new Error("No line items");
         const p = await party(kind, d.party, type, label);
         const numQ = { organization: ctx.org, [numField]: d.number, ...(type === "bills" ? { vendor: p._id } : {}) };
-        if ((await M.exists({ organization: ctx.org, importRef: key })) || (d.number && (await M.exists(numQ)))) {
+        const ownNumber = d.autoNumber && (type === "invoices" || type === "creditNotes");
+        if ((await M.exists({ organization: ctx.org, importRef: key })) || (d.number && !ownNumber && (await M.exists(numQ)))) {
           R_(type).skipped++;
           continue;
         }
@@ -401,10 +402,10 @@ async function commit(ctx, data, opts, progress) {
           terms: d.terms || "",
         };
         if (d.exchangeRate && p.currency && p.currency !== "INR") body.exchangeRate = d.exchangeRate;
-        if (type === "invoices") Object.assign(body, { invoiceNumber: clean(d.number).slice(0, 40), dueDate: due < body.date ? body.date : due, status: d.status === "draft" ? "draft" : "sent" });
+        if (type === "invoices") Object.assign(body, { invoiceNumber: ownNumber ? "" : clean(d.number).slice(0, 40), dueDate: due < body.date ? body.date : due, status: d.status === "draft" ? "draft" : "sent" });
         if (type === "bills") Object.assign(body, { billNumber: clean(d.number) || `IMP-${iso(d.date)}`, dueDate: due < body.date ? body.date : due, status: d.status === "draft" ? "draft" : "open" });
         if (type === "creditNotes" || type === "vendorCredits") {
-          Object.assign(body, { number: clean(d.number).slice(0, 40), status: d.status === "draft" ? "draft" : "open", reason: "Imported" });
+          Object.assign(body, { number: ownNumber ? "" : clean(d.number).slice(0, 40), status: d.status === "draft" ? "draft" : "open", reason: "Imported" });
           if (d.linked) {
             const L = type === "creditNotes" ? await Invoice.findOne({ organization: ctx.org, invoiceNumber: d.linked, customer: p._id }) : await Bill.findOne({ organization: ctx.org, billNumber: d.linked, vendor: p._id });
             if (L) body[type === "creditNotes" ? "invoice" : "bill"] = String(L._id);
