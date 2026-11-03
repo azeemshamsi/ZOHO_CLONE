@@ -1,8 +1,10 @@
 /**
  * Returns: "return created" (customer return opened) and "return closed" (parcel back in the warehouse,
  * scanned by AWB or order number). Both are mirrored in Shopify when the order was fulfilled there.
- * Closing a return on an invoiced order makes a credit note, which puts the stock back in the books;
- * an order that was never invoiced just stops reserving stock.
+ * Closing a return on an invoiced order makes a credit note. The returned stock comes back into OrdexaGo
+ * only when inventory sync to Shopify is on and the item's own Shopify sync is on; otherwise the credit
+ * note carries the amount but no stock. Returns never restock Shopify directly: with sync on, Shopify
+ * simply gets OrdexaGo's new quantity. An order that was never invoiced just stops reserving stock.
  */
 const ShopifyOrder = require("../../models/ShopifyOrder");
 const Invoice = require("../../models/Invoice");
@@ -65,9 +67,15 @@ async function markReturnCreated(ctx, order, store, note = "") {
   return { warning };
 }
 
-async function creditNoteFor(ctx, order) {
+async function creditNoteFor(ctx, order, store) {
   const inv = await Invoice.findById(order.invoice).lean();
   if (!inv || ["void", "draft"].includes(inv.status)) return null;
+  // Items whose stock comes back: store-wide inventory sync on and the item's own Shopify sync on.
+  const Item = require("../../models/Item");
+  const ids = inv.lineItems.filter((l) => l.item).map((l) => l.item);
+  const restock = new Set(
+    store?.inventorySync && ids.length ? (await Item.find({ _id: { $in: ids }, shopifySync: true }, { _id: 1 }).lean()).map((i) => String(i._id)) : []
+  );
   const { call } = require("../import/commit");
   const iso = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
   const cn = await call(require("../../routes/creditNotes"), "POST", "/", ctx, {
@@ -80,7 +88,7 @@ async function creditNoteFor(ctx, order) {
     ...(inv.warehouse ? { warehouse: String(inv.warehouse) } : {}),
     ...(inv.branch ? { branch: String(inv.branch) } : {}),
     adjustment: inv.adjustment || 0,
-    lineItems: inv.lineItems.map((l) => ({ item: l.item ? String(l.item) : null, name: l.name, description: l.description || "", hsnSac: l.hsnSac || "", unit: l.unit || "", quantity: l.quantity, rate: l.rate, discount: l.discount || 0, taxRate: l.taxRate || 0 })),
+    lineItems: inv.lineItems.map((l) => ({ item: l.item && restock.has(String(l.item)) ? String(l.item) : null, name: l.name, description: l.description || "", hsnSac: l.hsnSac || "", unit: l.unit || "", quantity: l.quantity, rate: l.rate, discount: l.discount || 0, taxRate: l.taxRate || 0 })),
     customerNotes: `Return of Shopify order ${order.name}${order.shipment?.awb ? ` (AWB ${order.shipment.awb})` : ""}`,
   });
   return cn;
@@ -99,10 +107,11 @@ async function finishReturn(ctx, order, store, was) {
     }
   if (order.invoice && store?.returnCreditNote !== false && !order.returnCreditNote) {
     try {
-      const cn = await creditNoteFor({ ...ctx, org: order.invoiceOrg || ctx.org }, order);
+      const cn = await creditNoteFor({ ...ctx, org: order.invoiceOrg || ctx.org }, order, store);
       if (cn) {
         order.returnCreditNote = cn._id;
         out.creditNote = cn.number;
+        if (!cn.lineItems?.some((l) => l.item)) out.warning = [out.warning, "No stock put back (inventory sync or the item's Shopify sync is off)"].filter(Boolean).join(" · ");
       }
     } catch (e) {
       out.error = `Credit note not made: ${e.message}`;

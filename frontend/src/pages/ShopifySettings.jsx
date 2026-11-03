@@ -288,7 +288,7 @@ function InventorySync({ store, onSaved }) {
           </Field>
         </div>
         <label className="check">
-          <input type="checkbox" checked={f.returnCreditNote} onChange={(e) => setF({ ...f, returnCreditNote: e.target.checked })} /> When a return is closed on an invoiced order, create a credit note (puts the stock back)
+          <input type="checkbox" checked={f.returnCreditNote} onChange={(e) => setF({ ...f, returnCreditNote: e.target.checked })} /> When a return is closed on an invoiced order, create a credit note (stock comes back into OrdexaGo only for items with Shopify sync on, while inventory sync is on)
         </label>
         {ps?.at && (
           <p className="muted small">
