@@ -244,6 +244,9 @@ function normalise(xml, known = {}) {
     return null;
   };
   const seenItems = new Set();
+  // A Day Book export carries the stock items its vouchers use, with their opening stock: only an inventory
+  // masters file (no vouchers) sets opening stock, or the items missing from it would lose theirs.
+  const hasVouchers = collect(xml, "VOUCHER").length > 0;
   for (const it of collect(xml, "STOCKITEM")) {
     const name = nameOf(it);
     if (!name) continue;
@@ -254,7 +257,7 @@ function normalise(xml, known = {}) {
     const unit = clean(text(it.BASEUNITS)).toLowerCase();
     const rate = gstOf(it) ?? fromGroup(parent, "gst");
     // Opening stock on the item master: quantity " 2020 PCS", value (Dr negative), rate "250.00/PCS".
-    const openingQty = Math.abs(num(text(it.OPENINGBALANCE)));
+    const openingQty = hasVouchers ? 0 : Math.abs(num(text(it.OPENINGBALANCE)));
     const openingValue = Math.abs(num(text(it.OPENINGVALUE)));
     out.items.push({
       name,
