@@ -28,6 +28,7 @@ const organizationSchema = new mongoose.Schema(
     creditNotePrefix: { type: String, default: "CN-" },
     vendorPaymentPrefix: { type: String, default: "PM-" },
     journalPrefix: { type: String, default: "MJ-" },
+    tallyOpeningStock: { type: Number }, // Tally's Opening Stock ledger balance (from a masters import): item opening values are matched to it
     purchaseOrderPrefix: { type: String, default: "PO-" },
     vendorCreditPrefix: { type: String, default: "DN-" },
     defaultPaymentTerms: { type: Number, default: 15 },

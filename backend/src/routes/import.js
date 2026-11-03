@@ -119,6 +119,7 @@ router.post(
     const warnings = [];
     let source = "sheet";
     let ledgerGroup = null;
+    let stockLedgerOpening = null;
     const sheetsFound = [];
 
     if (parsed.format === "xml") {
@@ -135,6 +136,7 @@ router.post(
       const out = tally.normalise(parsed.xml, { ledgers: known });
       Object.assign(records, out.records);
       ledgerGroup = out.ledgerGroup;
+      stockLedgerOpening = out.stockLedgerOpening;
       warnings.push(...out.warnings);
     } else {
       for (const sh of parsed.sheets) {
@@ -166,11 +168,11 @@ router.post(
     }
     const datasets = TYPES.filter((t) => records[t].length).map((t) => ({ type: t, label: LABELS[t], count: records[t].length, sample: records[t].slice(0, 5).map((r) => sample(t, r)) }));
     if (!datasets.length) throw new HttpError(400, warnings[0] || "Nothing to import was found in this file");
-    const hasOpening = records.accounts.some((a) => a.opening) || records.openingBalances.length || [...records.customers, ...records.vendors].some((c) => c.opening || (c.openingBills || []).length);
+    const hasOpening = records.items.some((i) => i.openingQty) || records.accounts.some((a) => a.opening) || records.openingBalances.length || [...records.customers, ...records.vendors].some((c) => c.opening || (c.openingBills || []).length);
     const dates = TYPES.flatMap((t) => records[t].map((r) => r.date)).filter(Boolean);
     const first = dates.length ? new Date(Math.min(...dates.map((d) => +d))) : null;
     const id = crypto.randomUUID();
-    previews.set(id, { org: String(req.org), at: Date.now(), data: { source, records, ledgerGroup, warnings } });
+    previews.set(id, { org: String(req.org), at: Date.now(), data: { source, records, ledgerGroup, warnings, stockLedgerOpening } });
     res.send({ id, source, fileName, sheets: sheetsFound, datasets, warnings: [...new Set(warnings)].slice(0, 100), hasOpening, firstDate: first ? iso(first) : null });
   })
 );

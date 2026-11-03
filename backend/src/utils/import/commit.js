@@ -152,6 +152,11 @@ async function commit(ctx, data, opts, progress) {
       if (g === "creditors" && !accByName.has(name)) accByName.set(name, "ap");
     }
   await refreshAccounts();
+  // Tally's Opening Stock ledger: item opening values (Inventory masters import) are matched to it.
+  if (data.stockLedgerOpening) {
+    await Organization.updateOne({ _id: ctx.org }, { tallyOpeningStock: round2(data.stockLedgerOpening) });
+    org.tallyOpeningStock = round2(data.stockLedgerOpening);
+  }
 
   /* ---------- 2. Customers and vendors ---------- */
   const currencies = new Set((await Currency.find({ organization: ctx.org }).lean()).map((c) => c.code));
@@ -342,6 +347,33 @@ async function commit(ctx, data, opts, progress) {
       } catch (e) {
         fail("items", m.name, e);
       }
+    }
+    // Opening stock from the item masters (quantity and value on each item). Tally's Opening Stock ledger,
+    // which its trial balance uses, can differ from the items; values are scaled to it so balances match.
+    const withOpening = data.records.items.filter((m) => m.openingQty > 0);
+    if (withOpening.length && !openingDate) warnings.push("The items have opening stock in Tally but no opening balance date was given, so opening stock was not imported");
+    if (withOpening.length && openingDate) {
+      const itemsTotal = round2(withOpening.reduce((s, m) => s + m.openingValue, 0));
+      const target = org.tallyOpeningStock || itemsTotal;
+      const factor = itemsTotal ? target / itemsTotal : 1;
+      const values = withOpening.map((m) => round2(m.openingValue * factor));
+      values[values.length - 1] = round2(values[values.length - 1] + target - values.reduce((s, v) => s + v, 0)); // paise to the last item
+      const fresh = new Map((await ItemM.find({ organization: ctx.org }).lean()).map((i) => [clean(i.name).toLowerCase(), i]));
+      const listed = new Set(withOpening.map((m) => clean(m.name).toLowerCase()));
+      for (const [i, m] of withOpening.entries()) {
+        const it = fresh.get(clean(m.name).toLowerCase());
+        if (!it) continue;
+        await ItemM.updateOne({ _id: it._id }, { openingStock: m.openingQty, openingStockRate: values[i] / m.openingQty, openingStockDate: openingDate, trackInventory: true });
+      }
+      // Items Tally has no opening stock for: none in OrdexaGo either (e.g. left over from a Stock Summary).
+      const cleared = await ItemM.updateMany({ organization: ctx.org, openingStock: { $gt: 0 }, _id: { $nin: [...fresh.values()].filter((i) => listed.has(clean(i.name).toLowerCase())).map((i) => i._id) }, name: { $in: data.records.items.map((m) => m.name) } }, { openingStock: 0, openingStockRate: 0 });
+      R_("openingStock").created += withOpening.length;
+      warnings.push(
+        `Opening stock: ${withOpening.length} item(s) as on ${iso(openingDate)}, worth ₹${target.toLocaleString("en-IN")}` +
+          (Math.abs(target - itemsTotal) >= 1 ? ` — Tally's items add up to ₹${itemsTotal.toLocaleString("en-IN")}, so their values were matched to Tally's Opening Stock ledger (₹${target.toLocaleString("en-IN")})` : "") +
+          (cleared.modifiedCount ? `; ${cleared.modifiedCount} item(s) with no opening stock in Tally were set to none` : "")
+      );
+      if (!org.tallyOpeningStock) warnings.push("Import Tally's accounting masters (ledgers) first if you want item opening values matched to Tally's Opening Stock ledger");
     }
     const noRate = data.records.items.filter((m) => m.taxRate === null || m.taxRate === undefined).length;
     if (noRate) warnings.push(`${noRate} stock item(s) have no GST rate in Tally (on the item or its stock groups), so their rate in OrdexaGo was left as it was`);
@@ -659,6 +691,64 @@ async function commit(ctx, data, opts, progress) {
       R_("journals").created++;
     } catch (e) {
       fail("journals", label, e);
+    }
+  }
+
+  /* ---------- Set-off for parties on both sides ---------- */
+  // In Tally such a party is one ledger; here it is a customer and a vendor. A journal moves the balance
+  // of the other side onto the side the Tally ledger is on, so receivables and payables match Tally.
+  for (const { party: name, home } of data.records.setOffs || []) {
+    progress();
+    try {
+      const n = clean(name).toLowerCase();
+      const same = (x) => clean(x || "").toLowerCase() === n;
+      const r = data.records;
+      const cust = contacts.customer.get(n);
+      const vend = contacts.vendor.get(n);
+      if (!cust || !vend) continue;
+      // The other record's balance as it stands in OrdexaGo: receivable on the customer / payable to the vendor.
+      const { journalNet } = require("../partyJournals");
+      let other;
+      if (home === "creditors") {
+        const [inv, pay, cn, jn] = await Promise.all([
+          Invoice.find({ organization: ctx.org, customer: cust._id, status: { $in: ["sent", "partially_paid", "overdue"] } }, { balance: 1 }).lean(),
+          Payment.find({ organization: ctx.org, customer: cust._id }, { unusedAmount: 1 }).lean(),
+          CreditNote.find({ organization: ctx.org, customer: cust._id, status: "open" }, { balance: 1 }).lean(),
+          journalNet(ctx.org, "customer"),
+        ]);
+        other = round2(inv.reduce((t, d) => t + (d.balance || 0), 0) - pay.reduce((t, d) => t + (d.unusedAmount || 0), 0) - cn.reduce((t, d) => t + (d.balance || 0), 0) + (jn[String(cust._id)] || 0));
+      } else {
+        const [bills, pay, vc, jn] = await Promise.all([
+          Bill.find({ organization: ctx.org, vendor: vend._id, status: { $in: ["open", "partially_paid", "overdue"] } }, { balance: 1 }).lean(),
+          VendorPayment.find({ organization: ctx.org, vendor: vend._id }, { unusedAmount: 1 }).lean(),
+          VendorCredit.find({ organization: ctx.org, vendor: vend._id, status: "open" }, { balance: 1 }).lean(),
+          journalNet(ctx.org, "vendor"),
+        ]);
+        other = round2(bills.reduce((t, d) => t + (d.balance || 0), 0) - pay.reduce((t, d) => t + (d.unusedAmount || 0), 0) - vc.reduce((t, d) => t + (d.balance || 0), 0) + (jn[String(vend._id)] || 0));
+      }
+      if (Math.abs(other) < 0.01) continue;
+      const dates = ["invoices", "bills", "creditNotes", "vendorCredits", "payments", "vendorPayments"].flatMap((t) => (r[t] || []).filter((d) => same(d.party)).map((d) => +new Date(d.date)));
+      const date = dates.length ? new Date(Math.max(...dates)) : openingDate || new Date();
+      const key = ref("journal", `setoff|${n}|${iso(date)}`);
+      if (await Journal.exists({ organization: ctx.org, importRef: key })) {
+        R_("journals").skipped++;
+        continue;
+      }
+      // Dr Accounts Payable (vendor) / Cr Accounts Receivable (customer) by the amount; reversed when negative.
+      const a = Math.abs(other);
+      // other > 0: a payable on the vendor record / a receivable on the customer record — both cleared by Dr AP, Cr AR.
+      const toCustomer = other > 0;
+      const lines = [
+        { account: "ap", vendor: vend._id, contactName: vend.displayName, description: "Set-off with customer record", debit: toCustomer ? a : 0, credit: toCustomer ? 0 : a },
+        { account: "ar", customer: cust._id, contactName: cust.displayName, description: "Set-off with vendor record", debit: toCustomer ? 0 : a, credit: toCustomer ? a : 0 },
+      ];
+      let number = `SETOFF-${clean(name).slice(0, 25)}`;
+      if (await Journal.exists({ organization: ctx.org, number })) number = `${number}-${iso(date)}`;
+      await Journal.create({ organization: ctx.org, number, date, reference: "Customer/vendor set-off", notes: `${clean(name)} is one ledger in Tally (${home === "debtors" ? "Sundry Debtors" : "Sundry Creditors"}): balance of its ${home === "debtors" ? "vendor" : "customer"} record moved to its ${home === "debtors" ? "customer" : "vendor"} record`, lines, total: a, importRef: key });
+      R_("journals").created++;
+      warnings.push(`${clean(name)}: ₹${a.toLocaleString("en-IN")} set off between its customer and vendor records (one ledger in Tally)`);
+    } catch (e) {
+      fail("journals", `Set-off ${name}`, e);
     }
   }
 

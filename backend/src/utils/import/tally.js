@@ -190,7 +190,10 @@ function normalise(xml, known = {}) {
       // Stock-in-Hand ledgers (Opening Stock, Closing Stock): with inventory kept item-wise their value
       // comes from the stock items (Stock Summary import), so a ledger balance here would count stock twice.
       const stock = underStock(parent);
-      if (stock && ob) stockLedgers.push(name);
+      if (stock && ob) {
+        stockLedgers.push(name);
+        out.stockLedgerOpening = C.round2((out.stockLedgerOpening || 0) - ob); // Dr is negative in Tally
+      }
       out.accounts.push({ name, code: text(l.ALIAS) || "", type: parent, group: grp, ledgerKind: ledgerKindOf(parent), description: text(l.DESCRIPTION) || text(l.NARRATION), parent: "", opening: stock ? 0 : -ob });
     }
   }
@@ -246,6 +249,9 @@ function normalise(xml, known = {}) {
     const parent = text(it.PARENT);
     const unit = clean(text(it.BASEUNITS)).toLowerCase();
     const rate = gstOf(it) ?? fromGroup(parent, "gst");
+    // Opening stock on the item master: quantity " 2020 PCS", value (Dr negative), rate "250.00/PCS".
+    const openingQty = Math.abs(num(text(it.OPENINGBALANCE)));
+    const openingValue = Math.abs(num(text(it.OPENINGVALUE)));
     out.items.push({
       name,
       group: /not applicable|primary/i.test(parent) ? "" : parent,
@@ -258,6 +264,8 @@ function normalise(xml, known = {}) {
         return names.length > 1 && names[1] !== name ? names[1].slice(0, 60) : "";
       })(),
       description: text(it.DESCRIPTION) || "",
+      openingQty,
+      openingValue: openingQty ? openingValue : 0,
     });
   }
 
@@ -269,6 +277,7 @@ function normalise(xml, known = {}) {
 
   const guessed = new Set();
   const twoWay = new Set();
+  const twoWayHome = new Map();
   const stockOnly = [];
   for (const v of collect(xml, "VOUCHER")) {
     if (/yes/i.test(text(v.ISCANCELLED)) || /yes/i.test(text(v.ISOPTIONAL)) || /yes/i.test(text(v.ISDELETED))) continue;
@@ -347,7 +356,10 @@ function normalise(xml, known = {}) {
       // A party can be both (sister concern / branch kept under Sundry Creditors but also sold to):
       // a sales voucher still makes an invoice; the importer creates the matching customer if needed.
       if (!partyEntry || !["debtors", "creditors"].includes(pg)) return asJournal();
-      if (pg !== partyGroup) twoWay.add(`${partyEntry.ledger} (${partyGroup === "debtors" ? "also a customer" : "also a vendor"})`);
+      if (pg !== partyGroup) {
+        twoWay.add(`${partyEntry.ledger} (${partyGroup === "debtors" ? "also a customer" : "also a vendor"})`);
+        twoWayHome.set(partyEntry.ledger, pg); // the side the Tally ledger is on
+      }
       const sales = kind === "invoices" || kind === "creditNotes";
       const total = partyEntry.debit || partyEntry.credit;
       const igst = entries.some((e) => /igst/i.test(e.ledger) && (e.debit || e.credit));
@@ -453,7 +465,10 @@ function normalise(xml, known = {}) {
   if (stockOnly.length) warnings.push(`${stockOnly.length} voucher(s) with neither accounting entries nor stock lines were skipped: ${stockOnly.slice(0, 8).join(", ")}${stockOnly.length > 8 ? "…" : ""}`);
   if (twoWay.size) warnings.push(`${twoWay.size} party ledger(s) are used on both sides (sold to and bought from), so they get both a customer and a vendor record: ${[...twoWay].slice(0, 8).join(", ")}`);
   if (guessed.size) warnings.push(`${guessed.size} party ledger(s) weren't in the file or in OrdexaGo and were taken from the voucher type: ${[...guessed].slice(0, 10).join(", ")}${guessed.size > 10 ? "…" : ""}`);
-  return { records: out, ledgerGroup: Object.fromEntries(ledgerGroup), warnings };
+  out.setOffs = [...twoWayHome].map(([party, home]) => ({ party, home }));
+  const { stockLedgerOpening } = out;
+  delete out.stockLedgerOpening;
+  return { records: out, ledgerGroup: Object.fromEntries(ledgerGroup), warnings, stockLedgerOpening };
 }
 
 module.exports = { isTally, normalise, lineRates };
