@@ -363,9 +363,15 @@ async function commit(ctx, data, opts, progress) {
         await ItemM.updateOne({ _id: it._id }, { openingStock: m.openingQty, openingStockRate: values[i] / m.openingQty, openingStockDate: openingDate, trackInventory: true });
       }
       // Items Tally has no opening stock for: none in OrdexaGo either (e.g. left over from a Stock Summary).
-      const cleared = await ItemM.updateMany({ organization: ctx.org, openingStock: { $gt: 0 }, _id: { $nin: [...fresh.values()].filter((i) => listed.has(clean(i.name).toLowerCase())).map((i) => i._id) }, name: { $in: data.records.items.map((m) => m.name) } }, { openingStock: 0, openingStockRate: 0 });
+      // Items with no opening stock in Tally: none here either — including items left with an opening on this
+      // date from an earlier Stock Summary import under a name Tally's masters don't have.
+      const keep = [...fresh.values()].filter((it) => listed.has(clean(it.name).toLowerCase())).map((it) => it._id);
+      const day = { $gte: new Date(openingDate.getTime() - 86400000), $lte: new Date(openingDate.getTime() + 86400000) };
+      const stale = await ItemM.find({ organization: ctx.org, openingStock: { $gt: 0 }, _id: { $nin: keep }, $or: [{ name: { $in: data.records.items.map((m) => m.name) } }, { openingStockDate: day }] }, { name: 1, openingStock: 1, openingStockRate: 1 }).lean();
+      await ItemM.updateMany({ _id: { $in: stale.map((x) => x._id) } }, { openingStock: 0, openingStockRate: 0 });
+      if (stale.length) warnings.push(`Opening stock removed from ${stale.length} item(s) that have none in Tally (₹${round2(stale.reduce((t, x) => t + round2(x.openingStock * (x.openingStockRate || 0)), 0)).toLocaleString("en-IN")}): ${stale.slice(0, 12).map((x) => `${x.name} (${x.openingStock})`).join(", ")}${stale.length > 12 ? "…" : ""}`);
       R_("openingStock").created += withOpening.length;
-      warnings.push(`Opening stock: ${withOpening.length} item(s) as on ${iso(openingDate)}, worth ₹${itemsTotal.toLocaleString("en-IN")} as in Tally's items` + (cleared.modifiedCount ? `; ${cleared.modifiedCount} item(s) with no opening stock in Tally were set to none` : ""));
+      warnings.push(`Opening stock: ${withOpening.length} item(s) as on ${iso(openingDate)}, worth ₹${itemsTotal.toLocaleString("en-IN")} as in Tally's items` + "");
       // Tally's Opening Stock ledger (its trial balance and P&L use it) can differ from its items' values when
       // accounts and inventory aren't integrated. The difference goes to "Opening Stock Difference (Tally)",
       // which the Tally view shows as part of Opening Stock — so balances and profit match Tally's.
