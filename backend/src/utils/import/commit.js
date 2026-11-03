@@ -354,10 +354,7 @@ async function commit(ctx, data, opts, progress) {
     if (withOpening.length && !openingDate) warnings.push("The items have opening stock in Tally but no opening balance date was given, so opening stock was not imported");
     if (withOpening.length && openingDate) {
       const itemsTotal = round2(withOpening.reduce((s, m) => s + m.openingValue, 0));
-      const target = org.tallyOpeningStock || itemsTotal;
-      const factor = itemsTotal ? target / itemsTotal : 1;
-      const values = withOpening.map((m) => round2(m.openingValue * factor));
-      values[values.length - 1] = round2(values[values.length - 1] + target - values.reduce((s, v) => s + v, 0)); // paise to the last item
+      const values = withOpening.map((m) => round2(m.openingValue));
       const fresh = new Map((await ItemM.find({ organization: ctx.org }).lean()).map((i) => [clean(i.name).toLowerCase(), i]));
       const listed = new Set(withOpening.map((m) => clean(m.name).toLowerCase()));
       for (const [i, m] of withOpening.entries()) {
@@ -368,12 +365,33 @@ async function commit(ctx, data, opts, progress) {
       // Items Tally has no opening stock for: none in OrdexaGo either (e.g. left over from a Stock Summary).
       const cleared = await ItemM.updateMany({ organization: ctx.org, openingStock: { $gt: 0 }, _id: { $nin: [...fresh.values()].filter((i) => listed.has(clean(i.name).toLowerCase())).map((i) => i._id) }, name: { $in: data.records.items.map((m) => m.name) } }, { openingStock: 0, openingStockRate: 0 });
       R_("openingStock").created += withOpening.length;
-      warnings.push(
-        `Opening stock: ${withOpening.length} item(s) as on ${iso(openingDate)}, worth ₹${target.toLocaleString("en-IN")}` +
-          (Math.abs(target - itemsTotal) >= 1 ? ` — Tally's items add up to ₹${itemsTotal.toLocaleString("en-IN")}, so their values were matched to Tally's Opening Stock ledger (₹${target.toLocaleString("en-IN")})` : "") +
-          (cleared.modifiedCount ? `; ${cleared.modifiedCount} item(s) with no opening stock in Tally were set to none` : "")
-      );
-      if (!org.tallyOpeningStock) warnings.push("Import Tally's accounting masters (ledgers) first if you want item opening values matched to Tally's Opening Stock ledger");
+      warnings.push(`Opening stock: ${withOpening.length} item(s) as on ${iso(openingDate)}, worth ₹${itemsTotal.toLocaleString("en-IN")} as in Tally's items` + (cleared.modifiedCount ? `; ${cleared.modifiedCount} item(s) with no opening stock in Tally were set to none` : ""));
+      // Tally's Opening Stock ledger (its trial balance and P&L use it) can differ from its items' values when
+      // accounts and inventory aren't integrated. The difference goes to "Opening Stock Difference (Tally)",
+      // which the Tally view shows as part of Opening Stock — so balances and profit match Tally's.
+      const diffKey = ref("journal", `opening-stock-diff|${iso(openingDate)}`);
+      await Journal.deleteMany({ organization: ctx.org, importRef: diffKey });
+      const target = org.tallyOpeningStock;
+      const diff = target ? round2(target - itemsTotal) : 0;
+      if (Math.abs(diff) >= 0.01) {
+        let acc = await Account.findOne({ organization: ctx.org, role: "opening_stock_diff" });
+        if (!acc) acc = await Account.create({ organization: ctx.org, name: "Opening Stock Difference (Tally)", group: "Cost Of Goods Sold", role: "opening_stock_diff", description: "Tally's Opening Stock ledger minus its stock items' opening values. Shown as part of Opening Stock in the Tally view of reports." });
+        const a = Math.abs(diff);
+        await Journal.create({
+          organization: ctx.org,
+          number: await nextNumber(ctx.org, "journal", org.journalPrefix || "MJ-"),
+          date: openingDate,
+          reference: "Opening stock difference",
+          notes: `Tally's Opening Stock ledger ₹${target.toLocaleString("en-IN")} − its items' opening values ₹${itemsTotal.toLocaleString("en-IN")}`,
+          lines: [
+            { account: String(acc._id), description: "Opening stock as per Tally ledger", debit: diff > 0 ? a : 0, credit: diff < 0 ? a : 0 },
+            { account: "opening_equity", description: "Opening stock difference", debit: diff < 0 ? a : 0, credit: diff > 0 ? a : 0 },
+          ],
+          total: a,
+          importRef: diffKey,
+        });
+        warnings.push(`Tally's Opening Stock ledger is ₹${target.toLocaleString("en-IN")} but its items add up to ₹${itemsTotal.toLocaleString("en-IN")}: the ₹${a.toLocaleString("en-IN")} difference was posted to "Opening Stock Difference (Tally)", shown as part of Opening Stock in the Tally view (as in Tally's P&L)`);
+      } else if (!target) warnings.push("Import Tally's accounting masters (ledgers) too, so Opening Stock matches Tally's Opening Stock ledger");
     }
     const noRate = data.records.items.filter((m) => m.taxRate === null || m.taxRate === undefined).length;
     if (noRate) warnings.push(`${noRate} stock item(s) have no GST rate in Tally (on the item or its stock groups), so their rate in OrdexaGo was left as it was`);

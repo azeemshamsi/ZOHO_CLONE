@@ -45,7 +45,7 @@ router.get(
     if (!isTally(req)) return res.send({ from, to, view: "live", ...profitAndLoss(accounts, movements(entries, { from, to })) });
     // Tally view: Cost of Goods Sold = Opening Stock + purchases − Closing Stock.
     const tAcc = TV.tallyAccounts(accounts);
-    const mv = movements(TV.tallyEntries(entries), { from, to });
+    const mv = movements(TV.tallyEntries(entries, accounts), { from, to });
     const opening = round2((from ? TV.stockValue(entries, new Date(from.getTime() - 1)) : 0) + naturalBalance(TV.OPENING_STOCK, mv[TV.OPENING_STOCK.code]));
     const closing = TV.stockValue(entries, to);
     const p = profitAndLoss(tAcc, mv);
@@ -108,7 +108,7 @@ router.get(
     const [accounts0, entries0] = await Promise.all([chartOfAccounts(req.org), buildEntries(req.org, { to })]);
     // Tally view: purchases in full on their ledgers and Opening Stock instead of Inventory Asset / Cost of Goods Sold.
     const accounts = isTally(req) ? TV.tallyAccounts(accounts0) : accounts0;
-    const entries = isTally(req) ? TV.tallyEntries(entries0) : entries0;
+    const entries = isTally(req) ? TV.tallyEntries(entries0, accounts0) : entries0;
     const mv = movements(entries);
     const rows = accounts
       .map((a) => {

@@ -243,9 +243,13 @@ function normalise(xml, known = {}) {
     }
     return null;
   };
+  const seenItems = new Set();
   for (const it of collect(xml, "STOCKITEM")) {
     const name = nameOf(it);
     if (!name) continue;
+    // Tally's export can list an item twice (once more as a dependent master): keep the first.
+    if (seenItems.has(name)) continue;
+    seenItems.add(name);
     const parent = text(it.PARENT);
     const unit = clean(text(it.BASEUNITS)).toLowerCase();
     const rate = gstOf(it) ?? fromGroup(parent, "gst");

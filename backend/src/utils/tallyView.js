@@ -10,10 +10,12 @@ const { round2 } = require("./http");
 const OPENING_STOCK = { code: "_opening_stock", name: "Opening Stock", group: "Other Current Asset", type: "asset", system: true };
 
 // Entries without the stock movements (tagged `stock` in buildEntries); item opening stock posts to Opening Stock.
-function tallyEntries(entries) {
+// `accounts` (optional): the Opening Stock Difference account (role "opening_stock_diff") is part of Opening Stock, as in Tally.
+function tallyEntries(entries, accounts = []) {
+  const diff = new Set(accounts.filter((a) => a.role === "opening_stock_diff").map((a) => a.code));
   const out = [];
   for (const e of entries) {
-    const lines = e.lines.filter((l) => !l.stock).map((l) => (l.openingStock ? { ...l, account: OPENING_STOCK.code } : l));
+    const lines = e.lines.filter((l) => !l.stock).map((l) => (l.openingStock || diff.has(l.account) ? { ...l, account: OPENING_STOCK.code } : l));
     if (lines.length) out.push({ ...e, lines });
   }
   return out;

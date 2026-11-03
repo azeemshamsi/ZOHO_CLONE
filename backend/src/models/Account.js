@@ -27,6 +27,8 @@ const accountSchema = new mongoose.Schema(
     active: { type: Boolean, default: true },
     // Sales / purchase ledger (as in Tally): offered on invoices and credit notes / bills and vendor credits.
     ledgerKind: { type: String, enum: ["", "sales", "purchase"], default: "" },
+    // "opening_stock_diff": Tally's Opening Stock ledger minus its items' opening values (shown as Opening Stock in the Tally view)
+    role: { type: String, default: "" },
   },
   { timestamps: true }
 );

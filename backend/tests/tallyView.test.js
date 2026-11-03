@@ -46,3 +46,13 @@ test("Tally view: purchase ledger in full, Opening Stock line, closing stock fro
   assert.equal(tallyProfit, liveProfit);
   assert.equal(tallyProfit, 2000);
 });
+
+test("Tally view: Opening Stock Difference (Tally) is part of Opening Stock", () => {
+  const withDiff = [
+    ...entries,
+    { date: D("01"), type: "Journal", lines: [{ account: "diffacc", debit: 805024.06, credit: 0 }, { account: "opening_equity", debit: 0, credit: 805024.06 }] },
+  ];
+  const mv = movements(TV.tallyEntries(withDiff, [{ code: "diffacc", role: "opening_stock_diff" }]));
+  assert.equal(net(mv, "_opening_stock"), 855024.06);
+  assert.equal(net(mv, "diffacc"), 0);
+});
