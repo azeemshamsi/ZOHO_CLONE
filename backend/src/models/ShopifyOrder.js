@@ -92,6 +92,9 @@ const shopifyOrderSchema = new mongoose.Schema(
       length: Number,
       breadth: Number,
       height: Number,
+      packageName: String,
+      charge: Number, // expected courier charge at booking
+      chargeSource: String, // "api" or "rate card"
       bookedAt: Date,
       trackStatus: String,
       trackedAt: Date,

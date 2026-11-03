@@ -23,6 +23,8 @@ const courierAccountSchema = new mongoose.Schema(
       pincode: { type: String, default: "" },
     },
     trackingUrl: { type: String, default: "" }, // template with {awb}
+    // Manual rate card, used when the courier's API gives no rate (see utils/couriers/rates.js).
+    rateCard: { type: mongoose.Schema.Types.Mixed, default: {} },
     token: { type: String, default: "" }, // cached session token
     tokenExpires: { type: Date },
   },

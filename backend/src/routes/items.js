@@ -25,11 +25,13 @@ const schema = Joi.object({
   openingStockDate: Joi.date().allow(null, ""),
   reorderLevel: Joi.number().min(0),
   openingWarehouse: Joi.string().allow(null, ""),
+  packageType: Joi.string().allow(null, ""),
 });
 
 // Services never carry stock.
 const clean = (data) => {
   if (!data.openingWarehouse) data.openingWarehouse = null;
+  if (data.packageType === "") data.packageType = null;
   if (data.type === "service") data.trackInventory = false;
   if (data.openingStockDate === "") data.openingStockDate = null;
   return data;

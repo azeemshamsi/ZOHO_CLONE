@@ -81,7 +81,7 @@ function ResultsModal({ results, title, onClose }) {
           {results.map((r) => (
             <tr key={r.id}>
               <td>{r.name}</td>
-              <td className={r.error ? "text-red" : ""}>{r.error || [r.skipped ? "Already invoiced" : "", r.invoiceNumber, r.courierName, r.awb, r.text, r.warning].filter(Boolean).join(" · ") || "Done"}</td>
+              <td className={r.error ? "text-red" : ""}>{r.error || [r.skipped ? "Already invoiced" : "", r.invoiceNumber, r.courierName, r.awb, r.charge != null ? money(r.charge) : "", r.text, r.warning].filter(Boolean).join(" · ") || "Done"}</td>
               {shipped.length > 0 && <td>{r.awb && <button className="btn btn-sm" onClick={() => openPdf(`/shopify/orders/${r.id}/label`)}>Label</button>}</td>}
             </tr>
           ))}
@@ -91,20 +91,142 @@ function ResultsModal({ results, title, onClose }) {
   );
 }
 
-function ShipModal({ ids, couriers, store, onClose, onDone }) {
+const pkgText = (p) => (p ? `${p.packageName ? `${p.packageName} · ` : ""}${p.weight} kg, ${p.length}×${p.breadth}×${p.height} cm` : "");
+const SERV = { true: ["Serviceable", "status-paid"], false: ["Not serviceable", "status-overdue"], null: ["Not checked", "status-draft"] };
+const ServBadge = ({ v, note }) => {
+  const [t, c] = SERV[String(v ?? null)];
+  return (
+    <span className={`status ${c}`} title={note || ""}>
+      {t}
+    </span>
+  );
+};
+const ChargeCell = ({ r }) =>
+  r.charge != null ? (
+    <span title={r.breakdown ? `${r.breakdown.zoneName} · ${r.breakdown.weight} kg chargeable · freight ${r.breakdown.freight} + fuel ${r.breakdown.fuel} + COD ${r.breakdown.cod} + GST ${r.breakdown.gst}` : "From the courier's API"}>
+      <strong>{money(r.charge)}</strong> <span className="muted small">{r.source === "api" ? "API" : "rate card"}</span>
+    </span>
+  ) : (
+    <span className="muted small">No rate</span>
+  );
+
+// Flatten courier rows: an aggregator (Shiprocket) lists each of its couriers as its own choice.
+const choicesOf = (rows) =>
+  rows.flatMap((r) =>
+    r.options?.length && r.serviceable !== false
+      ? r.options.map((o) => ({ ...r, key: `${r.account}|${o.courierId}`, courierId: o.courierId, sub: o.name, charge: o.charge, source: "api", etd: o.etd, breakdown: null, serviceable: true }))
+      : [{ ...r, key: r.account, courierId: "" }]
+  );
+
+// Live serviceability + expected charges for one order (read-only, in the order view).
+function CourierRates({ id }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    api
+      .post("/shopify/orders/quotes", { ids: [id] })
+      .then((r) => setD(r.data.orders[0]))
+      .catch((e) => setErr(errMsg(e)));
+  }, [id]);
+  if (err) return <p className="muted small">Courier charges: {err}</p>;
+  if (!d) return <p className="muted small">Checking couriers for this pincode…</p>;
+  if (d.error || d.needsPackage) return <p className="muted small">{d.error || "Its products have no package type — set one on the item (Items / Inventory), or enter the weight and size when booking, to see courier charges."}</p>;
+  const rows = choicesOf(d.rows);
+  if (!rows.length) return <p className="muted small">No active couriers. Add one in Store Settings → Couriers.</p>;
+  return (
+    <>
+      <div className="muted small" style={{ margin: "4px 0" }}>
+        To {d.pincode} {d.city} · {d.cod ? `COD ${money(d.codAmount)}` : "Prepaid"} · Package: {pkgText(d.pkg)}
+      </div>
+      <table className="table compact">
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.key} className={r.serviceable === false ? "muted" : ""}>
+              <td>
+                {r.name}
+                {r.sub && <span className="muted"> · {r.sub}</span>}
+                {i === 0 && r.serviceable !== false && r.charge != null && <span className="pill pill-green" style={{ marginLeft: 6 }}>Cheapest</span>}
+              </td>
+              <td>
+                <ServBadge v={r.serviceable} note={r.note} />
+                {r.note && r.serviceable !== true && <div className="muted small">{r.note}</div>}
+              </td>
+              <td className="num">
+                <ChargeCell r={r} />
+              </td>
+              <td className="muted small">{r.etd}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+function ShipModal({ ids, couriers, onClose, onDone }) {
   const active = couriers.filter((c) => c.active);
-  const [account, setAccount] = useState((active.find((c) => c.isDefault) || active[0])?._id || "");
-  const p = store?.pkg || {};
-  const [pkg, setPkg] = useState({ weight: p.weight || 0.5, length: p.length || 20, breadth: p.breadth || 15, height: p.height || 10 });
+  const single = ids.length === 1;
+  const [packages, setPackages] = useState([]);
+  const [mode, setMode] = useState("auto"); // auto | <package type id> | manual
+  const [manualPkg, setManualPkg] = useState({ weight: "", length: "", breadth: "", height: "" });
+  const [quotes, setQuotes] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const [pick, setPick] = useState(null); // { account, courierId, key }
   const [manual, setManual] = useState({ awb: "", courierName: "" });
   const [invoiceFirst, setInvoiceFirst] = useState(false);
+  const [skipCheck, setSkipCheck] = useState(false);
   const [busy, setBusy] = useState(false);
-  const acc = active.find((c) => c._id === account);
-  const set = (k) => (e) => setPkg({ ...pkg, [k]: e.target.value });
+  const manualOk = ["weight", "length", "breadth", "height"].every((k) => Number(manualPkg[k]) > 0);
+  const pkgBody = mode === "auto" ? {} : mode === "manual" ? (manualOk ? Object.fromEntries(Object.entries(manualPkg).map(([k, v]) => [k, Number(v)])) : null) : { packageType: mode };
+  const pkgKey = JSON.stringify(pkgBody);
+
+  useEffect(() => {
+    api.get("/shopify/package-types").then((r) => setPackages(r.data)).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!pkgBody || !active.length) return;
+    let live = true;
+    setChecking(true);
+    const t = setTimeout(
+      () =>
+        api
+          .post("/shopify/orders/quotes", { ids: ids.slice(0, 50), pkg: pkgBody })
+          .then((r) => {
+            if (!live) return;
+            setQuotes(r.data);
+            const o = r.data.orders[0];
+            if (single && mode === "auto" && o?.needsPackage) setMode("manual");
+            if (single && mode === "auto" && o?.pkg) setManualPkg({ weight: o.pkg.weight, length: o.pkg.length, breadth: o.pkg.breadth, height: o.pkg.height });
+            // Pre-select the cheapest courier that delivers there.
+            const list = single ? choicesOf(o?.rows || []) : (r.data.summary || []).map((s) => ({ ...s, key: s.account, serviceable: s.serviceable + s.unknown > 0 ? true : false }));
+            setPick((cur) => {
+              if (cur && list.some((x) => x.key === cur.key && x.serviceable !== false)) return cur;
+              const best = list.find((x) => x.serviceable !== false) || list[0];
+              return best ? { account: best.account, courierId: best.courierId || "", key: best.key } : null;
+            });
+          })
+          .catch((e) => live && toast(errMsg(e), "error"))
+          .finally(() => live && setChecking(false)),
+      mode === "manual" ? 600 : 0
+    );
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [pkgKey]);
+
+  const acc = active.find((c) => c._id === pick?.account);
+  const order = single ? quotes?.orders?.[0] : null;
+  const choices = single ? choicesOf(order?.rows || []) : [];
+  const chosen = single ? choices.find((c) => c.key === pick?.key) : quotes?.summary?.find((s) => s.account === pick?.account);
+  const blocked = single && chosen?.serviceable === false && !skipCheck;
+  const needPkg = mode === "manual" && !manualOk;
+  const autoMissing = !single && quotes?.orders?.filter((o) => o.needsPackage).length;
+
   const go = async () => {
     setBusy(true);
     try {
-      const { data } = await api.post("/shopify/orders/ship", { ids, account, pkg, manual, invoiceFirst });
+      const { data } = await api.post("/shopify/orders/ship", { ids, account: pick.account, pkg: pkgBody || {}, manual: { ...manual, courierId: pick.courierId || "" }, invoiceFirst, skipCheck });
       onDone(data.results);
     } catch (e) {
       toast(errMsg(e), "error");
@@ -114,6 +236,7 @@ function ShipModal({ ids, couriers, store, onClose, onDone }) {
   return (
     <Modal
       open
+      wide
       title={`Book shipment${ids.length > 1 ? ` for ${ids.length} orders` : ""}`}
       onClose={onClose}
       footer={
@@ -121,8 +244,8 @@ function ShipModal({ ids, couriers, store, onClose, onDone }) {
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-primary" disabled={busy || !account || (acc?.carrier === "custom" && ids.length === 1 && !manual.awb)} onClick={go}>
-            {busy ? "Booking…" : "Book Shipment"}
+          <button className="btn btn-primary" disabled={busy || !pick || needPkg || blocked || (acc?.carrier === "custom" && single && !manual.awb)} onClick={go}>
+            {busy ? "Checking pincode & booking…" : chosen?.charge != null ? `Book · ${money(chosen.charge)}` : "Book Shipment"}
           </button>
         </>
       }
@@ -133,21 +256,116 @@ function ShipModal({ ids, couriers, store, onClose, onDone }) {
         </p>
       ) : (
         <div className="form-grid">
-          <Field label="Courier">
-            <select value={account} onChange={(e) => setAccount(e.target.value)}>
-              {active.map((c) => (
-                <option key={c._id} value={c._id}>
-                  {c.name}
-                  {c.test ? " (test)" : ""}
+          <Field label="Package" hint={mode === "auto" ? (single ? (order?.pkg ? `From the products: ${pkgText(order.pkg)}` : order?.needsPackage ? "Its products have no package type — choose one or enter the size" : "") : "Each order uses its own products' package types") : ""}>
+            <select value={mode} onChange={(e) => setMode(e.target.value)}>
+              <option value="auto">From the products' package types</option>
+              {packages.map((p) => (
+                <option key={p._id} value={p._id}>
+                  {p.name} — {p.weight} kg, {p.length}×{p.breadth}×{p.height} cm
                 </option>
               ))}
+              <option value="manual">Enter weight and size</option>
             </select>
           </Field>
+          {mode === "manual" && (
+            <div className="row-4">
+              {[
+                ["weight", "Weight (kg)"],
+                ["length", "Length (cm)"],
+                ["breadth", "Breadth (cm)"],
+                ["height", "Height (cm)"],
+              ].map(([k, l]) => (
+                <Field key={k} label={l} required>
+                  <input type="number" step="0.01" min="0" value={manualPkg[k]} onChange={(e) => setManualPkg({ ...manualPkg, [k]: e.target.value })} />
+                </Field>
+              ))}
+            </div>
+          )}
+          {autoMissing > 0 && mode === "auto" && <p className="alert alert-warn">{autoMissing} of these orders have products without a package type — they won't be booked. Choose a package above to use it for all.</p>}
+
+          <div className="label-sm">
+            Couriers {single && order ? `to ${order.pincode} ${order.city} · ${order.cod ? `COD ${money(order.codAmount)}` : "Prepaid"}` : ""} {checking && <span className="muted">· checking live…</span>}
+          </div>
+          {needPkg ? (
+            <p className="muted small">Enter the weight and size to check couriers and rates.</p>
+          ) : !quotes ? (
+            <Spinner />
+          ) : single ? (
+            <table className="table compact table-click">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Courier</th>
+                  <th>Pincode</th>
+                  <th className="num">Expected charge</th>
+                  <th>Delivery</th>
+                </tr>
+              </thead>
+              <tbody>
+                {choices.map((r, i) => (
+                  <tr key={r.key} className={r.serviceable === false ? "muted" : ""} onClick={() => setPick({ account: r.account, courierId: r.courierId, key: r.key })}>
+                    <td>
+                      <input type="radio" readOnly checked={pick?.key === r.key} />
+                    </td>
+                    <td>
+                      {r.name}
+                      {r.sub && <span className="muted"> · {r.sub}</span>}
+                      {r.test && <span className="muted"> (test)</span>}
+                      {i === 0 && r.serviceable !== false && r.charge != null && <span className="pill pill-green" style={{ marginLeft: 6 }}>Cheapest</span>}
+                    </td>
+                    <td>
+                      <ServBadge v={r.serviceable} note={r.note} />
+                      {r.note && r.serviceable !== true && <div className="muted small">{r.note}</div>}
+                    </td>
+                    <td className="num">
+                      <ChargeCell r={r} />
+                    </td>
+                    <td className="muted small">{r.etd}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <table className="table compact table-click">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Courier</th>
+                  <th>Delivers to</th>
+                  <th className="num">Expected total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {quotes.summary.map((s) => (
+                  <tr key={s.account} onClick={() => setPick({ account: s.account, courierId: "", key: s.account })}>
+                    <td>
+                      <input type="radio" readOnly checked={pick?.account === s.account} />
+                    </td>
+                    <td>{s.name}</td>
+                    <td>
+                      {s.serviceable} of {quotes.orders.length}
+                      {s.unknown ? <span className="muted"> · {s.unknown} not checked</span> : ""}
+                      {s.notServiceable.length > 0 && <div className="text-red small">Can't deliver: {s.notServiceable.slice(0, 8).join(", ")}{s.notServiceable.length > 8 ? "…" : ""}</div>}
+                    </td>
+                    <td className="num">{s.priced ? <>{money(s.total)} <span className="muted small">({s.priced} priced)</span></> : <span className="muted small">No rate</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {!single && ids.length > 50 && <p className="muted small">Rates are shown for the first 50 orders; every order's pincode is still checked when it's booked.</p>}
+          {!single && <p className="muted small">Each order's pincode is checked live when it's booked; orders the courier can't deliver to are skipped and listed.</p>}
+          {single && chosen?.serviceable === false && (
+            <label className="check">
+              <input type="checkbox" checked={skipCheck} onChange={(e) => setSkipCheck(e.target.checked)} /> Book anyway (the courier says it doesn't deliver here)
+            </label>
+          )}
+
           {acc?.carrier === "custom" &&
-            (ids.length === 1 ? (
+            (single ? (
               <div className="row-2">
                 <Field label="AWB / Tracking number" required>
-                  <input value={manual.awb} onChange={(e) => setManual({ ...manual, awb: e.target.value })} autoFocus />
+                  <input value={manual.awb} onChange={(e) => setManual({ ...manual, awb: e.target.value })} />
                 </Field>
                 <Field label="Courier name" hint={`Defaults to ${acc.name}`}>
                   <input value={manual.courierName} onChange={(e) => setManual({ ...manual, courierName: e.target.value })} />
@@ -156,24 +374,9 @@ function ShipModal({ ids, couriers, store, onClose, onDone }) {
             ) : (
               <p className="alert alert-warn">Custom couriers need an AWB for each order — book them one at a time.</p>
             ))}
-          <div className="row-4">
-            <Field label="Weight (kg)">
-              <input type="number" step="0.01" value={pkg.weight} onChange={set("weight")} />
-            </Field>
-            <Field label="Length (cm)">
-              <input type="number" value={pkg.length} onChange={set("length")} />
-            </Field>
-            <Field label="Breadth (cm)">
-              <input type="number" value={pkg.breadth} onChange={set("breadth")} />
-            </Field>
-            <Field label="Height (cm)">
-              <input type="number" value={pkg.height} onChange={set("height")} />
-            </Field>
-          </div>
           <label className="check">
             <input type="checkbox" checked={invoiceFirst} onChange={(e) => setInvoiceFirst(e.target.checked)} /> Also create the invoice (optional — its number then goes on the shipment)
           </label>
-          {store?.fulfillInShopify && <p className="muted small">Orders will be marked fulfilled in Shopify with the tracking number.</p>}
         </div>
       )}
     </Modal>
@@ -308,8 +511,17 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
           ) : (
             <span className="muted">Not booked{sh.error ? ` — ${sh.error}` : ""}</span>
           )}
+          {sh.awb && sh.charge != null && <div className="muted small">Expected charge {money(sh.charge)} ({sh.chargeSource === "api" ? "API" : "rate card"}){sh.packageName ? ` · ${sh.packageName}` : ""}</div>}
         </div>
       </div>
+      {!sh.awb && ["new", "packed"].includes(o.status) && (
+        <>
+          <div className="label-sm" style={{ marginTop: 14 }}>
+            Courier charges (live)
+          </div>
+          <CourierRates id={o._id} />
+        </>
+      )}
       <table className="table compact" style={{ marginTop: 14 }}>
         <thead>
           <tr>

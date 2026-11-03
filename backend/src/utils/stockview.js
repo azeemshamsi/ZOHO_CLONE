@@ -100,6 +100,7 @@ async function stockView(org, { itemIds } = {}) {
       category: it.category || "",
       image: it.image || "",
       weight: it.weight || 0,
+      packageType: it.packageType ? String(it.packageType) : "",
       purchaseRate: it.purchaseRate,
       rate: it.rate,
       active: it.active !== false,

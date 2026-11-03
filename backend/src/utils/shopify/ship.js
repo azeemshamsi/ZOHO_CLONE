@@ -5,6 +5,8 @@ const CourierAccount = require("../../models/CourierAccount");
 const Organization = require("../../models/Organization");
 const { CARRIERS, shipmentFrom, checkShipment } = require("../couriers");
 const { gql } = require("./client");
+const { resolvePackage } = require("./package");
+const { quoteAccount } = require("../couriers/rates");
 
 const STATUS_FROM_TRACK = { delivered: "delivered", rto: "rto", in_transit: "shipped", out_for_delivery: "shipped" };
 
@@ -22,20 +24,31 @@ async function fulfillInShopify(store, order, sh) {
   return true;
 }
 
-async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {} }) {
+async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {}, skipCheck = false }) {
   if (order.status === "cancelled") throw new Error("Order is cancelled");
   if (order.shipment?.awb && order.status !== "new" && order.status !== "packed") throw new Error(`Already booked: ${order.shipment.courierName} ${order.shipment.awb}`);
   const acc = await CourierAccount.findOne({ _id: accountId, organization: ctx.storeOrg || ctx.org, active: true });
   if (!acc) throw new Error("Choose a courier");
   const store = await ShopifyStore.findOne({ organization: ctx.storeOrg || ctx.org });
   const org = await Organization.findById(ctx.org);
-  const p = { ...(store?.pkg?.toObject?.() || store?.pkg || {}), ...Object.fromEntries(Object.entries(pkg).filter(([, v]) => v !== "" && v !== null && v !== undefined)) };
   // HSN and GST from the (checked) OrdexaGo items, not Shopify's.
   const Item = require("../../models/Item");
   const items = new Map((await Item.find({ _id: { $in: order.lines.map((l) => l.item).filter(Boolean) } }).lean()).map((i) => [String(i._id), i]));
+  // Package: chosen / typed in, else from the products' package types.
+  const p = await resolvePackage(order, pkg, ctx.storeOrg || ctx.org, items);
+  if (!p) throw new Error("Its products have no package type — choose a package or enter the weight and size");
   const s = shipmentFrom(order, org, p, items);
   if (acc.carrier !== "custom") checkShipment(s);
   if (s.cod && acc.options?.codEnabled === false) throw new Error(`${acc.name} isn't set up for COD; choose another courier for this ₹${s.codAmount} COD order`);
+  // Live pincode check: book only where the courier delivers.
+  const q = await quoteAccount(acc, s);
+  let charge = q.charge;
+  let chargeSource = q.source;
+  if (manual.courierId && q.options) {
+    const opt = q.options.find((o) => o.courierId === String(manual.courierId));
+    if (!opt && !skipCheck) throw new Error(`${acc.name}: that courier no longer serves ${s.consignee.pincode}; check the rates again`);
+    if (opt) [charge, chargeSource] = [opt.charge, "api"];
+  } else if (q.serviceable === false && !skipCheck) throw new Error(`Not serviceable: ${q.note || `${acc.name} doesn't deliver to ${s.consignee.pincode}`}. Choose another courier.`);
   const out = await CARRIERS[acc.carrier].book(acc, s, manual);
   order.shipment = {
     account: acc._id,
@@ -49,6 +62,9 @@ async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {} }) {
     length: s.length,
     breadth: s.breadth,
     height: s.height,
+    packageName: p.packageName || "",
+    charge: charge ?? undefined,
+    chargeSource: charge != null ? chargeSource : "",
     bookedAt: new Date(),
     trackStatus: "pending",
     events: [],
@@ -66,7 +82,7 @@ async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {} }) {
     }
   }
   await order.save();
-  return { awb: out.awb, courierName: out.courierName, warning };
+  return { awb: out.awb, courierName: out.courierName, charge: charge ?? null, warning };
 }
 
 

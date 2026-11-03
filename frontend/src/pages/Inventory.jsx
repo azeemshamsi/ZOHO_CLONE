@@ -163,15 +163,17 @@ function ItemStock({ id, racks, onClose, onChanged }) {
   const load = () =>
     api.get(`/stock/${id}`).then((r) => {
       setD(r.data);
-      setF({ virtualStock: r.data.virtual, bufferStock: r.data.buffer, shopifySync: r.data.shopifySync, trackInventory: r.data.trackInventory, weight: r.data.weight, category: r.data.category });
+      setF({ virtualStock: r.data.virtual, bufferStock: r.data.buffer, shopifySync: r.data.shopifySync, trackInventory: r.data.trackInventory, weight: r.data.weight, category: r.data.category, packageType: r.data.packageType || "" });
     });
+  const [packages, setPackages] = useState([]);
   useEffect(() => {
     load().catch((e) => toast(errMsg(e), "error"));
+    api.get("/shopify/package-types").then((r) => setPackages(r.data)).catch(() => {});
   }, [id]);
   if (!d) return <Modal open title="Item" onClose={onClose}><Spinner /></Modal>;
   const save = async () => {
     try {
-      await api.put(`/stock/${id}`, { ...f, virtualStock: Number(f.virtualStock) || 0, bufferStock: Number(f.bufferStock) || 0, weight: Number(f.weight) || 0 });
+      await api.put(`/stock/${id}`, { ...f, virtualStock: Number(f.virtualStock) || 0, bufferStock: Number(f.bufferStock) || 0, weight: Number(f.weight) || 0, packageType: f.packageType || null });
       toast("Saved");
       await load();
       onChanged();
@@ -302,6 +304,16 @@ function ItemStock({ id, racks, onClose, onChanged }) {
               <input type="number" min="0" step="0.01" value={f.weight} onChange={(e) => setF({ ...f, weight: e.target.value })} />
             </Field>
           </div>
+          <Field label="Package type" hint="Used for courier booking and rates">
+            <select value={f.packageType || ""} onChange={(e) => setF({ ...f, packageType: e.target.value })}>
+              <option value="">None — enter weight and size when booking</option>
+              {packages.map((p) => (
+                <option key={p._id} value={p._id}>
+                  {p.name} — {p.weight} kg, {p.length}×{p.breadth}×{p.height} cm
+                </option>
+              ))}
+            </select>
+          </Field>
           <div className="small">
             {d.shopifyVariantId ? "Own Shopify listing" : "No own Shopify listing"} · {d.links.length} linked listing{d.links.length === 1 ? "" : "s"}{" "}
             <button className="link-btn small" onClick={() => setLinks(true)}>

@@ -146,7 +146,6 @@ function Share({ store, onSaved }) {
 function Invoicing({ store, onSaved }) {
   const inv = store.invoice || {};
   const [f, setF] = useState({ status: inv.status || "sent", dateFrom: inv.dateFrom || "order", recordPayment: !!inv.recordPayment, paymentAccount: inv.paymentAccount || "", shippingSac: inv.shippingSac || "996812", trackInventory: !!inv.trackInventory });
-  const [pkg, setPkg] = useState({ weight: store.pkg?.weight || 0.5, length: store.pkg?.length || 20, breadth: store.pkg?.breadth || 15, height: store.pkg?.height || 10 });
   const [ful, setFul] = useState({ fulfillInShopify: !!store.fulfillInShopify, notifyCustomer: store.notifyCustomer !== false });
   const [accounts, setAccounts] = useState([]);
   useEffect(() => {
@@ -156,7 +155,7 @@ function Invoicing({ store, onSaved }) {
   const save = async (e) => {
     e.preventDefault();
     try {
-      const { data } = await api.put("/shopify/store", { invoice: f, pkg: Object.fromEntries(Object.entries(pkg).map(([k, v]) => [k, Number(v)])), ...ful });
+      const { data } = await api.put("/shopify/store", { invoice: f, ...ful });
       onSaved(data);
       toast("Saved");
     } catch (err) {
@@ -203,19 +202,9 @@ function Invoicing({ store, onSaved }) {
         <label className="check">
           <input type="checkbox" checked={f.trackInventory} onChange={set("trackInventory")} /> Track stock for items created from Shopify
         </label>
-        <div className="label-sm">Default package (you can change it when booking)</div>
-        <div className="row-4">
-          {[
-            ["weight", "Weight (kg)"],
-            ["length", "Length (cm)"],
-            ["breadth", "Breadth (cm)"],
-            ["height", "Height (cm)"],
-          ].map(([k, l]) => (
-            <Field key={k} label={l}>
-              <input type="number" step="0.01" value={pkg[k]} onChange={(e) => setPkg({ ...pkg, [k]: e.target.value })} />
-            </Field>
-          ))}
-        </div>
+        <p className="muted small">
+          Package weight and size come from each product's package type — set them up under <a href="#packages">Package types</a> below.
+        </p>
         <label className="check">
           <input type="checkbox" checked={ful.fulfillInShopify} onChange={(e) => setFul({ ...ful, fulfillInShopify: e.target.checked })} /> When a shipment is booked, mark the order fulfilled in Shopify with the tracking number
         </label>
@@ -410,7 +399,7 @@ function Rules({ store, onSaved }) {
 
 function CourierModal({ acc, carriers, onClose, onSaved }) {
   const isNew = !acc._id;
-  const [f, setF] = useState({ carrier: acc.carrier || "shiprocket", name: acc.name || "", active: acc.active !== false, isDefault: !!acc.isDefault, test: !!acc.test, baseUrl: acc.baseUrl || "", credentials: {}, options: { ...(acc.options || {}) }, pickup: { name: "", phone: "", address: "", city: "", state: "", pincode: "", ...(acc.pickup || {}) }, trackingUrl: acc.trackingUrl || "" });
+  const [f, setF] = useState({ carrier: acc.carrier || "shiprocket", name: acc.name || "", active: acc.active !== false, isDefault: !!acc.isDefault, test: !!acc.test, baseUrl: acc.baseUrl || "", credentials: {}, options: { ...(acc.options || {}) }, pickup: { name: "", phone: "", address: "", city: "", state: "", pincode: "", ...(acc.pickup || {}) }, trackingUrl: acc.trackingUrl || "", rateCard: { slab: 0.5, divisor: 5000, gstPercent: 18, zones: {}, ...(acc.rateCard || {}) } });
   const [busy, setBusy] = useState(false);
   const c = carriers[f.carrier];
   const saved = acc.credentialKeys || [];
@@ -605,6 +594,7 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
             </div>
           </>
         )}
+        <RateCard rc={f.rateCard} onChange={(rateCard) => setF((x) => ({ ...x, rateCard }))} />
         <div className="row-2">
           <label className="check">
             <input type="checkbox" checked={f.isDefault} onChange={(e) => setF({ ...f, isDefault: e.target.checked })} /> Default courier
@@ -615,6 +605,190 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
         </div>
       </div>
     </Modal>
+  );
+}
+
+const ZONES = [
+  ["local", "Within city"],
+  ["state", "Within state"],
+  ["metro", "Metro to metro"],
+  ["roi", "Rest of India"],
+  ["special", "North-East, J&K, islands"],
+];
+
+// Manual rates: used for the expected charge when the courier's API doesn't give one.
+function RateCard({ rc, onChange }) {
+  const set = (k) => (e) => onChange({ ...rc, [k]: e.target.value === "" ? "" : Number(e.target.value) });
+  const setZ = (z, k) => (e) => onChange({ ...rc, zones: { ...(rc.zones || {}), [z]: { ...(rc.zones?.[z] || {}), [k]: e.target.value === "" ? "" : Number(e.target.value) } } });
+  return (
+    <div className="card" style={{ background: "var(--bg-soft, #f8fafc)", padding: 12 }}>
+      <label className="check">
+        <input type="checkbox" checked={!!rc.enabled} onChange={(e) => onChange({ ...rc, enabled: e.target.checked })} /> <strong>Rate card</strong> — use these rates when the courier's API doesn't give a charge
+      </label>
+      {rc.enabled && (
+        <>
+          <p className="muted small">
+            Charge = first slab + each extra slab, on the higher of actual and volumetric weight (L×B×H ÷ divisor), plus fuel surcharge, COD charge and GST. Zones: within city (same city or first 3 pincode digits), within state, metro to metro (Delhi, Mumbai, Kolkata, Chennai, Bengaluru, Hyderabad, Ahmedabad, Pune…), rest of India, and North-East / J&K / islands.
+          </p>
+          <div className="row-3">
+            <Field label="Slab (kg)">
+              <input type="number" step="0.01" min="0" value={rc.slab ?? ""} onChange={set("slab")} />
+            </Field>
+            <Field label="Volumetric divisor">
+              <input type="number" min="0" value={rc.divisor ?? ""} onChange={set("divisor")} />
+            </Field>
+            <Field label="Fuel surcharge %">
+              <input type="number" step="0.01" min="0" value={rc.fuelPercent ?? ""} onChange={set("fuelPercent")} />
+            </Field>
+          </div>
+          <table className="table compact">
+            <thead>
+              <tr>
+                <th>Zone</th>
+                <th className="num">First slab (₹)</th>
+                <th className="num">Each extra slab (₹)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ZONES.map(([z, l]) => (
+                <tr key={z}>
+                  <td>{l}</td>
+                  <td className="num">
+                    <input type="number" step="0.01" min="0" style={{ width: 110 }} value={rc.zones?.[z]?.first ?? ""} onChange={setZ(z, "first")} />
+                  </td>
+                  <td className="num">
+                    <input type="number" step="0.01" min="0" style={{ width: 110 }} value={rc.zones?.[z]?.extra ?? ""} onChange={setZ(z, "extra")} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="row-3">
+            <Field label="COD charge (₹, minimum)">
+              <input type="number" step="0.01" min="0" value={rc.codFixed ?? ""} onChange={set("codFixed")} />
+            </Field>
+            <Field label="COD charge % of amount" hint="The higher of the two is charged">
+              <input type="number" step="0.01" min="0" value={rc.codPercent ?? ""} onChange={set("codPercent")} />
+            </Field>
+            <Field label="GST % on the charge" hint="0 if your rates already include GST">
+              <input type="number" step="0.01" min="0" value={rc.gstPercent ?? ""} onChange={set("gstPercent")} />
+            </Field>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PackageTypes() {
+  const [rows, setRows] = useState(null);
+  const [f, setF] = useState(null);
+  const load = () => api.get("/shopify/package-types").then((r) => setRows(r.data));
+  useEffect(() => {
+    load().catch(() => setRows([]));
+  }, []);
+  const save = async () => {
+    try {
+      const body = { name: f.name, weight: Number(f.weight), length: Number(f.length), breadth: Number(f.breadth), height: Number(f.height) };
+      if (f._id) await api.put(`/shopify/package-types/${f._id}`, body);
+      else await api.post("/shopify/package-types", body);
+      toast("Package type saved");
+      setF(null);
+      load();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  const remove = async () => {
+    try {
+      await api.delete(`/shopify/package-types/${f._id}`);
+      toast("Package type deleted");
+      setF(null);
+      load();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  return (
+    <div className="card form" id="packages" style={{ marginTop: 18 }}>
+      <h4 className="section-title" style={{ marginTop: 0 }}>
+        Package types
+        <button className="btn btn-sm btn-primary" onClick={() => setF({ name: "", weight: "", length: "", breadth: "", height: "" })}>
+          + Add Package Type
+        </button>
+      </h4>
+      <p className="muted small">The box a product ships in, with its packed weight and size. Give each product a package type (Items or Inventory) and bookings and courier rates use it automatically; you can also pick one, or type the weight and size, when booking.</p>
+      {!rows ? (
+        <Spinner />
+      ) : !rows.length ? (
+        <p className="muted">No package types yet.</p>
+      ) : (
+        <table className="table compact table-click">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th className="num">Weight</th>
+              <th>Size (L × B × H)</th>
+              <th className="num">Products</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p) => (
+              <tr key={p._id} onClick={() => setF(p)}>
+                <td>
+                  <strong>{p.name}</strong>
+                </td>
+                <td className="num">{p.weight} kg</td>
+                <td>
+                  {p.length} × {p.breadth} × {p.height} cm
+                </td>
+                <td className="num">{p.items}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {f && (
+        <Modal
+          open
+          title={f._id ? `Edit ${f.name}` : "Add package type"}
+          onClose={() => setF(null)}
+          footer={
+            <>
+              {f._id && (
+                <button className="btn btn-danger" style={{ marginRight: "auto" }} onClick={remove}>
+                  Delete
+                </button>
+              )}
+              <button className="btn" onClick={() => setF(null)}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" onClick={save}>
+                Save
+              </button>
+            </>
+          }
+        >
+          <div className="form-grid">
+            <Field label="Name" required>
+              <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. Box M, Flyer L, Metal table carton" autoFocus />
+            </Field>
+            <div className="row-4">
+              {[
+                ["weight", "Weight (kg)"],
+                ["length", "Length (cm)"],
+                ["breadth", "Breadth (cm)"],
+                ["height", "Height (cm)"],
+              ].map(([k, l]) => (
+                <Field key={k} label={l} required>
+                  <input type="number" step="0.01" min="0" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
+                </Field>
+              ))}
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
   );
 }
 
@@ -703,6 +877,7 @@ export function ShopifySettings() {
       <Invoicing store={store} onSaved={saved} />
       <InventorySync store={store} onSaved={saved} />
       <Rules key={JSON.stringify(store.rules).length} store={store} onSaved={saved} />
+      <PackageTypes />
       <Couriers carriers={store.carriers} />
     </>
   );

@@ -23,6 +23,7 @@ const itemSchema = new mongoose.Schema(
     category: { type: String, default: "" },
     image: { type: String, default: "" },
     weight: { type: Number, default: 0 }, // kg
+    packageType: { type: mongoose.Schema.Types.ObjectId, ref: "PackageType", default: null }, // box it ships in
     // Stock shown on Shopify but not held: made-to-order capacity. No effect on the books.
     virtualStock: { type: Number, default: 0 },
     bufferStock: { type: Number, default: 0 }, // kept back from Shopify

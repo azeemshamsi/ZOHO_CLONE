@@ -63,7 +63,7 @@ const shiprocket = {
     }
     return res;
   },
-  async book(acc, s) {
+  async book(acc, s, manual = {}) {
     need2(acc, ["pickupLocation"]);
     const [first, ...rest] = s.consignee.name.split(" ");
     const { status, data } = await this.call(acc, "/orders/create/adhoc", {
@@ -94,7 +94,7 @@ const shiprocket = {
     });
     if (!data.shipment_id) throw new Error(`Shiprocket didn't create the order (${status}): ${data.message || short(data.errors || data)}`);
     const refs = { orderId: data.order_id, shipmentId: data.shipment_id };
-    const a = await this.call(acc, "/courier/assign/awb", { method: "POST", json: { shipment_id: data.shipment_id, ...(acc.options.courierId ? { courier_id: String(acc.options.courierId) } : {}) } });
+    const a = await this.call(acc, "/courier/assign/awb", { method: "POST", json: { shipment_id: data.shipment_id, ...(manual.courierId || acc.options.courierId ? { courier_id: String(manual.courierId || acc.options.courierId) } : {}) } });
     const awbData = a.data?.response?.data || {};
     if (!awbData.awb_code) throw new Error(`Shiprocket created order ${data.order_id} but couldn't assign an AWB: ${awbData.awb_assign_error || a.data?.message || short(a.data)}`);
     if (acc.options.autoPickup) await this.call(acc, "/courier/generate/pickup", { method: "POST", json: { shipment_id: [data.shipment_id] } }).catch(() => {});

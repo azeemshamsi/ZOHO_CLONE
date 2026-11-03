@@ -165,10 +165,12 @@ router.put(
         trackInventory: Joi.boolean(),
         category: Joi.string().allow(""),
         weight: Joi.number().min(0),
+        packageType: Joi.string().allow(null, ""),
       }),
       req.body
     );
     if (d.shopifySync !== undefined) d.shopifySyncByUser = true;
+    if (d.packageType === "") d.packageType = null;
     const it = await Item.findOneAndUpdate({ _id: req.params.id, organization: req.org }, d, { new: true });
     if (!it) throw new HttpError(404, "Item not found");
     res.send(it);

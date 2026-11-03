@@ -18,6 +18,10 @@ const { DEFAULT_RULES, checkGst } = require("../utils/shopify/catalog");
 const { bookOrder, trackOrder, cancelShipment } = require("../utils/shopify/ship");
 const { CARRIERS } = require("../utils/couriers");
 const { labelsPdf } = require("../utils/couriers/label");
+const { shipmentFrom } = require("../utils/couriers");
+const { quoteAccount, sortQuotes, ZONES } = require("../utils/couriers/rates");
+const { resolvePackage } = require("../utils/shopify/package");
+const PackageType = require("../models/PackageType");
 
 const STATUSES = ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "return_created", "returned", "cancelled"];
 const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -337,6 +341,53 @@ router.post(
   })
 );
 
+const pkgJoi = Joi.object({ packageType: Joi.string().allow("", null), weight: Joi.number().min(0).allow(null, ""), length: Joi.number().min(0).allow(null, ""), breadth: Joi.number().min(0).allow(null, ""), height: Joi.number().min(0).allow(null, "") }).default({});
+
+// Live serviceability and expected charges of every active courier, for one or more orders.
+router.post(
+  "/orders/quotes",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ ids: Joi.array().items(Joi.string()).min(1).max(50).required(), pkg: pkgJoi }), req.body);
+    const [orders, accs, org] = await Promise.all([ordersFor(req, d.ids), CourierAccount.find({ organization: req.storeOrg, active: true }).sort({ isDefault: -1, name: 1 }), Organization.findById(req.org)]);
+    // Log in once up front, so parallel checks share the session.
+    for (const a of accs) if (CARRIERS[a.carrier].token) await CARRIERS[a.carrier].token(a).catch(() => {});
+    const allItems = new Map((await Item.find({ _id: { $in: orders.flatMap((o) => o.lines.map((l) => l.item)).filter(Boolean) } }).lean()).map((i) => [String(i._id), i]));
+    const out = [];
+    const one = async (o) => {
+      const base = { id: String(o._id), name: o.name, pincode: o.shippingAddress?.zip || "", city: o.shippingAddress?.city || "", cod: false, rows: [] };
+      let p;
+      try {
+        p = await resolvePackage(o, d.pkg, req.storeOrg, allItems);
+      } catch (e) {
+        return { ...base, error: e.message };
+      }
+      if (!p) return { ...base, pkg: null, needsPackage: true };
+      const s = shipmentFrom(o, org, p, allItems);
+      const rows = sortQuotes(await Promise.all(accs.map((a) => quoteAccount(a, s))));
+      return { ...base, pkg: p, cod: s.cod, codAmount: s.codAmount, rows };
+    };
+    for (let i = 0; i < orders.length; i += 5) out.push(...(await Promise.all(orders.slice(i, i + 5).map(one))));
+    // Several orders: per courier, how many it serves and the total.
+    const summary = accs.map((a) => {
+      const rs = out.map((o) => ({ o, r: o.rows.find((x) => x.account === String(a._id)) })).filter((x) => x.r);
+      return {
+        account: String(a._id),
+        name: a.name,
+        carrier: a.carrier,
+        isDefault: !!a.isDefault,
+        serviceable: rs.filter((x) => x.r.serviceable === true).length,
+        unknown: rs.filter((x) => x.r.serviceable === null).length,
+        notServiceable: rs.filter((x) => x.r.serviceable === false).map((x) => x.o.name),
+        total: Math.round(rs.reduce((t, x) => t + (x.r.serviceable !== false ? x.r.charge || 0 : 0), 0) * 100) / 100,
+        priced: rs.filter((x) => x.r.serviceable !== false && x.r.charge != null).length,
+      };
+    });
+    const none = (s) => (s.serviceable + s.unknown === 0 ? 1 : 0);
+    summary.sort((a, b) => none(a) - none(b) || b.serviceable + b.unknown - (a.serviceable + a.unknown) || (a.priced ? a.total : 1e12) - (b.priced ? b.total : 1e12));
+    res.send({ orders: out, summary });
+  })
+);
+
 router.post(
   "/orders/ship",
   ah(async (req, res) => {
@@ -344,9 +395,10 @@ router.post(
       Joi.object({
         ids: idsJoi,
         account: Joi.string().required().label("Courier"),
-        pkg: Joi.object({ weight: Joi.number().greater(0).allow(null, ""), length: Joi.number().greater(0).allow(null, ""), breadth: Joi.number().greater(0).allow(null, ""), height: Joi.number().greater(0).allow(null, "") }).default({}),
-        manual: Joi.object({ awb: Joi.string().allow(""), courierName: Joi.string().allow("") }).default({}),
+        pkg: pkgJoi,
+        manual: Joi.object({ awb: Joi.string().allow(""), courierName: Joi.string().allow(""), courierId: Joi.string().allow("") }).default({}),
         invoiceFirst: Joi.boolean().default(false),
+        skipCheck: Joi.boolean().default(false),
       }),
       req.body
     );
@@ -355,7 +407,7 @@ router.post(
     for (const o of await ordersFor(req, d.ids)) {
       try {
         if (d.invoiceFirst && !o.invoice && store) await invoiceOrder(ctxOf(req), o, store).catch(() => {});
-        const r = await bookOrder(ctxOf(req), o, { accountId: d.account, pkg: d.pkg, manual: d.ids.length === 1 ? d.manual : {} });
+        const r = await bookOrder(ctxOf(req), o, { accountId: d.account, pkg: d.pkg, manual: d.ids.length === 1 ? d.manual : {}, skipCheck: d.skipCheck });
         results.push({ id: o._id, name: o.name, ok: true, ...r });
       } catch (e) {
         await ShopifyOrder.updateOne({ _id: o._id }, { "shipment.error": e.message }).catch(() => {});
@@ -545,6 +597,16 @@ const courierJoi = Joi.object({
   options: Joi.object().pattern(Joi.string(), Joi.alternatives(Joi.string().allow(""), Joi.boolean(), Joi.number())),
   pickup: Joi.object({ name: Joi.string().allow(""), phone: Joi.string().allow(""), address: Joi.string().allow(""), city: Joi.string().allow(""), state: Joi.string().allow(""), pincode: Joi.string().allow("") }),
   trackingUrl: Joi.string().trim().allow(""),
+  rateCard: Joi.object({
+    enabled: Joi.boolean(),
+    slab: Joi.number().greater(0).allow(""),
+    divisor: Joi.number().greater(0).allow(""),
+    codFixed: Joi.number().min(0).allow(""),
+    codPercent: Joi.number().min(0).allow(""),
+    fuelPercent: Joi.number().min(0).allow(""),
+    gstPercent: Joi.number().min(0).allow(""),
+    zones: Joi.object().pattern(Joi.string().valid(...ZONES.map(([z]) => z)), Joi.object({ first: Joi.number().min(0).allow(""), extra: Joi.number().min(0).allow("") })),
+  }),
 });
 
 async function saveCourier(req, acc) {
@@ -553,6 +615,7 @@ async function saveCourier(req, acc) {
   for (const [k, v] of Object.entries(d.credentials || {})) if (v) creds[k] = v.trim(); // blank = keep
   Object.assign(acc, { ...d, credentials: creds });
   acc.markModified("credentials");
+  acc.markModified("rateCard");
   acc.markModified("options");
   acc.token = "";
   if (d.isDefault) await CourierAccount.updateMany({ organization: req.storeOrg, _id: { $ne: acc._id } }, { isDefault: false });
@@ -605,11 +668,62 @@ router.post(
   })
 );
 
+/* ---------------- package types ---------------- */
+const ptJoi = Joi.object({ name: Joi.string().trim().required().label("Name"), weight: Joi.number().greater(0).required().label("Weight"), length: Joi.number().greater(0).required().label("Length"), breadth: Joi.number().greater(0).required().label("Breadth"), height: Joi.number().greater(0).required().label("Height"), active: Joi.boolean() });
+router.get(
+  "/package-types",
+  ah(async (req, res) => {
+    const rows = await PackageType.find({ organization: req.storeOrg, active: true }).sort({ name: 1 }).lean();
+    const counts = await Item.aggregate([{ $match: { packageType: { $in: rows.map((r) => r._id) } } }, { $group: { _id: "$packageType", n: { $sum: 1 } } }]);
+    const by = new Map(counts.map((c) => [String(c._id), c.n]));
+    res.send(rows.map((r) => ({ ...r, items: by.get(String(r._id)) || 0 })));
+  })
+);
+router.post(
+  "/package-types",
+  ah(async (req, res) => {
+    ownerOnly(req);
+    res.send(await PackageType.create({ ...validate(ptJoi, req.body), organization: req.storeOrg }));
+  })
+);
+router.put(
+  "/package-types/:id",
+  ah(async (req, res) => {
+    ownerOnly(req);
+    const pt = await PackageType.findOneAndUpdate({ _id: req.params.id, organization: req.storeOrg }, validate(ptJoi, req.body), { new: true });
+    if (!pt) throw new HttpError(404, "Package type not found");
+    res.send(pt);
+  })
+);
+router.delete(
+  "/package-types/:id",
+  ah(async (req, res) => {
+    ownerOnly(req);
+    const pt = await PackageType.findOneAndUpdate({ _id: req.params.id, organization: req.storeOrg }, { active: false });
+    if (!pt) throw new HttpError(404, "Package type not found");
+    await Item.updateMany({ packageType: pt._id }, { packageType: null });
+    res.send({ ok: true });
+  })
+);
+// Give several items a package type at once.
+router.post(
+  "/package-types/:id/assign",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ items: Joi.array().items(Joi.string()).min(1).max(2000).required() }), req.body);
+    const pt = await PackageType.findOne({ _id: req.params.id, organization: req.storeOrg, active: true });
+    if (!pt) throw new HttpError(404, "Package type not found");
+    const r = await Item.updateMany({ _id: { $in: d.items }, organization: req.org }, { packageType: pt._id });
+    res.send({ updated: r.modifiedCount });
+  })
+);
+
 // Which permission a request needs: returns, shipping, settings, or orders.
 router.moduleOf = function (req) {
   const p = req.path;
   if (/^\/returns\/|^\/orders\/return$/.test(p)) return "store_returns";
   if (/^\/orders\/(ship|track|labels)$|^\/orders\/[^/]+\/(label|cancel-shipment)$/.test(p)) return "store_shipping";
+  if (p === "/orders/quotes") return ["store_orders", "store_shipping"];
+  if (/^\/package-types/.test(p)) return req.method === "GET" ? ["store_shipping", "store_settings", "store_orders"] : /assign$/.test(p) ? ["store_settings", "store_shipping"] : "store_settings";
   if (/^\/couriers/.test(p)) return req.method === "GET" ? ["store_shipping", "store_settings"] : "store_settings";
   if (/^\/(store|locations|rules)/.test(p) && req.method !== "GET") return "store_settings";
   if (/^\/(store|locations)/.test(p)) return ["store_settings", "store_orders", "store_shipping", "store_returns"];
