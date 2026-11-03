@@ -83,7 +83,7 @@ function incomeAccounts(lines = []) {
 }
 
 // A purchase adjustment posted to its own account (TDS) can include a few paise of round-off, which goes to Rounding.
-const roundOffPart = (d) => (d.adjustmentAccount && Math.abs(d.adjustmentRoundOff || 0) < 1 && Math.abs(d.adjustmentRoundOff || 0) < Math.abs(d.adjustment || 0) ? d.adjustmentRoundOff || 0 : 0);
+const roundOffPart = (d) => (d.adjustmentAccount && Math.abs(d.adjustmentRoundOff || 0) < 5 && Math.abs(d.adjustmentRoundOff || 0) < Math.abs(d.adjustment || 0) ? d.adjustmentRoundOff || 0 : 0);
 
 // The cash/bank account money went through: the one picked, else by payment mode.
 const modeAccount = (mode, bankAccount) => bankAccount || (mode === "cash" ? "cash" : "bank");
@@ -170,7 +170,10 @@ async function buildEntries(org, { to } = {}) {
         cr("output_sgst", i.sgst);
         cr("output_igst", i.igst);
         cr("shipping_income", i.shippingCharge);
-        dr("adjustments", -(i.adjustment || 0));
+        // Adjustment: to its own account when set (e.g. packing charged), round-off part to Rounding.
+        const ro = roundOffPart(i);
+        dr(i.adjustmentAccount || "adjustments", -((i.adjustment || 0) - ro));
+        dr("adjustments", -ro);
         st("cogs", -inv("Invoice", i._id));
         st("inventory", inv("Invoice", i._id));
       },
@@ -205,7 +208,9 @@ async function buildEntries(org, { to } = {}) {
         dr("output_sgst", c.sgst);
         dr("output_igst", c.igst);
         dr("shipping_income", c.shippingCharge);
-        cr("adjustments", -(c.adjustment || 0));
+        const ro = roundOffPart(c);
+        cr(c.adjustmentAccount || "adjustments", -((c.adjustment || 0) - ro));
+        cr("adjustments", -ro);
         cr("ar", c.total);
         st("inventory", inv("Credit Note", c._id));
         st("cogs", -inv("Credit Note", c._id));

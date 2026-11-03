@@ -536,7 +536,7 @@ async function commit(ctx, data, opts, progress) {
           })(),
           shippingCharge: d.shippingCharge || 0,
           adjustment,
-          ...((type === "bills" || type === "vendorCredits") && d.adjustmentLedger && adjustment ? { adjustmentAccount: lookupAccount(d.adjustmentLedger) || "" } : {}),
+          ...(d.adjustmentLedger && adjustment && !["ar", "ap"].includes(lookupAccount(d.adjustmentLedger)) ? { adjustmentAccount: lookupAccount(d.adjustmentLedger) || "" } : {}),
           ...(() => {
             // The voucher's sales / purchase ledger, when it's an account of the right kind.
             const code = d.ledger ? lookupAccount(d.ledger) : "";

@@ -282,6 +282,8 @@ function normalise(xml, known = {}) {
   const guessed = new Set();
   const twoWay = new Set();
   const twoWayHome = new Map();
+  const seenDocs = new Map();
+  const dupNumbers = [];
   const stockOnly = [];
   for (const v of collect(xml, "VOUCHER")) {
     if (/yes/i.test(text(v.ISCANCELLED)) || /yes/i.test(text(v.ISOPTIONAL)) || /yes/i.test(text(v.ISDELETED))) continue;
@@ -373,7 +375,11 @@ function normalise(xml, known = {}) {
       const partyState = stateCode(text(v.STATENAME) || text(v.PARTYSTATENAME));
       const supplyState = stateCode(text(v.PLACEOFSUPPLY) || text(v.CONSIGNEESTATENAME)) || partyState;
       const docState = sales ? supplyState : partyState || supplyState;
-      const incomeSide = entries.filter((e) => e.ledger !== partyEntry.ledger && !isTax(e.ledger) && !isRound(e.ledger) && ["Income", "Other Income", "Cost Of Goods Sold", "Expense", "Other Expense", "Fixed Asset"].includes(groupOf(e.ledger) || (e.fromInventory ? "Income" : "")));
+      // With stock lines, the sale/purchase is the stock items' own ledgers; any other ledger on the voucher
+      // (packing or freight charged, TDS…) is an adjustment posted to that ledger.
+      const incomeSide = inv.length
+        ? entries.filter((e) => e.fromInventory)
+        : entries.filter((e) => e.ledger !== partyEntry.ledger && !isTax(e.ledger) && !isRound(e.ledger) && ["Income", "Other Income", "Cost Of Goods Sold", "Expense", "Other Expense", "Fixed Asset"].includes(groupOf(e.ledger) || (e.fromInventory ? "Income" : "")));
       let lines = inv.map((it) => {
         const qtyText = text(it.BILLEDQTY) || text(it.ACTUALQTY);
         const qty = Math.abs(num(qtyText)) || 1;
@@ -412,10 +418,21 @@ function normalise(xml, known = {}) {
       // When the whole adjustment is one real ledger (TDS deducted on a bill), post it there instead of Rounding.
       const adjLedgers = [...new Set(other.filter((e) => !isRound(e.ledger)).map((e) => e.ledger))];
       const roundOff = other.filter((e) => isRound(e.ledger)).reduce((s, e) => s + Math.abs(e.debit - e.credit), 0);
-      const adjustmentLedger = !sales && adjLedgers.length === 1 && roundOff < 1 ? adjLedgers[0] : "";
+      // One real ledger in the adjustment (TDS on a bill, packing charged on an invoice): post it there; the
+      // round-off beside it goes to Rounding.
+      const adjustmentLedger = adjLedgers.length === 1 && !["debtors", "creditors"].includes(groupOf(adjLedgers[0])) ? adjLedgers[0] : "";
+      void roundOff;
       const roundSigned = other.filter((e) => isRound(e.ledger)).reduce((t, e) => t + (sales ? e.credit - e.debit : e.debit - e.credit), 0);
+      // The same party can have two vouchers with one number (e.g. bill "100" on two dates): keep both.
+      const dupKey = `${kind}|${clean(partyEntry.ledger).toLowerCase()}|${clean(number).toLowerCase()}`;
+      let docNumber = number;
+      if (seenDocs.has(dupKey)) {
+        docNumber = `${number} (${d ? `${String(d.getUTCDate()).padStart(2, "0")}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${d.getUTCFullYear()}` : seenDocs.get(dupKey) + 1})`;
+        dupNumbers.push(`${partyEntry.ledger} ${number}`);
+      }
+      seenDocs.set(dupKey, (seenDocs.get(dupKey) || 0) + 1);
       out[kind].push({
-        number,
+        number: docNumber,
         date: d,
         dueDate: null,
         party: partyEntry.ledger,
@@ -463,6 +480,7 @@ function normalise(xml, known = {}) {
         });
     } else asJournal();
   }
+  if (dupNumbers.length) warnings.push(`${dupNumbers.length} voucher(s) repeat a number already used for the same party, so the date was added to tell them apart: ${dupNumbers.slice(0, 10).join(", ")}${dupNumbers.length > 10 ? "…" : ""}`);
   if (billPartial.length) warnings.push(`${billPartial.length} party ledger(s) have bill-wise opening details in Tally covering only part of the opening balance; the bills were kept and the rest added as an opening amount without a bill: ${billPartial.slice(0, 10).join(", ")}${billPartial.length > 10 ? "…" : ""}`);
   if (billMismatch.length) warnings.push(`${billMismatch.length} party ledger(s) have bill-wise opening details in Tally that don't add up to the ledger's opening balance, so the ledger balance was used as one opening amount: ${billMismatch.slice(0, 10).join(", ")}${billMismatch.length > 10 ? "…" : ""}`);
   if (stockLedgers.length) warnings.push(`Opening balance on stock ledger(s) ${stockLedgers.join(", ")} was left out: stock value comes from your items' opening stock (import Tally's Stock Summary), so it isn't counted twice`);
