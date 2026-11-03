@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { STATES } from "../lib/constants";
 import { PageHeader, Spinner, Field, Modal, toast } from "../components/ui";
+import { breakdownText } from "../components/rates";
 
 const FIELD_LABEL = {
   email: "API user email",
@@ -399,7 +400,7 @@ function Rules({ store, onSaved }) {
 
 function CourierModal({ acc, carriers, onClose, onSaved }) {
   const isNew = !acc._id;
-  const [f, setF] = useState({ carrier: acc.carrier || "shiprocket", name: acc.name || "", active: acc.active !== false, isDefault: !!acc.isDefault, test: !!acc.test, baseUrl: acc.baseUrl || "", credentials: {}, options: { ...(acc.options || {}) }, pickup: { name: "", phone: "", address: "", city: "", state: "", pincode: "", ...(acc.pickup || {}) }, trackingUrl: acc.trackingUrl || "", rateCard: { slab: 0.5, divisor: 5000, gstPercent: 18, zones: {}, ...(acc.rateCard || {}) } });
+  const [f, setF] = useState({ carrier: acc.carrier || "shiprocket", name: acc.name || "", active: acc.active !== false, isDefault: !!acc.isDefault, test: !!acc.test, baseUrl: acc.baseUrl || "", credentials: {}, options: { ...(acc.options || {}) }, pickup: { name: "", phone: "", address: "", city: "", state: "", pincode: "", ...(acc.pickup || {}) }, trackingUrl: acc.trackingUrl || "", rateCard: asRateCard(acc.rateCard) });
   const [busy, setBusy] = useState(false);
   const c = carriers[f.carrier];
   const saved = acc.credentialKeys || [];
@@ -409,7 +410,7 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
       // A dropdown shows its first choice when nothing is saved: save that choice too, so what you see is what's used.
       const options = { ...f.options };
       for (const k of c.fields.options) if (SELECTS[k] && !options[k]) options[k] = SELECTS[k][0][0];
-      const body = { ...f, options, name: f.name || c.label };
+      const body = { ...f, options, name: f.name || c.label, rateCard: cleanRateCard(f.rateCard) };
       const { data } = isNew ? await api.post("/shopify/couriers", body) : await api.put(`/shopify/couriers/${acc._id}`, body);
       if (f.carrier !== "custom") {
         try {
@@ -595,6 +596,7 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
           </>
         )}
         <RateCard rc={f.rateCard} onChange={(rateCard) => setF((x) => ({ ...x, rateCard }))} />
+        {f.rateCard.enabled && (isNew ? <p className="muted small">Save the courier first, then upload its pincode lists.</p> : <PincodeLists acc={acc} />)}
         <div className="row-2">
           <label className="check">
             <input type="checkbox" checked={f.isDefault} onChange={(e) => setF({ ...f, isDefault: e.target.checked })} /> Default courier
@@ -608,75 +610,403 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
   );
 }
 
-const ZONES = [
-  ["local", "Within city"],
-  ["state", "Within state"],
-  ["metro", "Metro to metro"],
-  ["roi", "Rest of India"],
-  ["special", "North-East, J&K, islands"],
-];
+// Drop blank slabs/zones before saving.
+const cleanSlabs = (sl) => (sl || []).filter((s) => Number(s.up_to_kg) > 0 && s.price !== "" && s.price !== undefined).map((s) => ({ up_to_kg: Number(s.up_to_kg), price: Number(s.price) }));
+const cleanRateCard = (rc) => ({
+  ...rc,
+  zones: (rc.zones || []).filter((z) => z.zone).map((z) => ({ ...z, slabs: cleanSlabs(z.slabs), additional_per_kg: Number(z.additional_per_kg) || 0, per_kg_rate: Number(z.per_kg_rate) || 0 })),
+  extras: { ...(rc.extras || {}), ecc_slabs: cleanSlabs(rc.extras?.ecc_slabs), owsp_slabs: cleanSlabs(rc.extras?.owsp_slabs) },
+});
+const EMPTY_RC = { enabled: false, rate_type: "slab", volumetric_divisor: 5000, default_zone: "", zones: [], extras: { gst_pct: 18 } };
+const asRateCard = (rc) => (rc && Array.isArray(rc.zones) ? { ...EMPTY_RC, ...rc, extras: { ...EMPTY_RC.extras, ...(rc.extras || {}) } } : { ...EMPTY_RC });
+const n = (v) => (v === "" || v === null || v === undefined ? "" : Number(v));
 
-// Manual rates: used for the expected charge when the courier's API doesn't give one.
+function Slabs({ slabs = [], onChange, unit = "₹" }) {
+  const set = (i, k, v) => onChange(slabs.map((s, j) => (j === i ? { ...s, [k]: n(v) } : s)));
+  return (
+    <div>
+      {slabs.map((s, i) => (
+        <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+          <span className="muted small">up to</span>
+          <input type="number" step="0.01" min="0" style={{ width: 80 }} value={s.up_to_kg ?? ""} onChange={(e) => set(i, "up_to_kg", e.target.value)} />
+          <span className="muted small">kg {unit}</span>
+          <input type="number" step="0.01" min="0" style={{ width: 90 }} value={s.price ?? ""} onChange={(e) => set(i, "price", e.target.value)} />
+          <button type="button" className="link-btn" onClick={() => onChange(slabs.filter((_, j) => j !== i))}>
+            ✕
+          </button>
+        </div>
+      ))}
+      <button type="button" className="link-btn small" onClick={() => onChange([...slabs, { up_to_kg: "", price: "" }])}>
+        + slab
+      </button>
+    </div>
+  );
+}
+
+// Rate card in the same format as the Maganova/BillFlow shipping calculator.
 function RateCard({ rc, onChange }) {
-  const set = (k) => (e) => onChange({ ...rc, [k]: e.target.value === "" ? "" : Number(e.target.value) });
-  const setZ = (z, k) => (e) => onChange({ ...rc, zones: { ...(rc.zones || {}), [z]: { ...(rc.zones?.[z] || {}), [k]: e.target.value === "" ? "" : Number(e.target.value) } } });
+  const [paste, setPaste] = useState(null);
+  const x = rc.extras || {};
+  const set = (k, v) => onChange({ ...rc, [k]: v });
+  const setX = (k, v) => onChange({ ...rc, extras: { ...x, [k]: v } });
+  const num = (k) => ({ type: "number", step: "0.01", min: "0", value: x[k] ?? "", onChange: (e) => setX(k, n(e.target.value)) });
+  const setZone = (i, z) => set("zones", rc.zones.map((y, j) => (j === i ? z : y)));
+  const importJson = () => {
+    try {
+      const j = JSON.parse(paste);
+      const src = j.rateCard || j;
+      if (!Array.isArray(src.zones)) throw new Error("No zones found in it");
+      onChange(asRateCard({ enabled: true, rate_type: src.rate_type || "slab", volumetric_divisor: src.volumetric_divisor || 5000, default_zone: src.default_zone || "", zones: src.zones, extras: src.extras || {} }));
+      setPaste(null);
+      toast(`Rate card loaded: ${src.zones.length} zones — save to keep it`);
+    } catch (e) {
+      toast(`Couldn't read that: ${e.message}`, "error");
+    }
+  };
   return (
     <div className="card" style={{ background: "var(--bg-soft, #f8fafc)", padding: 12 }}>
-      <label className="check">
-        <input type="checkbox" checked={!!rc.enabled} onChange={(e) => onChange({ ...rc, enabled: e.target.checked })} /> <strong>Rate card</strong> — use these rates when the courier's API doesn't give a charge
-      </label>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <label className="check">
+          <input type="checkbox" checked={!!rc.enabled} onChange={(e) => set("enabled", e.target.checked)} /> <strong>Rate card</strong> — used when the courier's API gives no charge
+        </label>
+        <button type="button" className="btn btn-sm" onClick={() => setPaste("")}>
+          Paste JSON from other app
+        </button>
+      </div>
+      {paste !== null && (
+        <div style={{ marginTop: 8 }}>
+          <textarea rows={6} style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }} placeholder='{"rate_type":"slab","volumetric_divisor":5000,"default_zone":"A","zones":[…],"extras":{…}}' value={paste} onChange={(e) => setPaste(e.target.value)} />
+          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+            <button type="button" className="btn btn-sm btn-primary" onClick={importJson}>
+              Load
+            </button>
+            <button type="button" className="btn btn-sm" onClick={() => setPaste(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       {rc.enabled && (
         <>
           <p className="muted small">
-            Charge = first slab + each extra slab, on the higher of actual and volumetric weight (L×B×H ÷ divisor), plus fuel surcharge, COD charge and GST. Zones: within city (same city or first 3 pincode digits), within state, metro to metro (Delhi, Mumbai, Kolkata, Chennai, Bengaluru, Hyderabad, Ahmedabad, Pune…), rest of India, and North-East / J&K / islands.
+            Chargeable weight = the higher of dead weight and L×B×H ÷ divisor, rounded up to a whole kg. Slab rates charge the cheapest of: a slab's price (weight within it) or its price + extra kg × additional per kg. Then fuel, docket, ECC, OWSP, RAS, IDC, EFSS, FOV, custom charges and COD (higher of flat or %), and GST on the total.
           </p>
           <div className="row-3">
-            <Field label="Slab (kg)">
-              <input type="number" step="0.01" min="0" value={rc.slab ?? ""} onChange={set("slab")} />
+            <Field label="Rate type">
+              <select value={rc.rate_type} onChange={(e) => set("rate_type", e.target.value)}>
+                <option value="slab">Weight slabs</option>
+                <option value="per_kg">Flat per kg</option>
+              </select>
             </Field>
-            <Field label="Volumetric divisor">
-              <input type="number" min="0" value={rc.divisor ?? ""} onChange={set("divisor")} />
+            <Field label="Volumetric divisor" hint="Delhivery/DTDC 5000, Blue Dart 4500">
+              <input type="number" min="1" value={rc.volumetric_divisor ?? ""} onChange={(e) => set("volumetric_divisor", n(e.target.value))} />
             </Field>
-            <Field label="Fuel surcharge %">
-              <input type="number" step="0.01" min="0" value={rc.fuelPercent ?? ""} onChange={set("fuelPercent")} />
+            <Field label="Default zone" hint="Used when no pincode list is uploaded">
+              <input value={rc.default_zone || ""} onChange={(e) => set("default_zone", e.target.value.trim())} placeholder="e.g. A" />
             </Field>
           </div>
+          <div className="label-sm">Zones</div>
           <table className="table compact">
             <thead>
               <tr>
                 <th>Zone</th>
-                <th className="num">First slab (₹)</th>
-                <th className="num">Each extra slab (₹)</th>
+                <th>{rc.rate_type === "per_kg" ? "₹ per kg" : "Slabs"}</th>
+                {rc.rate_type !== "per_kg" && <th>Additional ₹/kg</th>}
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {ZONES.map(([z, l]) => (
-                <tr key={z}>
-                  <td>{l}</td>
-                  <td className="num">
-                    <input type="number" step="0.01" min="0" style={{ width: 110 }} value={rc.zones?.[z]?.first ?? ""} onChange={setZ(z, "first")} />
+              {rc.zones.map((z, i) => (
+                <tr key={i}>
+                  <td>
+                    <input style={{ width: 70 }} value={z.zone || ""} onChange={(e) => setZone(i, { ...z, zone: e.target.value.trim() })} />
                   </td>
-                  <td className="num">
-                    <input type="number" step="0.01" min="0" style={{ width: 110 }} value={rc.zones?.[z]?.extra ?? ""} onChange={setZ(z, "extra")} />
+                  <td>
+                    {rc.rate_type === "per_kg" ? (
+                      <input type="number" step="0.01" min="0" style={{ width: 90 }} value={z.per_kg_rate ?? ""} onChange={(e) => setZone(i, { ...z, per_kg_rate: n(e.target.value) })} />
+                    ) : (
+                      <Slabs slabs={z.slabs || []} onChange={(slabs) => setZone(i, { ...z, slabs })} />
+                    )}
+                  </td>
+                  {rc.rate_type !== "per_kg" && (
+                    <td>
+                      <input type="number" step="0.01" min="0" style={{ width: 80 }} value={z.additional_per_kg ?? ""} onChange={(e) => setZone(i, { ...z, additional_per_kg: n(e.target.value) })} />
+                    </td>
+                  )}
+                  <td>
+                    <button type="button" className="link-btn" onClick={() => set("zones", rc.zones.filter((_, j) => j !== i))}>
+                      Remove
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="row-3">
-            <Field label="COD charge (₹, minimum)">
-              <input type="number" step="0.01" min="0" value={rc.codFixed ?? ""} onChange={set("codFixed")} />
+          <button type="button" className="btn btn-sm" onClick={() => set("zones", [...rc.zones, { zone: String.fromCharCode(65 + rc.zones.length), slabs: [], additional_per_kg: 0, per_kg_rate: 0 }])}>
+            + Add zone
+          </button>
+
+          <div className="label-sm" style={{ marginTop: 12 }}>
+            Surcharges
+          </div>
+          <div className="row-4">
+            <Field label="Fuel surcharge %">
+              <input {...num("fuel_surcharge_pct")} />
             </Field>
-            <Field label="COD charge % of amount" hint="The higher of the two is charged">
-              <input type="number" step="0.01" min="0" value={rc.codPercent ?? ""} onChange={set("codPercent")} />
+            <Field label="Docket ₹">
+              <input {...num("docket_charge")} />
             </Field>
-            <Field label="GST % on the charge" hint="0 if your rates already include GST">
-              <input type="number" step="0.01" min="0" value={rc.gstPercent ?? ""} onChange={set("gstPercent")} />
+            <Field label="IDC % of freight">
+              <input {...num("idc_pct")} />
+            </Field>
+            <Field label="EFSS % of freight">
+              <input {...num("efss_pct")} />
             </Field>
           </div>
+          <div className="row-4">
+            <Field label="FOV % of order value">
+              <input {...num("fov_pct")} />
+            </Field>
+            <Field label="COD flat ₹">
+              <input {...num("cod_flat")} />
+            </Field>
+            <Field label="COD % of order value" hint="Higher of flat or %">
+              <input {...num("cod_pct")} />
+            </Field>
+            <Field label="GST %">
+              <input {...num("gst_pct")} />
+            </Field>
+          </div>
+          <div className="row-2">
+            <Field label="ECC districts" hint="One per line: State | District. Aliases like “Gautam Buddha Nagar (Noida)” work.">
+              <textarea
+                rows={4}
+                value={(x.ecc_districts || []).map((e) => (e.state ? `${e.state} | ${e.district}` : e.district)).join("\n")}
+                onChange={(e) =>
+                  setX(
+                    "ecc_districts",
+                    e.target.value
+                      .split("\n")
+                      .map((l) => l.split("|").map((t) => t.trim()))
+                      .filter((p) => p.some(Boolean))
+                      .map((p) => (p.length > 1 ? { state: p[0], district: p[1] } : { state: "", district: p[0] }))
+                  )
+                }
+              />
+            </Field>
+            <Field label="ECC charge by weight" hint="Charged when the district (or pincode) is in the ECC list">
+              <Slabs slabs={x.ecc_slabs || []} onChange={(v) => setX("ecc_slabs", v)} />
+              <div className="muted small" style={{ marginTop: 4 }}>
+                Flat ECC ₹ (no slabs / no list set):{" "}
+                <input style={{ width: 80 }} {...num("ecc_charge")} />
+              </div>
+            </Field>
+          </div>
+          <div className="row-2">
+            <Field label="OWSP (over-weight surcharge)" hint="By chargeable weight, on every shipment">
+              <Slabs slabs={x.owsp_slabs || []} onChange={(v) => setX("owsp_slabs", v)} />
+            </Field>
+            <Field label="RAS states" hint="Comma or line separated state names">
+              <textarea rows={3} value={(x.ras_states || []).join(", ")} onChange={(e) => setX("ras_states", e.target.value.split(/[,\n]+/).map((t) => t.trim()).filter(Boolean))} />
+              <div className="muted small" style={{ marginTop: 4 }}>
+                RAS ₹ per kg: <input style={{ width: 80 }} {...num("ras_per_kg")} />
+              </div>
+            </Field>
+          </div>
+          {[1, 2].map((k) => (
+            <div className="row-3" key={k}>
+              <Field label={`Custom charge ${k} — label`}>
+                <input value={x[`custom${k}_label`] || ""} onChange={(e) => setX(`custom${k}_label`, e.target.value)} />
+              </Field>
+              <Field label="Type">
+                <select value={x[`custom${k}_type`] || "fixed"} onChange={(e) => setX(`custom${k}_type`, e.target.value)}>
+                  <option value="fixed">Fixed ₹</option>
+                  <option value="pct_freight">% of freight</option>
+                  <option value="pct_value">% of order value</option>
+                </select>
+              </Field>
+              <Field label="Value">
+                <input {...num(`custom${k}_value`)} />
+              </Field>
+            </div>
+          ))}
         </>
       )}
     </div>
+  );
+}
+
+// Upload the courier's pincode lists: zones (pincode, zone), EDL and ECC pincodes.
+function PincodeLists({ acc }) {
+  const [c, setC] = useState(null);
+  const [replace, setReplace] = useState(true);
+  const [busy, setBusy] = useState("");
+  const load = () => api.get(`/shopify/couriers/${acc._id}/pincodes`).then((r) => setC(r.data));
+  useEffect(() => {
+    load().catch(() => {});
+  }, [acc._id]);
+  const upload = async (kind, file) => {
+    if (!file) return;
+    setBusy(kind);
+    try {
+      const rows = (await file.text())
+        .split(/\r?\n/)
+        .map((l) => l.split(/[,;\t]/).map((t) => t.trim().replace(/^"|"$/g, "")))
+        .filter((p) => /^\d{6}$/.test(p[0]))
+        .map((p) => ({ pincode: p[0], zone: kind === "zone" ? p[1] || "" : "" }));
+      if (!rows.length) throw new Error("No 6-digit pincodes found in the first column");
+      let added = 0;
+      for (let i = 0; i < rows.length; i += 20000) {
+        const { data } = await api.post(`/shopify/couriers/${acc._id}/pincodes`, { kind, replace: replace && i === 0, rows: rows.slice(i, i + 20000) });
+        added += data.added;
+      }
+      toast(`${added} pincodes uploaded`);
+      load();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy("");
+  };
+  const clear = async (kind) => {
+    if (!window.confirm("Remove this whole list?")) return;
+    await api.delete(`/shopify/couriers/${acc._id}/pincodes/${kind}`);
+    load();
+  };
+  const KINDS = [
+    ["zone", "Pincode → zone", "CSV: pincode, zone. With a list, pincodes not in it are not serviceable."],
+    ["edl", "EDL (out of delivery area)", "CSV: one pincode per line. Shown as EDL on the quote."],
+    ["ecc", "ECC pincodes", "Optional, instead of ECC districts."],
+  ];
+  return (
+    <div>
+      <div className="label-sm">Pincode lists</div>
+      <table className="table compact">
+        <tbody>
+          {KINDS.map(([k, l, h]) => (
+            <tr key={k}>
+              <td>
+                <strong>{l}</strong>
+                <div className="muted small">{h}</div>
+              </td>
+              <td className="small">
+                {c ? `${c[k]} pincodes` : "…"}
+                {k === "zone" && c && Object.keys(c.zones).length > 0 && (
+                  <div className="muted small">
+                    {Object.entries(c.zones)
+                      .map(([z, v]) => `${z}: ${v}`)
+                      .join(" · ")}
+                  </div>
+                )}
+              </td>
+              <td style={{ whiteSpace: "nowrap" }}>
+                <label className="btn btn-sm">
+                  {busy === k ? "Uploading…" : "Upload CSV"}
+                  <input type="file" accept=".csv,.txt" hidden onChange={(e) => upload(k, e.target.files[0]) && (e.target.value = "")} />
+                </label>{" "}
+                {c?.[k] > 0 && (
+                  <button type="button" className="link-btn small" onClick={() => clear(k)}>
+                    Clear
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <label className="check small">
+        <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} /> Uploading replaces the existing list (untick to add to it)
+      </label>
+    </div>
+  );
+}
+
+// Rate calculator: every active courier for a pincode, weight and size.
+function RateCalculator() {
+  const [f, setF] = useState({ to: "", weight: "", length: "", breadth: "", height: "", value: "", cod: false });
+  const [r, setR] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+  const go = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const body = { ...f, weight: Number(f.weight), length: Number(f.length) || 0, breadth: Number(f.breadth) || 0, height: Number(f.height) || 0, value: Number(f.value) || 0 };
+      setR((await api.post("/shopify/couriers/calculate", body)).data);
+    } catch (err) {
+      toast(errMsg(err), "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <form className="card form" id="rate-calculator" style={{ marginTop: 18 }} onSubmit={go}>
+      <h4 className="section-title" style={{ marginTop: 0 }}>
+        Rate calculator
+      </h4>
+      <div className="row-4">
+        <Field label="Destination pincode" required>
+          <input value={f.to} onChange={set("to")} maxLength={6} />
+        </Field>
+        <Field label="Dead weight (kg)" required>
+          <input type="number" step="0.01" min="0" value={f.weight} onChange={set("weight")} />
+        </Field>
+        <Field label="Order value ₹">
+          <input type="number" step="0.01" min="0" value={f.value} onChange={set("value")} />
+        </Field>
+        <label className="check" style={{ alignSelf: "end" }}>
+          <input type="checkbox" checked={f.cod} onChange={set("cod")} /> COD
+        </label>
+      </div>
+      <div className="row-4">
+        <Field label="Length (cm)">
+          <input type="number" step="0.1" min="0" value={f.length} onChange={set("length")} />
+        </Field>
+        <Field label="Breadth (cm)">
+          <input type="number" step="0.1" min="0" value={f.breadth} onChange={set("breadth")} />
+        </Field>
+        <Field label="Height (cm)">
+          <input type="number" step="0.1" min="0" value={f.height} onChange={set("height")} />
+        </Field>
+        <button className="btn btn-primary" style={{ alignSelf: "end" }} disabled={busy}>
+          {busy ? "Calculating…" : "Calculate"}
+        </button>
+      </div>
+      {r && (
+        <>
+          <p className="muted small">
+            {f.to}: {r.destination?.district ? `${r.destination.district}, ${r.destination.state}` : "location not found"}
+          </p>
+          <table className="table compact">
+            <thead>
+              <tr>
+                <th>Courier</th>
+                <th>Pincode</th>
+                <th>Zone · weight</th>
+                <th className="num">Total</th>
+                <th>Breakdown</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.rows.map((q) => (
+                <tr key={q.account} className={q.serviceable === false ? "muted" : ""}>
+                  <td>
+                    {q.name}
+                    {q.edl && <span className="pill pill-amber" style={{ marginLeft: 6 }}>EDL</span>}
+                  </td>
+                  <td className="small">{q.serviceable === true ? "Serviceable" : q.serviceable === false ? <span className="text-red">Not serviceable</span> : "Not checked"}{q.note && <div className="muted small">{q.note}</div>}</td>
+                  <td className="small">
+                    {q.zone || "—"} · {q.chargeableWeight} kg
+                  </td>
+                  <td className="num">{q.charge != null ? <strong>₹{q.charge}</strong> : "—"} <span className="muted small">{q.source === "api" ? "API" : q.source}</span></td>
+                  <td className="small muted" style={{ whiteSpace: "pre-line" }}>
+                    {breakdownText(q).split("\n").pop()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </form>
   );
 }
 
@@ -879,6 +1209,7 @@ export function ShopifySettings() {
       <Rules key={JSON.stringify(store.rules).length} store={store} onSaved={saved} />
       <PackageTypes />
       <Couriers carriers={store.carriers} />
+      <RateCalculator />
     </>
   );
 }

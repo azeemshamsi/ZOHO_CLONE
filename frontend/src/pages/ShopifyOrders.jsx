@@ -5,6 +5,7 @@ import { money, date } from "../lib/format";
 import { stateName } from "../lib/constants";
 import { PageHeader, Spinner, Empty, Modal, Field, SearchBox, useDebounced, toast } from "../components/ui";
 import Icon from "../components/Icon";
+import { breakdownText } from "../components/rates";
 import { useAuth } from "../lib/auth";
 
 const TABS = [
@@ -103,11 +104,18 @@ const ServBadge = ({ v, note }) => {
 };
 const ChargeCell = ({ r }) =>
   r.charge != null ? (
-    <span title={r.breakdown ? `${r.breakdown.zoneName} · ${r.breakdown.weight} kg chargeable · freight ${r.breakdown.freight} + fuel ${r.breakdown.fuel} + COD ${r.breakdown.cod} + GST ${r.breakdown.gst}` : "From the courier's API"}>
+    <span title={breakdownText(r)} style={{ cursor: "help" }}>
       <strong>{money(r.charge)}</strong> <span className="muted small">{r.source === "api" ? "API" : "rate card"}</span>
+      {r.edl && <span className="pill pill-amber" style={{ marginLeft: 4 }}>EDL</span>}
+      {(r.zone || r.chargeableWeight) && (
+        <div className="muted small">
+          {r.zone ? `Zone ${r.zone} · ` : ""}
+          {r.chargeableWeight} kg
+        </div>
+      )}
     </span>
   ) : (
-    <span className="muted small">No rate</span>
+    <span className="muted small">No rate{r.edl ? " · EDL" : ""}</span>
   );
 
 // Flatten courier rows: an aggregator (Shiprocket) lists each of its couriers as its own choice.

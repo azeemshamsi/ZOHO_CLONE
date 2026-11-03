@@ -13,52 +13,169 @@ const r2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const qs = (o) => new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== "")).toString();
 const yes = (v) => (v === undefined || v === null || v === "" ? null : /^(y|yes|true|1)$/i.test(String(v)));
 
-/* ---------------- rate card ---------------- */
-// Zones as Indian couriers usually price them.
-const ZONES = [
-  ["local", "Within city"],
-  ["state", "Within state"],
-  ["metro", "Metro to metro"],
-  ["roi", "Rest of India"],
-  ["special", "North-East, J&K, islands"],
-];
-const SPECIAL_STATES = ["01", "38", "11", "12", "13", "14", "15", "16", "17", "18", "35", "31"];
-const METROS = ["delhi", "new delhi", "mumbai", "navi mumbai", "kolkata", "chennai", "bengaluru", "bangalore", "hyderabad", "ahmedabad", "pune", "secunderabad", "noida", "gurgaon", "gurugram", "thane"];
-const norm = (s) => String(s || "").trim().toLowerCase();
+/* ---------------- rate card (same format and maths as the Maganova/BillFlow calculator) ---------------- */
+// acc.rateCard = { enabled, rate_type: "slab"|"per_kg", volumetric_divisor, default_zone,
+//   zones: [{ zone, slabs: [{ up_to_kg, price }], additional_per_kg, per_kg_rate }],
+//   extras: { fuel_surcharge_pct, docket_charge, ecc_charge, ecc_slabs, owsp_slabs, ecc_districts: [{state, district}],
+//             ras_states, ras_per_kg, gst_pct, cod_flat, cod_pct, idc_pct, efss_pct, fov_pct,
+//             custom1_label, custom1_type: fixed|pct_freight|pct_value, custom1_value, custom2_… } }
+// Pincode lists (zone / edl / ecc) are in CourierPincode.
+const num = (v) => Number(v) || 0;
 
-function zoneOf(from, to) {
-  if (SPECIAL_STATES.includes(to.state) || SPECIAL_STATES.includes(from.state)) return "special";
-  if ((from.city && norm(from.city) === norm(to.city)) || (from.pincode && to.pincode && from.pincode.slice(0, 3) === to.pincode.slice(0, 3))) return "local";
-  if (from.state && from.state === to.state) return "state";
-  if (METROS.includes(norm(from.city)) && METROS.includes(norm(to.city))) return "metro";
-  return "roi";
+function volumetricWeight(l, w, h, divisor) {
+  if (divisor <= 0 || l * w * h <= 0) return 0;
+  return (l * w * h) / divisor;
 }
 
-const rateCardOn = (acc) => !!acc.rateCard?.enabled && ZONES.some(([z]) => Number(acc.rateCard.zones?.[z]?.first) > 0);
-
-// Chargeable weight: the higher of actual and volumetric, rounded up to the slab.
+// Chargeable weight: the higher of dead and volumetric, rounded UP to a whole kg.
 function chargeableWeight(q, rc = {}) {
-  const divisor = Number(rc.divisor) || 5000;
-  const vol = (Number(q.length) * Number(q.breadth) * Number(q.height)) / divisor || 0;
-  const w = Math.max(Number(q.weight) || 0, vol);
-  const slab = Number(rc.slab) || 0.5;
-  return { weight: r2(Math.max(slab, Math.ceil(r2(w / slab)) * slab)), volumetric: r2(vol), slab };
+  const divisor = num(rc.volumetric_divisor) || 5000;
+  const volumetric = volumetricWeight(num(q.length), num(q.breadth), num(q.height), divisor);
+  return { weight: Math.ceil(Math.max(num(q.weight), volumetric)), volumetric: r2(volumetric), divisor };
 }
 
-function rateCardCharge(acc, q, from, to) {
-  const rc = acc.rateCard || {};
-  const zone = zoneOf(from, to);
-  const z = rc.zones?.[zone] || {};
-  const first = Number(z.first) || 0;
-  if (!first) return null;
-  const { weight, volumetric, slab } = chargeableWeight(q, rc);
-  const extraSlabs = Math.max(0, Math.round((weight - slab) / slab));
-  const freight = r2(first + extraSlabs * (Number(z.extra) || 0));
-  const fuel = r2((freight * (Number(rc.fuelPercent) || 0)) / 100);
-  const cod = q.cod ? r2(Math.max(Number(rc.codFixed) || 0, ((Number(q.codAmount) || 0) * (Number(rc.codPercent) || 0)) / 100)) : 0;
-  const before = r2(freight + fuel + cod);
-  const gst = r2((before * (rc.gstPercent === undefined || rc.gstPercent === "" ? 18 : Number(rc.gstPercent))) / 100);
-  return { total: r2(before + gst), zone, zoneName: ZONES.find(([k]) => k === zone)[1], weight, volumetric, freight, fuel, cod, gst };
+// rate_type per_kg → weight × per_kg_rate. slab → the lowest of: each slab's price (weight within it)
+// or its price + excess kg × additional_per_kg.
+function slabFreight(cw, zoneRate, rateType) {
+  if (rateType === "per_kg") return cw * num(zoneRate.per_kg_rate);
+  const slabs = [...(zoneRate.slabs || [])].sort((a, b) => num(a.up_to_kg) - num(b.up_to_kg));
+  if (!slabs.length) return 0;
+  const add = num(zoneRate.additional_per_kg);
+  return Math.min(...slabs.map((s) => (cw <= num(s.up_to_kg) ? num(s.price) : num(s.price) + (cw - num(s.up_to_kg)) * add)));
+}
+
+const nrm = (s) => String(s || "").split(/\s+/).filter(Boolean).join(" ").toLowerCase();
+const stripAlias = (n) => (n.includes("(") && n.includes(")") ? n.split("(")[0].trim() : n.trim());
+const extractAlias = (n) => (n.includes("(") && n.includes(")") ? n.split("(").slice(1).join("(").split(")")[0].trim() : "");
+const slabPrice = (slabs, cw) => {
+  const sorted = [...slabs].sort((a, b) => num(a.up_to_kg) - num(b.up_to_kg));
+  const hit = sorted.find((s) => cw <= num(s.up_to_kg));
+  return num((hit || sorted[sorted.length - 1]).price);
+};
+
+/**
+ * The charge for one shipment from a rate card (pure; lookups already done).
+ * ctx: { zone, cw, orderValue, isCod, destState, destDistrict, eccListed, eccListConfigured }
+ */
+function computeRateCard(rc, ctx) {
+  const zoneRate = (rc.zones || []).find((z) => z.zone === ctx.zone);
+  if (!zoneRate) return { error: `No rate set for zone '${ctx.zone}'` };
+  const cw = ctx.cw;
+  const x = rc.extras || {};
+  const freight = slabFreight(cw, zoneRate, rc.rate_type || "slab");
+  const fuel = (freight * num(x.fuel_surcharge_pct)) / 100;
+  const docket = num(x.docket_charge);
+
+  // ECC: destination district in the courier's list (or the pincode in its ECC list)
+  let ecc = 0;
+  let eccMatched = false;
+  const eccDistricts = x.ecc_districts || [];
+  if (eccDistricts.length && ctx.destDistrict) {
+    const d = nrm(ctx.destDistrict);
+    const st = nrm(ctx.destState);
+    eccMatched = eccDistricts.some((e) => {
+      const ed = e.district || "";
+      const alias = nrm(extractAlias(ed));
+      if (d !== nrm(stripAlias(ed)) && !(alias && d === alias)) return false;
+      const es = nrm(e.state);
+      return !es || st === es;
+    });
+  }
+  if (!eccMatched && ctx.eccListConfigured) eccMatched = !!ctx.eccListed;
+  if (eccMatched) ecc = (x.ecc_slabs || []).length ? slabPrice(x.ecc_slabs, cw) : num(x.ecc_charge);
+  else if (!(eccDistricts.length || ctx.eccListConfigured)) ecc = num(x.ecc_charge); // nothing set up → flat fee
+
+  // OWSP: over-weight surcharge slabs, on every shipment
+  const owsp = (x.owsp_slabs || []).length ? slabPrice(x.owsp_slabs, cw) : 0;
+
+  // RAS: per kg for chosen destination states
+  let ras = 0;
+  const rasStates = (x.ras_states || []).filter((s) => typeof s === "string");
+  if (num(x.ras_per_kg) > 0 && rasStates.length && ctx.destState && rasStates.map(nrm).includes(nrm(ctx.destState))) ras = num(x.ras_per_kg) * cw;
+
+  const value = num(ctx.orderValue);
+  const idc = (freight * num(x.idc_pct)) / 100;
+  const efss = (freight * num(x.efss_pct)) / 100;
+  const fov = (value * num(x.fov_pct)) / 100;
+  const custom = (t, v) => {
+    v = num(v);
+    if (v <= 0) return 0;
+    if (t === "pct_freight") return (freight * v) / 100;
+    if (t === "pct_value") return (value * v) / 100;
+    return v;
+  };
+  const custom1 = custom(x.custom1_type || "fixed", x.custom1_value);
+  const custom2 = custom(x.custom2_type || "fixed", x.custom2_value);
+  const cod = ctx.isCod ? Math.max(num(x.cod_flat), (value * num(x.cod_pct)) / 100) : 0;
+
+  const taxable = freight + fuel + docket + ecc + owsp + ras + idc + efss + fov + custom1 + custom2 + cod;
+  const gst = (taxable * (x.gst_pct === undefined || x.gst_pct === "" || x.gst_pct === null ? 18 : num(x.gst_pct))) / 100;
+  return {
+    zone: ctx.zone,
+    chargeableWeight: cw,
+    breakdown: {
+      freight: r2(freight),
+      fuel_surcharge: r2(fuel),
+      docket: r2(docket),
+      ecc: r2(ecc),
+      owsp: r2(owsp),
+      ras: r2(ras),
+      idc: r2(idc),
+      efss: r2(efss),
+      fov: r2(fov),
+      custom1: custom1 > 0 ? { label: x.custom1_label || "Custom 1", amount: r2(custom1) } : null,
+      custom2: custom2 > 0 ? { label: x.custom2_label || "Custom 2", amount: r2(custom2) } : null,
+      cod_charge: r2(cod),
+      gst: r2(gst),
+    },
+    total: r2(taxable + gst),
+  };
+}
+
+const rateCardOn = (acc) => !!acc.rateCard?.enabled && Array.isArray(acc.rateCard.zones) && acc.rateCard.zones.length > 0;
+
+// Pincode → state and district, cached.
+async function locatePincode(pincode) {
+  const PincodeLookup = require("../../models/PincodeLookup");
+  if (!/^\d{6}$/.test(pincode || "")) return {};
+  const hit = await PincodeLookup.findOne({ pincode }).lean();
+  if (hit) return { state: hit.state, district: hit.district };
+  let state = null;
+  let district = null;
+  try {
+    const { data } = await request(`https://api.postalpincode.in/pincode/${pincode}`, { timeout: 10000 });
+    const e = Array.isArray(data) ? data[0] : data?.["0"] || {};
+    const po = e?.PostOffice?.[0];
+    if (e?.Status === "Success" && po) [state, district] = [(po.State || "").trim() || null, (po.District || "").trim() || null];
+  } catch {}
+  await PincodeLookup.updateOne({ pincode }, { pincode, state, district, at: new Date() }, { upsert: true }).catch(() => {});
+  return { state, district };
+}
+
+// Count / find in a courier's pincode lists (zone, edl, ecc).
+async function listInfo(acc, kind, pincode) {
+  const CourierPincode = require("../../models/CourierPincode");
+  const configured = !!(await CourierPincode.exists({ account: acc._id, kind }));
+  if (!configured) return { configured: false };
+  const row = await CourierPincode.findOne({ account: acc._id, kind, pincode }).lean();
+  return { configured: true, row };
+}
+
+// The rate card quote, with the zone from the courier's pincode list (or its default zone).
+async function rateCardQuote(acc, q, cw) {
+  const rc = acc.rateCard;
+  const zl = await listInfo(acc, "zone", q.to);
+  let zone;
+  if (!zl.configured) {
+    zone = rc.default_zone;
+    if (!zone) return { error: "No pincode list uploaded and no default zone set" };
+  } else {
+    if (!zl.row) return { notListed: true, error: `${q.to} isn't in ${acc.name}'s pincode list` };
+    zone = zl.row.zone;
+  }
+  const [loc, ecc] = await Promise.all([locatePincode(q.to), listInfo(acc, "ecc", q.to)]);
+  const r = computeRateCard(rc, { zone, cw, orderValue: q.value, isCod: q.cod, destState: loc.state, destDistrict: loc.district, eccListed: !!ecc.row, eccListConfigured: ecc.configured });
+  return { ...r, listed: zl.configured, destState: loc.state, destDistrict: loc.district };
 }
 
 /* ---------------- courier APIs ---------------- */
@@ -94,11 +211,16 @@ const QUOTES = {
     if (!q.cod && yes(pc.pre_paid) === false) return { serviceable: false, note: `Delhivery: no prepaid delivery to ${q.to}` };
     const out = { serviceable: true };
     if (q.from) {
-      const grams = Math.round(chargeableWeight(q, { slab: 0.001 }).weight * 1000);
       const md = /express/i.test(acc.options?.shippingMode || "") ? "E" : "S";
-      const r = await request(`${c.base(acc)}/api/kinko/v1/invoice/charges/.json?${qs({ md, ss: "Delivered", d_pin: q.to, o_pin: q.from, cgm: grams, pt: q.cod ? "COD" : "Pre-paid", cod: q.cod ? q.codAmount : 0 })}`, { headers: c.h(acc), timeout: 12000 }).catch(() => null);
-      const row = Array.isArray(r?.data) ? r.data[0] : r?.data?.[0] || null;
-      if (row && Number(row.total_amount) > 0) out.charge = r2(row.total_amount);
+      const r = await request(`${c.base(acc)}/api/kinko/v1/invoice/charges/.json?${qs({ md, ss: "Delivered", d_pin: q.to, o_pin: q.from, cgm: Math.round(q.cw * 1000), pt: q.cod ? "COD" : "Pre-paid", cod: q.cod ? q.codAmount : undefined, l: q.length > 0 ? Math.round(q.length) : undefined, b: q.breadth > 0 ? Math.round(q.breadth) : undefined, h: q.height > 0 ? Math.round(q.height) : undefined })}`, { headers: c.h(acc), timeout: 12000 }).catch(() => null);
+      const row = Array.isArray(r?.data) ? r.data[0] : r?.data && typeof r.data === "object" ? r.data : null;
+      const total = Number(row?.total_amount || row?.gross_amount || 0);
+      if (total > 0) {
+        out.charge = r2(total);
+        const gross = Number(row.gross_amount || 0);
+        out.breakdown = { freight: r2(gross), cod_charge: r2(row.cod_charges || 0), gst: r2(row.tax_value ?? total - gross) };
+        out.zone = String(row.zone || "");
+      }
     }
     return out;
   },
@@ -155,20 +277,40 @@ const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeo
 async function quoteAccount(acc, s) {
   const p = acc.pickup || {};
   const q = { from: p.pincode || "", to: s.consignee.pincode, weight: s.weight, length: s.length, breadth: s.breadth, height: s.height, cod: s.cod, codAmount: s.codAmount, value: s.value };
-  const out = { account: String(acc._id), name: acc.name, carrier: acc.carrier, test: !!acc.test, isDefault: !!acc.isDefault, serviceable: null, charge: null, source: "", etd: "", note: "" };
+  // Chargeable weight with this courier's volumetric divisor, rounded up to a whole kg.
+  const cwt = chargeableWeight(q, acc.rateCard || {});
+  q.cw = cwt.weight;
+  const out = { account: String(acc._id), name: acc.name, carrier: acc.carrier, test: !!acc.test, isDefault: !!acc.isDefault, serviceable: null, charge: null, source: "", etd: "", note: "", chargeableWeight: cwt.weight, volumetricWeight: cwt.volumetric };
   if (!/^\d{6}$/.test(q.to || "")) return { ...out, serviceable: false, note: "The order has no valid 6-digit pincode" };
   if (s.cod && acc.options?.codEnabled === false) return { ...out, serviceable: false, note: `${acc.name} is set up for prepaid only` };
   try {
     const r = await withTimeout(QUOTES[acc.carrier](acc, q), 15000);
     Object.assign(out, { serviceable: r.serviceable ?? null, etd: r.etd || "", note: r.note || "", courierName: r.courierName, courierId: r.courierId, options: r.options });
-    if (r.charge > 0) Object.assign(out, { charge: r.charge, source: "api" });
+    if (r.charge > 0) Object.assign(out, { charge: r.charge, source: "api", breakdown: r.breakdown, zone: r.zone });
   } catch (e) {
     out.note = `Couldn't check: ${e.message}`;
     out.checkFailed = true;
   }
-  if (out.charge == null && out.serviceable !== false && rateCardOn(acc)) {
-    const rc = rateCardCharge(acc, q, { pincode: p.pincode, city: p.city, state: p.state }, { pincode: q.to, city: s.consignee.city, state: s.consignee.state });
-    if (rc) Object.assign(out, { charge: rc.total, source: "rate card", breakdown: rc });
+  if (rateCardOn(acc)) {
+    try {
+      if (out.charge == null && out.serviceable !== false) {
+        const r = await rateCardQuote(acc, q, q.cw);
+        if (r.notListed) {
+          // Not in the courier's pincode list: not serviceable, unless its API says it is.
+          if (out.serviceable !== true) Object.assign(out, { serviceable: false, note: r.error });
+          else out.note = [out.note, r.error].filter(Boolean).join(" · ");
+        } else if (r.error) out.note = [out.note, r.error].filter(Boolean).join(" · ");
+        else {
+          Object.assign(out, { charge: r.total, source: "rate card", breakdown: r.breakdown, zone: r.zone, destState: r.destState, destDistrict: r.destDistrict });
+          if (out.serviceable === null && r.listed) out.serviceable = true; // in the courier's pincode list
+        }
+      }
+      // EDL: in the courier's out-of-delivery-area list
+      const edl = await listInfo(acc, "edl", q.to);
+      out.edl = !!edl.row;
+    } catch (e) {
+      out.note = [out.note, `Rate card: ${e.message}`].filter(Boolean).join(" · ");
+    }
   }
   return out;
 }
@@ -179,4 +321,4 @@ function sortQuotes(rows) {
   return rows.sort((a, b) => rank(a) - rank(b) || (a.charge ?? 1e12) - (b.charge ?? 1e12) || a.name.localeCompare(b.name));
 }
 
-module.exports = { quoteAccount, sortQuotes, rateCardCharge, chargeableWeight, zoneOf, ZONES, rateCardOn };
+module.exports = { quoteAccount, sortQuotes, computeRateCard, slabFreight, chargeableWeight, volumetricWeight, rateCardOn, locatePincode };

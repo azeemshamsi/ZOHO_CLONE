@@ -19,7 +19,8 @@ const { bookOrder, trackOrder, cancelShipment } = require("../utils/shopify/ship
 const { CARRIERS } = require("../utils/couriers");
 const { labelsPdf } = require("../utils/couriers/label");
 const { shipmentFrom } = require("../utils/couriers");
-const { quoteAccount, sortQuotes, ZONES } = require("../utils/couriers/rates");
+const { quoteAccount, sortQuotes } = require("../utils/couriers/rates");
+const CourierPincode = require("../models/CourierPincode");
 const { resolvePackage } = require("../utils/shopify/package");
 const PackageType = require("../models/PackageType");
 
@@ -597,16 +598,7 @@ const courierJoi = Joi.object({
   options: Joi.object().pattern(Joi.string(), Joi.alternatives(Joi.string().allow(""), Joi.boolean(), Joi.number())),
   pickup: Joi.object({ name: Joi.string().allow(""), phone: Joi.string().allow(""), address: Joi.string().allow(""), city: Joi.string().allow(""), state: Joi.string().allow(""), pincode: Joi.string().allow("") }),
   trackingUrl: Joi.string().trim().allow(""),
-  rateCard: Joi.object({
-    enabled: Joi.boolean(),
-    slab: Joi.number().greater(0).allow(""),
-    divisor: Joi.number().greater(0).allow(""),
-    codFixed: Joi.number().min(0).allow(""),
-    codPercent: Joi.number().min(0).allow(""),
-    fuelPercent: Joi.number().min(0).allow(""),
-    gstPercent: Joi.number().min(0).allow(""),
-    zones: Joi.object().pattern(Joi.string().valid(...ZONES.map(([z]) => z)), Joi.object({ first: Joi.number().min(0).allow(""), extra: Joi.number().min(0).allow("") })),
-  }),
+  rateCard: Joi.object({ enabled: Joi.boolean() }).unknown(true), // same format as the Maganova calculator (see utils/couriers/rates.js)
 });
 
 async function saveCourier(req, acc) {
@@ -668,6 +660,79 @@ router.post(
   })
 );
 
+/* ---------------- courier pincode lists + rate calculator ---------------- */
+const courierOf = async (req) => {
+  const acc = await CourierAccount.findOne({ _id: req.params.id, organization: req.storeOrg });
+  if (!acc) throw new HttpError(404, "Courier not found");
+  return acc;
+};
+router.get(
+  "/couriers/:id/pincodes",
+  ah(async (req, res) => {
+    const acc = await courierOf(req);
+    const counts = await CourierPincode.aggregate([{ $match: { account: acc._id } }, { $group: { _id: { kind: "$kind", zone: "$zone" }, n: { $sum: 1 } } }]);
+    const out = { zone: 0, edl: 0, ecc: 0, zones: {} };
+    for (const c of counts) {
+      out[c._id.kind] += c.n;
+      if (c._id.kind === "zone") out.zones[c._id.zone] = c.n;
+    }
+    res.send(out);
+  })
+);
+router.post(
+  "/couriers/:id/pincodes",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ kind: Joi.string().valid("zone", "edl", "ecc").required(), replace: Joi.boolean().default(false), rows: Joi.array().items(Joi.object({ pincode: Joi.string().required(), zone: Joi.string().allow("") })).max(20000).required() }), req.body);
+    const acc = await courierOf(req);
+    if (d.replace) await CourierPincode.deleteMany({ account: acc._id, kind: d.kind });
+    const seen = new Set();
+    const rows = [];
+    for (const r of d.rows) {
+      const pin = String(r.pincode).replace(/\D/g, "");
+      if (!/^\d{6}$/.test(pin) || seen.has(pin)) continue;
+      if (d.kind === "zone" && !String(r.zone || "").trim()) continue;
+      seen.add(pin);
+      rows.push({ organization: req.storeOrg, account: acc._id, kind: d.kind, pincode: pin, zone: String(r.zone || "").trim() });
+    }
+    if (!d.replace && rows.length) await CourierPincode.deleteMany({ account: acc._id, kind: d.kind, pincode: { $in: rows.map((r) => r.pincode) } });
+    for (let i = 0; i < rows.length; i += 2000) await CourierPincode.insertMany(rows.slice(i, i + 2000), { ordered: false });
+    res.send({ added: rows.length, skipped: d.rows.length - rows.length });
+  })
+);
+router.delete(
+  "/couriers/:id/pincodes/:kind",
+  ah(async (req, res) => {
+    const acc = await courierOf(req);
+    const r = await CourierPincode.deleteMany({ account: acc._id, kind: req.params.kind });
+    res.send({ deleted: r.deletedCount });
+  })
+);
+// Rate calculator: every active courier (or chosen ones) for a pincode, weight and size.
+router.post(
+  "/couriers/calculate",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        to: Joi.string().pattern(/^\d{6}$/).required().label("Destination pincode"),
+        weight: Joi.number().greater(0).required().label("Weight"),
+        length: Joi.number().min(0).default(0),
+        breadth: Joi.number().min(0).default(0),
+        height: Joi.number().min(0).default(0),
+        value: Joi.number().min(0).default(0),
+        cod: Joi.boolean().default(false),
+        accounts: Joi.array().items(Joi.string()).default([]),
+      }),
+      req.body
+    );
+    const accs = await CourierAccount.find({ organization: req.storeOrg, active: true, ...(d.accounts.length ? { _id: { $in: d.accounts } } : {}) });
+    for (const a of accs) if (CARRIERS[a.carrier].token) await CARRIERS[a.carrier].token(a).catch(() => {});
+    const { locatePincode } = require("../utils/couriers/rates");
+    const loc = await locatePincode(d.to);
+    const s = { consignee: { pincode: d.to, city: loc.district || "", state: "" }, weight: d.weight, length: d.length, breadth: d.breadth, height: d.height, cod: d.cod, codAmount: d.cod ? d.value : 0, value: d.value };
+    res.send({ destination: loc, rows: sortQuotes(await Promise.all(accs.map((a) => quoteAccount(a, s)))) });
+  })
+);
+
 /* ---------------- package types ---------------- */
 const ptJoi = Joi.object({ name: Joi.string().trim().required().label("Name"), weight: Joi.number().greater(0).required().label("Weight"), length: Joi.number().greater(0).required().label("Length"), breadth: Joi.number().greater(0).required().label("Breadth"), height: Joi.number().greater(0).required().label("Height"), active: Joi.boolean() });
 router.get(
@@ -722,7 +787,8 @@ router.moduleOf = function (req) {
   const p = req.path;
   if (/^\/returns\/|^\/orders\/return$/.test(p)) return "store_returns";
   if (/^\/orders\/(ship|track|labels)$|^\/orders\/[^/]+\/(label|cancel-shipment)$/.test(p)) return "store_shipping";
-  if (p === "/orders/quotes") return ["store_orders", "store_shipping"];
+  if (p === "/orders/quotes" || p === "/couriers/calculate") return ["store_orders", "store_shipping", "store_settings"];
+  if (/^\/couriers\/[^/]+\/pincodes/.test(p)) return req.method === "GET" ? ["store_shipping", "store_settings"] : "store_settings";
   if (/^\/package-types/.test(p)) return req.method === "GET" ? ["store_shipping", "store_settings", "store_orders"] : /assign$/.test(p) ? ["store_settings", "store_shipping"] : "store_settings";
   if (/^\/couriers/.test(p)) return req.method === "GET" ? ["store_shipping", "store_settings"] : "store_settings";
   if (/^\/(store|locations|rules)/.test(p) && req.method !== "GET") return "store_settings";
