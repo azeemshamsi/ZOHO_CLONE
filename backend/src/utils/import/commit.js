@@ -302,6 +302,16 @@ async function commit(ctx, data, opts, progress) {
       }
     }
 
+  // The 12% GST slab was removed (rates rationalised in Sept 2025): items that were at 12% are 5% for
+  // new documents. Imported vouchers keep the rate on each of their lines.
+  const NEW_RATE = { 12: 5 };
+  let moved12 = 0;
+  const newRate = (r) => {
+    if (NEW_RATE[r] === undefined) return r;
+    moved12++;
+    return NEW_RATE[r];
+  };
+
   /* ---------- Stock items from Tally's Inventory masters ---------- */
   if ((data.records.items || []).length) {
     const ItemM = require("../../models/Item");
@@ -314,7 +324,7 @@ async function commit(ctx, data, opts, progress) {
         // Tally's HSN and GST rate win; unit and group fill in where OrdexaGo has none.
         const set = {};
         if (m.hsnSac) set.hsnSac = m.hsnSac;
-        if (m.taxRate !== null && m.taxRate !== undefined) set.taxRate = m.taxRate;
+        if (m.taxRate !== null && m.taxRate !== undefined) set.taxRate = newRate(m.taxRate);
         if (!it) {
           await ItemM.create({ organization: ctx.org, type: "goods", name: clean(m.name), unit: m.unit || "pcs", category: m.group || "", description: m.description || "", trackInventory: true, taxRate: 0, ...set });
           R_("items").created++;
@@ -358,7 +368,8 @@ async function commit(ctx, data, opts, progress) {
   const factOf = (k) => {
     const f = facts.get(k);
     if (!f) return { hsn: "", rate: 0 };
-    return { hsn: f.hsn, rate: [...f.rates].sort((a, b) => b[1] - a[1])[0]?.[0] || 0 };
+    const r = [...f.rates].sort((a, b) => b[1] - a[1])[0]?.[0] || 0;
+    return { hsn: f.hsn, rate: NEW_RATE[r] ?? r };
   };
   // Items already in OrdexaGo (e.g. from the Stock Summary) without HSN / GST rate get them now.
   let enriched = 0;
@@ -373,6 +384,7 @@ async function commit(ctx, data, opts, progress) {
       enriched++;
     }
   }
+  if (moved12) warnings.push(`${moved12} item(s) at 12% GST in the source were set to 5% for new invoices and bills (the 12% slab no longer applies); imported vouchers keep their own rates`);
   if (enriched) warnings.push(`${enriched} item(s) got their HSN code and/or GST rate from the Tally vouchers`);
   const itemFor = async (l, side) => {
     const k = clean(l.name).toLowerCase();
