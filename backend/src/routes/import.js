@@ -131,8 +131,15 @@ router.post(
       const { chartOfAccounts } = require("../utils/ledger");
       const known = {};
       for (const a of await chartOfAccounts(req.org)) known[a.name.toLowerCase()] = a.group;
-      for (const c of await Customer.find({ organization: req.org }, { displayName: 1 }).lean()) known[c.displayName.toLowerCase()] = "debtors";
-      for (const v of await Vendor.find({ organization: req.org }, { displayName: 1 }).lean()) known[v.displayName.toLowerCase()] = "creditors";
+      // A name that is both a customer and a vendor: the record made first (by the masters import) is the Tally ledger's side.
+      const first = {};
+      for (const [M, g] of [[Customer, "debtors"], [Vendor, "creditors"]])
+        for (const c of await M.find({ organization: req.org }, { displayName: 1, createdAt: 1 }).lean()) {
+          const k = c.displayName.trim().replace(/\s+/g, " ").toLowerCase();
+          const at = +new Date(c.createdAt || 0);
+          if (!first[k] || at < first[k].at) first[k] = { g, at };
+        }
+      for (const [k, v] of Object.entries(first)) known[k] = v.g;
       const out = tally.normalise(parsed.xml, { ledgers: known });
       Object.assign(records, out.records);
       ledgerGroup = out.ledgerGroup;

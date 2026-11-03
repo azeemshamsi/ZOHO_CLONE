@@ -706,6 +706,8 @@ async function commit(ctx, data, opts, progress) {
       const cust = contacts.customer.get(n);
       const vend = contacts.vendor.get(n);
       if (!cust || !vend) continue;
+      // Replace an earlier set-off (it may have gone the other way), then take the balance without it.
+      await Journal.deleteMany({ organization: ctx.org, importRef: { $regex: `^${`${src}:journal:setoff|${n}|`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` } });
       // The other record's balance as it stands in OrdexaGo: receivable on the customer / payable to the vendor.
       const { journalNet } = require("../partyJournals");
       let other;
@@ -730,10 +732,6 @@ async function commit(ctx, data, opts, progress) {
       const dates = ["invoices", "bills", "creditNotes", "vendorCredits", "payments", "vendorPayments"].flatMap((t) => (r[t] || []).filter((d) => same(d.party)).map((d) => +new Date(d.date)));
       const date = dates.length ? new Date(Math.max(...dates)) : openingDate || new Date();
       const key = ref("journal", `setoff|${n}|${iso(date)}`);
-      if (await Journal.exists({ organization: ctx.org, importRef: key })) {
-        R_("journals").skipped++;
-        continue;
-      }
       // Dr Accounts Payable (vendor) / Cr Accounts Receivable (customer) by the amount; reversed when negative.
       const a = Math.abs(other);
       // other > 0: a payable on the vendor record / a receivable on the customer record — both cleared by Dr AP, Cr AR.
