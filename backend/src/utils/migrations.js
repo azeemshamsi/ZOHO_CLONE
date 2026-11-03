@@ -12,6 +12,20 @@ const MIGRATIONS = [
       await Item.updateMany({ shopifySync: { $ne: false }, shopifySyncByUser: { $ne: true } }, { $set: { shopifySync: false } });
     },
   },
+  {
+    // Shopify orders paid "manual" / pending or tagged COD (e.g. "CASHFREE - COD") were taken as prepaid.
+    id: "2026-11-shopify-cod-from-tags-and-pending",
+    run: async () => {
+      const ShopifyOrder = require("../models/ShopifyOrder");
+      const rx = /\bcod\b|cash on delivery|cash_on_delivery|cash-on-delivery/i;
+      const list = await ShopifyOrder.find({ paymentMode: "prepaid", $or: [{ tags: { $regex: rx } }, { financialStatus: "PENDING" }] }, { total: 1, outstanding: 1, prepaidAmount: 1 }).lean();
+      for (const o of list) {
+        if ((o.prepaidAmount || 0) >= 0.5) continue;
+        await ShopifyOrder.updateOne({ _id: o._id }, { paymentMode: "cod", codAmount: o.outstanding || o.total || 0, prepaidAmount: 0 });
+      }
+      console.log(`COD fix: ${list.length} order(s) checked`);
+    },
+  },
 ];
 
 async function runMigrations() {

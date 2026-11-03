@@ -67,7 +67,10 @@ const COD_RX = /\bcod\b|cash on delivery|cash_on_delivery|cash-on-delivery/i;
 // Prepaid, COD, or partly paid (part prepaid online, the rest collected on delivery).
 function payment(o, total) {
   const gws = o.paymentGatewayNames || [];
-  const hasCod = gws.some((g) => COD_RX.test(g));
+  // COD: a COD payment method, a COD tag (checkout apps such as Cashfree tag "CASHFREE - COD" and use the
+  // "manual" method), or an order still pending with nothing paid online.
+  const pendingUnpaid = o.displayFinancialStatus === "PENDING" && !(o.transactions || []).some((t) => t.status === "SUCCESS" && ["SALE", "CAPTURE"].includes(t.kind) && !/^manual$/i.test(t.gateway || "") && !COD_RX.test(t.gateway || ""));
+  const hasCod = gws.some((g) => COD_RX.test(g)) || (o.tags || []).some((t) => COD_RX.test(t)) || pendingUnpaid;
   const ok = (o.transactions || []).filter((t) => t.status === "SUCCESS");
   const online = (t) => !COD_RX.test(t.gateway || "") && !(hasCod && /^manual$/i.test(t.gateway || ""));
   const paid = ok.filter((t) => ["SALE", "CAPTURE"].includes(t.kind) && online(t)).reduce((s, t) => s + amt(t.amountSet), 0);
