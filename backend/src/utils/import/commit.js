@@ -536,7 +536,8 @@ async function commit(ctx, data, opts, progress) {
           })(),
           shippingCharge: d.shippingCharge || 0,
           adjustment,
-          ...(d.adjustmentLedger && adjustment && !["ar", "ap"].includes(lookupAccount(d.adjustmentLedger)) ? { adjustmentAccount: lookupAccount(d.adjustmentLedger) || "" } : {}),
+          // Also when the ledger and the round-off cancel out (TDS 0.13 against round-off 0.13: adjustment 0).
+          ...(d.adjustmentLedger && (adjustment || roundOff) && !["ar", "ap"].includes(lookupAccount(d.adjustmentLedger)) ? { adjustmentAccount: lookupAccount(d.adjustmentLedger) || "" } : {}),
           ...(() => {
             // The voucher's sales / purchase ledger, when it's an account of the right kind.
             const code = d.ledger ? lookupAccount(d.ledger) : "";
