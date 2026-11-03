@@ -6,6 +6,7 @@ import { money, date, isoDate } from "../lib/format";
 import { docLink } from "./Accounts";
 import { useLocations } from "../lib/locations";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Confirm } from "../components/ui";
+import ShopifyLookup from "../components/ShopifyLookup";
 import Icon from "../components/Icon";
 import { LinkPicker } from "./Inventory";
 import { useAuth } from "../lib/auth";
@@ -38,7 +39,14 @@ export function ItemList() {
       {!rows ? (
         <Spinner />
       ) : rows.length === 0 ? (
-        <Empty
+        <>
+        {q && (
+          <div className="card">
+            <strong>No items match “{q}”.</strong>
+            <ShopifyLookup q={dq} onCreated={() => api.get("/items", { params: { q: dq, status } }).then((r) => setRows(r.data))} />
+          </div>
+        )}
+        {!q && <Empty
           icon="box"
           title={q ? "No items match your search" : "Add the goods and services you sell"}
           text="Save prices, HSN/SAC codes and GST rates once, then pick them on invoices."
@@ -47,7 +55,8 @@ export function ItemList() {
               New Item
             </Link>
           }
-        />
+        />}
+        </>
       ) : (
         <div className="card flush">
           <table className="table table-click">

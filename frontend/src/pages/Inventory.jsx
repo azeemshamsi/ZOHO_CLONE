@@ -4,6 +4,7 @@ import api, { errMsg } from "../lib/api";
 import { money } from "../lib/format";
 import { PageHeader, Spinner, Modal, Field, SearchBox, useDebounced, toast } from "../components/ui";
 import Icon from "../components/Icon";
+import ShopifyLookup from "../components/ShopifyLookup";
 
 const TABS = [
   ["all", "All"],
@@ -494,7 +495,10 @@ export function Inventory() {
         {!data ? (
           <Spinner />
         ) : !data.rows.length ? (
-          <div className="empty-row muted">No items here.</div>
+          <div className="empty-row muted">
+            No items here.
+            {dq && <ShopifyLookup q={dq} onCreated={() => load()} />}
+          </div>
         ) : (
           <table className="table table-click inv-table">
             <thead>

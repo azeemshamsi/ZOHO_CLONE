@@ -134,4 +134,23 @@ async function searchVariants(store, q) {
   return (d.productVariants?.nodes || []).map((v) => ({ variantId: v.id, inventoryItemId: v.inventoryItem?.id || "", sku: v.sku || "", title: v.displayName || `${v.product?.title} - ${v.title}`, image: v.image?.url || "" }));
 }
 
-module.exports = { schedulePush, pushOrg, pushAll, locations, searchVariants };
+// One variant, with what's needed to make an OrdexaGo item from it.
+async function variantDetails(store, variantId) {
+  const d = await gql(store, `query($id: ID!) { productVariant(id: $id) { id sku title price image { url } inventoryItem { id harmonizedSystemCode } product { title productType featuredImage { url } } } }`, { id: variantId });
+  const v = d.productVariant;
+  if (!v) throw new Error("That Shopify product wasn't found");
+  return {
+    variantId: v.id,
+    inventoryItemId: v.inventoryItem?.id || "",
+    sku: (v.sku || "").trim(),
+    title: v.product?.title || v.title,
+    variantTitle: v.title && v.title !== "Default Title" ? v.title : "",
+    productType: v.product?.productType || "",
+    image: v.image?.url || v.product?.featuredImage?.url || "",
+    hsn: (v.inventoryItem?.harmonizedSystemCode || "").replace(/\D/g, ""),
+    unitPrice: Number(v.price) || 0,
+    shopifyTaxRate: null,
+  };
+}
+
+module.exports = { schedulePush, pushOrg, pushAll, locations, searchVariants, variantDetails };

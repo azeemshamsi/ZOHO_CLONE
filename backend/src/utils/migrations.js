@@ -26,6 +26,26 @@ const MIGRATIONS = [
       console.log(`COD fix: ${list.length} order(s) checked`);
     },
   },
+  {
+    // Items matched to a Shopify listing (e.g. Tally items) never got the listing's SKU.
+    id: "2026-11-item-sku-from-shopify",
+    run: async () => {
+      const Item = require("../models/Item");
+      const ShopifyOrder = require("../models/ShopifyOrder");
+      const skus = await ShopifyOrder.aggregate([{ $unwind: "$lines" }, { $match: { "lines.variantId": { $nin: ["", null] }, "lines.sku": { $nin: ["", null] } } }, { $group: { _id: "$lines.variantId", sku: { $first: "$lines.sku" } } }]);
+      const by = new Map(skus.map((s) => [s._id, s.sku]));
+      const items = await Item.find({ shopifyVariantId: { $nin: ["", null] }, $or: [{ sku: "" }, { sku: null }, { sku: { $exists: false } }] }, { shopifyVariantId: 1 }).lean();
+      let n = 0;
+      for (const it of items) {
+        const sku = by.get(it.shopifyVariantId);
+        if (sku) {
+          await Item.updateOne({ _id: it._id }, { sku });
+          n++;
+        }
+      }
+      console.log(`SKU backfill: ${n} item(s)`);
+    },
+  },
 ];
 
 async function runMigrations() {

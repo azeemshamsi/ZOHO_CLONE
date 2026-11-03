@@ -123,9 +123,13 @@ async function itemFor(orgId, line, store, cache = new Map()) {
   } else if (line.variantId && !item.shopifyVariantId && !(item.shopifyLinks || []).some((l) => l.variantId === line.variantId)) {
     item.shopifyVariantId = line.variantId;
     if (!item.image && line.image) item.image = line.image;
+    if (!item.sku && line.sku) item.sku = line.sku; // e.g. a Tally item: take the Shopify SKU
     await item.save();
-  } else if (!item.image && line.image) {
-    await Item.updateOne({ _id: item._id }, { image: line.image });
+  } else {
+    const set = {};
+    if (!item.image && line.image) set.image = line.image;
+    if (!item.sku && line.sku && item.shopifyVariantId === line.variantId) set.sku = line.sku;
+    if (Object.keys(set).length) await Item.updateOne({ _id: item._id }, set);
   }
   const out = { item, created };
   cache.set(key, out);

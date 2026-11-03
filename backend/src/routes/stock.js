@@ -223,10 +223,35 @@ router.get(
       throw new HttpError(400, "Connect your Shopify store first (Store → Store Settings)");
     }
     try {
-      res.send(await inv.searchVariants(store, (req.query.q || "").trim()));
+      const list = await inv.searchVariants(store, (req.query.q || "").trim());
+      const ids = list.map((v) => v.variantId);
+      const items = await Item.find({ organization: req.org, $or: [{ shopifyVariantId: { $in: ids } }, { "shopifyLinks.variantId": { $in: ids } }] }, { name: 1, shopifyVariantId: 1, "shopifyLinks.variantId": 1 }).lean();
+      const by = new Map();
+      for (const it of items) for (const v of [it.shopifyVariantId, ...(it.shopifyLinks || []).map((l) => l.variantId)]) if (v) by.set(v, { _id: it._id, name: it.name });
+      res.send(list.map((v) => ({ ...v, item: by.get(v.variantId) || null })));
     } catch (e) {
       throw new HttpError(400, e.message);
     }
+  })
+);
+
+// Make an OrdexaGo item from a Shopify product that hasn't been ordered yet (same matching as orders: SKU, then name).
+router.post(
+  "/shopify/create-item",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ variantId: Joi.string().required() }), req.body);
+    const store = await ShopifyStore.findOne({ organization: req.org });
+    if (!store?.connected) throw new HttpError(400, "Connect your Shopify store first (Store → Store Settings)");
+    let line;
+    try {
+      line = await inv.variantDetails(store, d.variantId);
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+    const { itemFor } = require("../utils/shopify/catalog");
+    const { item, created } = await itemFor(req.org, line, store);
+    if (line.inventoryItemId && item.shopifyVariantId === line.variantId && !item.shopifyInventoryItemId) await Item.updateOne({ _id: item._id }, { shopifyInventoryItemId: line.inventoryItemId });
+    res.send({ _id: item._id, name: item.name, created });
   })
 );
 

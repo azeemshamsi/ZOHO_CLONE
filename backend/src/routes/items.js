@@ -56,7 +56,7 @@ router.get(
     const filter = { organization: req.org };
     if (req.query.q) {
       const rx = new RegExp(req.query.q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      filter.$or = [{ name: rx }, { sku: rx }, { hsnSac: rx }];
+      filter.$or = [{ name: rx }, { sku: rx }, { hsnSac: rx }, { "shopifyLinks.sku": rx }, { "shopifyLinks.title": rx }];
     }
     if (req.query.status === "active") filter.active = true;
     if (req.query.status === "inactive") filter.active = false;
