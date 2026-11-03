@@ -1,129 +1,111 @@
+/**
+ * Home dashboard, from the books: every figure comes from the ledger (the same entries as the trial
+ * balance and reports), so it matches Accounts. Receivables / payables ageing is per party, with
+ * on-account receipts, credit notes and journals set against the oldest dues (see utils/partyAging.js).
+ */
 const router = require("express").Router();
 const Invoice = require("../models/Invoice");
-const Payment = require("../models/Payment");
 const Customer = require("../models/Customer");
 const Item = require("../models/Item");
-const Bill = require("../models/Bill");
-const Expense = require("../models/Expense");
 const { ah, round2 } = require("../utils/http");
-
-const DAY = 24 * 60 * 60 * 1000;
-
-// Indian financial year starts 1 April.
-function fiscalYearStart(d = new Date()) {
-  const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
-  return new Date(y, 3, 1);
-}
+const { chartOfAccounts, buildEntries, fiscalYear } = require("../utils/ledger");
+const { partyAging } = require("../utils/partyAging");
 
 router.get(
   "/",
   ah(async (req, res) => {
     const org = req.org;
-    const today = require("../utils/time").istToday();
-    const fyStart = fiscalYearStart(today);
-    const monthsBack = new Date(today.getFullYear(), today.getMonth() - 11, 1);
+    const time = require("../utils/time");
+    const today = time.istToday();
+    const end = time.istEndOfToday();
+    const fy = fiscalYear(today);
+    const monthsBack = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 11, 1));
 
-    const [bills, expenses] = await Promise.all([
-      Bill.find({ organization: org, status: { $in: ["open", "partially_paid"] } }, { balance: 1, dueDate: 1 }).lean(),
-      Expense.find({ organization: org, date: { $gte: monthsBack < fyStart ? monthsBack : fyStart } }, { total: 1, date: 1, category: 1 }).lean(),
-    ]);
-    const pay = { total: 0, current: 0, overdue: 0 };
-    for (const b of bills) {
-      pay.total += b.balance;
-      if (new Date(b.dueDate) < today) pay.overdue += b.balance;
-      else pay.current += b.balance;
-    }
-    Object.keys(pay).forEach((k) => (pay[k] = round2(pay[k])));
-    const byCategory = {};
-    let expensesThisFy = 0;
-    for (const e of expenses) {
-      if (new Date(e.date) < fyStart) continue;
-      expensesThisFy += e.total;
-      byCategory[e.category] = round2((byCategory[e.category] || 0) + e.total);
-    }
-    const topExpenses = Object.entries(byCategory)
-      .map(([category, total]) => ({ category, total }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 5);
-
-    const [invoices, payments, customerCount, itemCount] = await Promise.all([
-      Invoice.find(
-        { organization: org, status: { $nin: ["draft", "void"] } },
-        { lineItems: 0, billingAddress: 0 }
-      ).lean(),
-      Payment.find({ organization: org, date: { $gte: monthsBack } }, { amount: 1, date: 1 }).lean(),
+    const [accounts, entries, recvAging, payAging, customerCount, itemCount, invoiceCount] = await Promise.all([
+      chartOfAccounts(org),
+      buildEntries(org, { to: end }),
+      partyAging(org, "customer", today),
+      partyAging(org, "vendor", today),
       Customer.countDocuments({ organization: org }),
       Item.countDocuments({ organization: org }),
+      Invoice.countDocuments({ organization: org, status: { $nin: ["draft", "void"] } }),
     ]);
+    const group = new Map(accounts.map((a) => [a.code, a]));
+    const isCash = (code) => ["Cash", "Bank"].includes(group.get(code)?.group);
 
-    const recv = { total: 0, current: 0, overdue: 0, buckets: { "1-15": 0, "16-30": 0, "31-45": 0, "45+": 0 } };
-    for (const inv of invoices) {
-      if (inv.balance <= 0) continue;
-      recv.total += inv.balance;
-      const late = Math.floor((today - new Date(inv.dueDate)) / DAY);
-      if (late <= 0) {
-        recv.current += inv.balance;
-      } else {
-        recv.overdue += inv.balance;
-        const key = late <= 15 ? "1-15" : late <= 30 ? "16-30" : late <= 45 ? "31-45" : "45+";
-        recv.buckets[key] += inv.balance;
-      }
-    }
-    recv.total = round2(recv.total);
-    recv.current = round2(recv.current);
-    recv.overdue = round2(recv.overdue);
-    Object.keys(recv.buckets).forEach((k) => (recv.buckets[k] = round2(recv.buckets[k])));
-
-    // Last 12 months: sales (invoiced) vs receipts.
+    // Ledger balances of receivables / payables (as in the trial balance).
+    let ar = 0;
+    let ap = 0;
+    // Months: sales = sales (Income) ledgers; receipts = money into cash/bank against receivables.
     const months = [];
     for (let i = 0; i < 12; i++) {
-      const d = new Date(monthsBack.getFullYear(), monthsBack.getMonth() + i, 1);
-      months.push({ key: `${d.getFullYear()}-${d.getMonth()}`, label: d.toLocaleString("en-IN", { month: "short" }), year: d.getFullYear(), sales: 0, receipts: 0 });
+      const d = new Date(Date.UTC(monthsBack.getUTCFullYear(), monthsBack.getUTCMonth() + i, 1));
+      months.push({ key: `${d.getUTCFullYear()}-${d.getUTCMonth()}`, label: d.toLocaleString("en-IN", { month: "short", timeZone: "UTC" }), year: d.getUTCFullYear(), sales: 0, receipts: 0 });
     }
     const idx = Object.fromEntries(months.map((m, i) => [m.key, i]));
     let salesThisFy = 0;
-    for (const inv of invoices) {
-      const d = new Date(inv.date);
-      const i = idx[`${d.getFullYear()}-${d.getMonth()}`];
-      if (i !== undefined) months[i].sales += inv.total;
-      if (d >= fyStart) salesThisFy += inv.total;
-    }
-    for (const p of payments) {
-      const d = new Date(p.date);
-      const i = idx[`${d.getFullYear()}-${d.getMonth()}`];
-      if (i !== undefined) months[i].receipts += p.amount;
+    let receiptsThisFy = 0;
+    const expense = {};
+    for (const e of entries) {
+      const d = new Date(e.date);
+      const mi = idx[`${d.getUTCFullYear()}-${d.getUTCMonth()}`];
+      const inFy = d >= fy.from && d <= fy.to;
+      const hitsAr = e.lines.some((l) => l.account === "ar" && l.credit > 0);
+      for (const l of e.lines) {
+        if (l.account === "ar") ar += l.debit - l.credit;
+        if (l.account === "ap") ap += l.credit - l.debit;
+        const a = group.get(l.account);
+        if (!a) continue;
+        if (a.group === "Income") {
+          const v = l.credit - l.debit;
+          if (mi !== undefined) months[mi].sales += v;
+          if (inFy) salesThisFy += v;
+        }
+        if (hitsAr && isCash(l.account) && l.debit > 0) {
+          if (mi !== undefined) months[mi].receipts += l.debit;
+          if (inFy) receiptsThisFy += l.debit;
+        }
+        // Expenses: expense ledgers and your own direct-cost ledgers (not stock movements or the Tally stock difference).
+        const exp = ["Expense", "Other Expense"].includes(a.group) || (a.group === "Cost Of Goods Sold" && !a.system && a.role !== "opening_stock_diff");
+        if (exp && inFy && !l.stock && a.code !== "adjustments") expense[a.code] = (expense[a.code] || 0) + l.debit - l.credit;
+      }
     }
     months.forEach((m) => {
       m.sales = round2(m.sales);
       m.receipts = round2(m.receipts);
     });
+    const exps = Object.entries(expense)
+      .map(([code, total]) => ({ code, category: group.get(code)?.name || code, total: round2(total) }))
+      .filter((x) => x.total > 0)
+      .sort((a, b) => b.total - a.total);
 
-    // Top customers by receivable.
-    const byCustomer = {};
-    for (const inv of invoices) {
-      if (inv.balance <= 0) continue;
-      const k = String(inv.customer);
-      byCustomer[k] = byCustomer[k] || { customer: inv.customer, name: inv.customerName, balance: 0 };
-      byCustomer[k].balance = round2(byCustomer[k].balance + inv.balance);
-    }
-    const topDebtors = Object.values(byCustomer).sort((a, b) => b.balance - a.balance).slice(0, 5);
+    ar = round2(ar);
+    ap = round2(ap);
+    const side = (aging, total) => ({
+      total, // as per books
+      due: aging.due,
+      advances: aging.advances,
+      other: round2(total - (aging.due - aging.advances)), // posted to receivables/payables without a party
+      current: aging.current,
+      overdue: aging.overdue,
+      buckets: aging.buckets,
+    });
 
-    const recentInvoices = await Invoice.find({ organization: org }, { lineItems: 0, billingAddress: 0 })
-      .sort({ createdAt: -1 })
-      .limit(6);
+    const recentInvoices = await Invoice.find({ organization: org }, { lineItems: 0, billingAddress: 0 }).sort({ createdAt: -1 }).limit(6);
 
     res.send({
-      payables: pay,
-      expensesThisFy: round2(expensesThisFy),
-      topExpenses,
-      receivables: recv,
+      source: "books",
+      receivables: side(recvAging, ar),
+      payables: side(payAging, ap),
+      expensesThisFy: round2(exps.reduce((s, x) => s + x.total, 0)),
+      topExpenses: exps.slice(0, 5),
       salesThisFy: round2(salesThisFy),
-      fiscalYearStart: fyStart,
-      receiptsThisFy: round2(payments.filter((p) => new Date(p.date) >= fyStart).reduce((s, p) => s + p.amount, 0)),
+      receiptsThisFy: round2(receiptsThisFy),
+      fiscalYearStart: fy.from,
       months,
-      topDebtors,
+      topDebtors: recvAging.parties.filter((p) => p.net > 0).slice(0, 5).map((p) => ({ customer: p.id, name: p.name, balance: p.net })),
       recentInvoices,
-      counts: { customers: customerCount, items: itemCount, invoices: invoices.length },
+      counts: { customers: customerCount, items: itemCount, invoices: invoiceCount },
     });
   })
 );

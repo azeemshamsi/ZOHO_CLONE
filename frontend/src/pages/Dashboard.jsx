@@ -62,7 +62,10 @@ export default function Dashboard() {
 
   if (!d) return <Spinner />;
   const r = d.receivables;
-  const overduePct = r.total ? (r.overdue / r.total) * 100 : 0;
+  const overduePct = r.current + r.overdue ? (r.overdue / (r.current + r.overdue)) * 100 : 0;
+  // How the books total is made up: dues − advances (± entries without a party).
+  const makeup = (s, adv) =>
+    [`Due ${money(s.due)}`, s.advances ? `${adv} ${money(s.advances)}` : "", Math.abs(s.other) >= 0.01 ? `not linked to a party ${money(s.other)}` : ""].filter(Boolean).join(" · ");
   const isNew = d.counts.invoices === 0 && d.counts.customers === 0;
 
   return (
@@ -101,7 +104,9 @@ export default function Dashboard() {
             <Icon name="plus" size={14} /> New
           </Link>
         </div>
-        <p className="muted small">Total unpaid invoices {money(r.total, r.currency)}</p>
+        <p className="muted small">
+          As per books <strong>{money(r.total)}</strong> · {makeup(r, "advances received")}
+        </p>
         <div className="meter">
           <div className="meter-current" style={{ width: `${100 - overduePct}%` }} />
           <div className="meter-overdue" style={{ width: `${overduePct}%` }} />
@@ -132,10 +137,12 @@ export default function Dashboard() {
               <Icon name="plus" size={14} /> New Bill
             </Link>
           </div>
-          <p className="muted small">Total unpaid bills {money(d.payables.total)}</p>
+          <p className="muted small">
+            As per books <strong>{money(d.payables.total)}</strong> · {makeup(d.payables, "advances paid")}
+          </p>
           <div className="meter">
-            <div className="meter-current" style={{ width: `${d.payables.total ? 100 - (d.payables.overdue / d.payables.total) * 100 : 100}%` }} />
-            <div className="meter-overdue" style={{ width: `${d.payables.total ? (d.payables.overdue / d.payables.total) * 100 : 0}%` }} />
+            <div className="meter-current" style={{ width: `${d.payables.current + d.payables.overdue ? 100 - (d.payables.overdue / (d.payables.current + d.payables.overdue)) * 100 : 100}%` }} />
+            <div className="meter-overdue" style={{ width: `${d.payables.current + d.payables.overdue ? (d.payables.overdue / (d.payables.current + d.payables.overdue)) * 100 : 0}%` }} />
           </div>
           <div className="kpis no-border">
             <div>
@@ -155,7 +162,7 @@ export default function Dashboard() {
           </div>
           {d.topExpenses.length === 0 ? (
             <p className="muted">
-              No expenses yet. <Link to="/expenses/new">Record one</Link>
+              No expenses this financial year. <Link to="/expenses/new">Record one</Link>
             </p>
           ) : (
             <ul className="rank">
@@ -165,7 +172,7 @@ export default function Dashboard() {
                     <span className="bar-track">
                       <span className="bar-fill" style={{ width: `${(t.total / d.topExpenses[0].total) * 100}%` }} />
                     </span>
-                    {t.category}
+                    {t.code ? <Link to={`/chart-of-accounts/${encodeURIComponent(t.code)}`}>{t.category}</Link> : t.category}
                   </span>
                   <strong>{money(t.total)}</strong>
                 </li>
