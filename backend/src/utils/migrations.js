@@ -46,6 +46,16 @@ const MIGRATIONS = [
       console.log(`SKU backfill: ${n} item(s)`);
     },
   },
+  {
+    // Products with the same name but different SKUs had been merged into one item: separate them.
+    id: "2026-11-split-items-by-sku",
+    run: async () => {
+      const { splitMergedItems } = require("./shopify/splitSkus");
+      const r = await splitMergedItems();
+      const db = mongoose.connection.db;
+      await db.collection("migration_reports").updateOne({ _id: "split-items-by-sku" }, { $set: { at: new Date(), ...r } }, { upsert: true });
+    },
+  },
 ];
 
 async function runMigrations() {

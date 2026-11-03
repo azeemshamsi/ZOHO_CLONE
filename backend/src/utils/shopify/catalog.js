@@ -93,11 +93,27 @@ async function itemFor(orgId, line, store, cache = new Map()) {
   const key = line.variantId || line.sku || itemName(line);
   if (cache.has(key)) return cache.get(key);
   let item = null;
+  const sku = (line.sku || "").trim();
+  const sameSku = (it) => !sku || !it.sku || it.sku.toLowerCase() === sku.toLowerCase();
   // A Shopify listing linked to an OrdexaGo item (e.g. 4 listings of one metal table) uses that item.
   if (line.variantId) item = await Item.findOne({ organization: orgId, "shopifyLinks.variantId": line.variantId });
-  if (!item && line.variantId) item = await Item.findOne({ organization: orgId, shopifyVariantId: line.variantId, active: { $ne: false } });
-  if (!item && line.sku) item = await Item.findOne({ organization: orgId, sku: new RegExp(`^${esc(line.sku)}$`, "i") });
-  if (!item) item = await Item.findOne({ organization: orgId, name: new RegExp(`^${esc(itemName(line))}$`, "i") });
+  // The SKU is what identifies a product: names can repeat, SKUs don't.
+  if (!item && line.variantId) {
+    // The same Shopify listing is the same product; if its SKU was changed in Shopify, the item follows.
+    item = await Item.findOne({ organization: orgId, shopifyVariantId: line.variantId, active: { $ne: false } });
+    if (item && sku && !sameSku(item)) {
+      item.sku = sku;
+      await Item.updateOne({ _id: item._id }, { sku });
+    }
+  }
+  if (!item && sku) item = await Item.findOne({ organization: orgId, sku: new RegExp(`^${esc(sku)}$`, "i") });
+  // By name only for an item no Shopify product has claimed yet (e.g. from Tally): no SKU, no listing.
+  if (!item) {
+    const nameRx = new RegExp(`^${esc(itemName(line))}$`, "i");
+    item = sku
+      ? await Item.findOne({ organization: orgId, name: nameRx, sku: { $in: ["", null] }, shopifyVariantId: { $in: ["", null] }, "shopifyLinks.0": { $exists: false } })
+      : await Item.findOne({ organization: orgId, name: nameRx });
+  }
   let created = false;
   if (!item) {
     const g = checkGst(line, store);
@@ -128,7 +144,7 @@ async function itemFor(orgId, line, store, cache = new Map()) {
   } else {
     const set = {};
     if (!item.image && line.image) set.image = line.image;
-    if (!item.sku && line.sku && item.shopifyVariantId === line.variantId) set.sku = line.sku;
+    if (!item.sku && sku && item.shopifyVariantId === line.variantId) set.sku = sku;
     if (Object.keys(set).length) await Item.updateOne({ _id: item._id }, set);
   }
   const out = { item, created };
