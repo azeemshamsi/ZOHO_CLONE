@@ -302,6 +302,41 @@ async function commit(ctx, data, opts, progress) {
       }
     }
 
+  /* ---------- Stock items from Tally's Inventory masters ---------- */
+  if ((data.records.items || []).length) {
+    const ItemM = require("../../models/Item");
+    const have = new Map((await ItemM.find({ organization: ctx.org }).lean()).map((i) => [clean(i.name).toLowerCase(), i]));
+    for (const m of data.records.items) {
+      progress();
+      try {
+        const k = clean(m.name).toLowerCase();
+        const it = have.get(k);
+        // Tally's HSN and GST rate win; unit and group fill in where OrdexaGo has none.
+        const set = {};
+        if (m.hsnSac) set.hsnSac = m.hsnSac;
+        if (m.taxRate !== null && m.taxRate !== undefined) set.taxRate = m.taxRate;
+        if (!it) {
+          await ItemM.create({ organization: ctx.org, type: "goods", name: clean(m.name), unit: m.unit || "pcs", category: m.group || "", description: m.description || "", trackInventory: true, taxRate: 0, ...set });
+          R_("items").created++;
+          continue;
+        }
+        if (!it.unit && m.unit) set.unit = m.unit;
+        if (!it.category && m.group) set.category = m.group;
+        const changed = Object.keys(set).some((f) => String(it[f] ?? "") !== String(set[f]));
+        if (!changed) {
+          R_("items").skipped++;
+          continue;
+        }
+        await ItemM.updateOne({ _id: it._id }, { ...set, trackInventory: true });
+        R_("items").created++;
+      } catch (e) {
+        fail("items", m.name, e);
+      }
+    }
+    const noRate = data.records.items.filter((m) => m.taxRate === null || m.taxRate === undefined).length;
+    if (noRate) warnings.push(`${noRate} stock item(s) have no GST rate in Tally (on the item or its stock groups), so their rate in OrdexaGo was left as it was`);
+  }
+
   /* ---------- 4. Invoices, bills, credit notes, vendor credits ---------- */
   /* ---------- Stock items (Tally stock lines are linked to items, so stock moves) ---------- */
   const Item = require("../../models/Item");

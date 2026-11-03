@@ -137,7 +137,7 @@ function normalise(xml, known = {}) {
   const billMismatch = [];
   const billPartial = [];
 
-  const out = { accounts: [], customers: [], vendors: [], invoices: [], bills: [], creditNotes: [], vendorCredits: [], payments: [], vendorPayments: [], journals: [], stockAdjustments: [] };
+  const out = { items: [], accounts: [], customers: [], vendors: [], invoices: [], bills: [], creditNotes: [], vendorCredits: [], payments: [], vendorPayments: [], journals: [], stockAdjustments: [] };
   const ledgerGroup = new Map(); // ledger name → OrdexaGo group / "debtors" / "creditors"
   for (const l of collect(xml, "LEDGER")) {
     const name = nameOf(l);
@@ -193,6 +193,72 @@ function normalise(xml, known = {}) {
       if (stock && ob) stockLedgers.push(name);
       out.accounts.push({ name, code: text(l.ALIAS) || "", type: parent, group: grp, ledgerKind: ledgerKindOf(parent), description: text(l.DESCRIPTION) || text(l.NARRATION), parent: "", opening: stock ? 0 : -ob });
     }
+  }
+
+  /* ---------- Stock items (Inventory masters): HSN, GST rate, unit, group ---------- */
+  // Tally keeps GST and HSN as dated entries on the item, or "As per Company/Stock Group" to take
+  // them from its stock group (and that group's parents). The latest entry up to today applies.
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const latest = (list) =>
+    arr(list)
+      .filter((d) => typeof d === "object")
+      .map((d) => ({ d, from: text(d.APPLICABLEFROM) || "0" }))
+      .filter((x) => x.from <= today)
+      .sort((a, b) => (a.from < b.from ? 1 : -1))[0]?.d;
+  const gstOf = (node) => {
+    const d = latest(node["GSTDETAILS.LIST"]);
+    if (!d || !/specify/i.test(text(d.SRCOFGSTDETAILS) || "specify")) return null; // inherit
+    if (/exempt|nil|non.?gst/i.test(text(d.TAXABILITY))) return 0;
+    let igst = null;
+    let cs = 0;
+    for (const s of arr(d["STATEWISEDETAILS.LIST"]))
+      for (const r of arr(s["RATEDETAILS.LIST"])) {
+        const head = text(r.GSTRATEDUTYHEAD);
+        const rate = num(text(r.GSTRATE));
+        if (/^igst|integrated/i.test(head)) igst = rate;
+        else if (/^cgst|^sgst|central|state tax|utgst/i.test(head) && !/cess/i.test(head)) cs += rate;
+      }
+    const rate = igst ?? (cs || null);
+    return rate === null ? (text(d.TAXABILITY) ? 0 : null) : C.round2(rate);
+  };
+  const hsnOf = (node) => {
+    const d = latest(node["HSNDETAILS.LIST"]);
+    if (d) return /specify/i.test(text(d.SRCOFHSNDETAILS) || "specify") ? clean(text(d.HSNCODE) || text(d.HSN)).replace(/\s/g, "") || null : null;
+    const g = latest(node["GSTDETAILS.LIST"]); // older Tally: HSN inside the GST details
+    return g && /specify/i.test(text(g.SRCOFGSTDETAILS) || "specify") ? clean(text(g.HSNCODE)).replace(/\s/g, "") || null : null;
+  };
+  const stockGroups = new Map();
+  for (const g of collect(xml, "STOCKGROUP")) {
+    const n = nameOf(g);
+    if (n) stockGroups.set(n.toLowerCase(), { name: n, parent: text(g.PARENT), gst: gstOf(g), hsn: hsnOf(g), unit: text(g.BASEUNITS) });
+  }
+  const fromGroup = (group, key) => {
+    let g = stockGroups.get(clean(group).toLowerCase());
+    for (let i = 0; i < 20 && g; i++) {
+      if (g[key] !== null && g[key] !== undefined && g[key] !== "") return g[key];
+      g = stockGroups.get(clean(g.parent).toLowerCase());
+    }
+    return null;
+  };
+  for (const it of collect(xml, "STOCKITEM")) {
+    const name = nameOf(it);
+    if (!name) continue;
+    const parent = text(it.PARENT);
+    const unit = clean(text(it.BASEUNITS)).toLowerCase();
+    const rate = gstOf(it) ?? fromGroup(parent, "gst");
+    out.items.push({
+      name,
+      group: /not applicable|primary/i.test(parent) ? "" : parent,
+      unit: /not applicable/i.test(unit) ? "" : unit,
+      hsnSac: hsnOf(it) ?? fromGroup(parent, "hsn") ?? "",
+      taxRate: rate,
+      // Tally's alias (second name in the item's name list) is the item code.
+      sku: (() => {
+        const names = arr(arr(arr(it["LANGUAGENAME.LIST"])[0]?.["NAME.LIST"])[0]?.NAME).map(text).filter(Boolean);
+        return names.length > 1 && names[1] !== name ? names[1].slice(0, 60) : "";
+      })(),
+      description: text(it.DESCRIPTION) || "",
+    });
   }
 
   // Ledgers already in OrdexaGo (e.g. masters imported earlier) count when this file has no masters.

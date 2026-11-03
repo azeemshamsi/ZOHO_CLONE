@@ -23,6 +23,7 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 const LABELS = {
+  items: "Stock items (HSN, GST rate, unit)",
   accounts: "Chart of accounts",
   customers: "Customers (debtors)",
   vendors: "Vendors (creditors)",
@@ -58,6 +59,8 @@ function sample(type, r) {
     case "creditNotes":
     case "vendorCredits":
       return { Number: r.number, Date: iso(r.date), Party: r.party, Lines: r.lines.length, Total: r.total, Status: r.status };
+    case "items":
+      return { Item: r.name, Group: r.group, Unit: r.unit, HSN: r.hsnSac, "GST %": r.taxRate ?? "" };
     case "openingStock":
       return { Item: r.name, Quantity: r.quantity, Rate: r.rate, Value: r.value };
     case "stockAdjustments":
