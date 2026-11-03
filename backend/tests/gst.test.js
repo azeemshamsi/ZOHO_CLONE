@@ -33,3 +33,11 @@ test("inter-state supply charges IGST", () => {
   assert.equal(r.cgst + r.sgst, 0);
   assert.equal(r.total, 924.5);
 });
+
+test("half a paisa of tax rounds up, as GST and Tally do", () => {
+  const intra = computeTotals({ orgState: "09", placeOfSupply: "09", lineItems: [{ name: "Shelf", quantity: 1, rate: 1367, taxRate: 5 }] });
+  assert.equal(intra.cgst, 34.18);
+  assert.equal(intra.sgst, 34.18);
+  const inter = computeTotals({ orgState: "09", placeOfSupply: "27", lineItems: [{ name: "Shelf", quantity: 3, rate: 1879.366667, taxRate: 5 }] });
+  assert.equal(inter.igst, 281.91);
+});

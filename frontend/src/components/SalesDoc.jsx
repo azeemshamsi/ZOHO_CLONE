@@ -88,7 +88,9 @@ export function DocList({ kind, filters, columns, emptyText, summary, headerExtr
 
 /* ======================= Form ======================= */
 const blankLine = () => ({ item: "", name: "", description: "", hsnSac: "", unit: "", quantity: 1, rate: 0, discount: 0, taxRate: 18 });
-const lineAmount = (l) => round2((Number(l.quantity) || 0) * (Number(l.rate) || 0) * (1 - (Number(l.discount) || 0) / 100));
+// Half a paisa rounds up (as GST, Tally and the server do).
+const taxRound = (n) => Math.round(Number((Number(n) * 100).toFixed(6))) / 100;
+const lineAmount = (l) => taxRound((Number(l.quantity) || 0) * (Number(l.rate) || 0) * (1 - (Number(l.discount) || 0) / 100));
 const cleanLine = (l) => ({
   item: l.item || "",
   name: l.name,
@@ -113,10 +115,10 @@ function calc(lines, orgState, pos, shipping, adjustment) {
     if (!r) continue;
     const tax = (amt * r) / 100;
     taxByRate[r] = taxByRate[r] || { cgst: 0, sgst: 0, igst: 0 };
-    if (inter) taxByRate[r].igst += round2(tax);
+    if (inter) taxByRate[r].igst += taxRound(tax);
     else {
-      taxByRate[r].cgst += round2(tax / 2);
-      taxByRate[r].sgst += round2(tax / 2);
+      taxByRate[r].cgst += taxRound(tax / 2);
+      taxByRate[r].sgst += taxRound(tax / 2);
     }
   }
   const taxTotal = round2(Object.values(taxByRate).reduce((s, t) => s + t.cgst + t.sgst + t.igst, 0));

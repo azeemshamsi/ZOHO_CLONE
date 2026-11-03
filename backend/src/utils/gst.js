@@ -1,4 +1,6 @@
 const { round2 } = require("./http");
+// Tax amounts round half a paisa up, as GST and Tally do: 34.175 → 34.18 (plain float rounding can give 34.17).
+const taxRound = (n) => Math.round(Number((Number(n) * 100).toFixed(6))) / 100;
 
 /**
  * Compute line amounts and GST for an invoice.
@@ -17,14 +19,14 @@ function computeTotals({ lineItems = [], orgState, placeOfSupply, shippingCharge
     const rate = Number(li.rate) || 0;
     const discount = Math.min(Math.max(Number(li.discount) || 0, 0), 100);
     const taxRate = Number(li.taxRate) || 0;
-    const amount = round2(quantity * rate * (1 - discount / 100));
+    const amount = taxRound(quantity * rate * (1 - discount / 100));
     const tax = (amount * taxRate) / 100;
     const line = { ...li, quantity, rate, discount, taxRate, amount, cgst: 0, sgst: 0, igst: 0 };
     if (isInterState) {
-      line.igst = round2(tax);
+      line.igst = taxRound(tax);
     } else {
-      line.cgst = round2(tax / 2);
-      line.sgst = round2(tax / 2);
+      line.cgst = taxRound(tax / 2);
+      line.sgst = taxRound(tax / 2);
     }
     subTotal += amount;
     cgst += line.cgst;
@@ -43,4 +45,4 @@ function computeTotals({ lineItems = [], orgState, placeOfSupply, shippingCharge
   return { lineItems: lines, isInterState, subTotal, cgst, sgst, igst, taxTotal, total };
 }
 
-module.exports = { computeTotals };
+module.exports = { computeTotals, taxRound };
