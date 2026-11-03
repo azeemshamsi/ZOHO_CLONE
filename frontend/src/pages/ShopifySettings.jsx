@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { STATES } from "../lib/constants";
@@ -410,7 +410,7 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
       // A dropdown shows its first choice when nothing is saved: save that choice too, so what you see is what's used.
       const options = { ...f.options };
       for (const k of c.fields.options) if (SELECTS[k] && !options[k]) options[k] = SELECTS[k][0][0];
-      const body = { ...f, options, name: f.name || c.label, rateCard: cleanRateCard(f.rateCard) };
+      const body = { ...f, options, name: f.name || c.label, rateCard: cleanRateCard(f.rateCard, FLAT_CARRIERS.includes(f.carrier)) };
       const { data } = isNew ? await api.post("/shopify/couriers", body) : await api.put(`/shopify/couriers/${acc._id}`, body);
       if (f.carrier !== "custom") {
         try {
@@ -595,8 +595,8 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
             </div>
           </>
         )}
-        <RateCard rc={f.rateCard} onChange={(rateCard) => setF((x) => ({ ...x, rateCard }))} />
-        {f.rateCard.enabled && (isNew ? <p className="muted small">Save the courier first, then upload its pincode lists.</p> : <PincodeLists acc={acc} />)}
+        <RateCard rc={f.rateCard} flat={FLAT_CARRIERS.includes(f.carrier)} onChange={(rateCard) => setF((x) => ({ ...x, rateCard }))} />
+        {f.rateCard.enabled && (isNew ? <p className="muted small">Save the courier first, then upload its pincode lists.</p> : <PincodeLists acc={acc} flat={FLAT_CARRIERS.includes(f.carrier)} />)}
         <div className="row-2">
           <label className="check">
             <input type="checkbox" checked={f.isDefault} onChange={(e) => setF({ ...f, isDefault: e.target.checked })} /> Default courier
@@ -612,7 +612,10 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
 
 // Drop blank slabs/zones before saving.
 const cleanSlabs = (sl) => (sl || []).filter((s) => Number(s.up_to_kg) > 0 && s.price !== "" && s.price !== undefined).map((s) => ({ up_to_kg: Number(s.up_to_kg), price: Number(s.price) }));
-const cleanRateCard = (rc) => ({
+// A flat card has only slabs + excess per kg, and fuel / docket / COD / custom charges / GST.
+const FLAT_DROP = ["ecc_charge", "ecc_slabs", "ecc_districts", "owsp_slabs", "ras_states", "ras_per_kg", "idc_pct", "efss_pct", "fov_pct"];
+const cleanRateCard = (rc, flat) => (flat ? cleanFull({ ...rc, rate_type: "slab", extras: Object.fromEntries(Object.entries(rc.extras || {}).filter(([k]) => !FLAT_DROP.includes(k))) }) : cleanFull(rc));
+const cleanFull = (rc) => ({
   ...rc,
   zones: (rc.zones || []).filter((z) => z.zone).map((z) => ({ ...z, slabs: cleanSlabs(z.slabs), additional_per_kg: Number(z.additional_per_kg) || 0, per_kg_rate: Number(z.per_kg_rate) || 0 })),
   extras: { ...(rc.extras || {}), ecc_slabs: cleanSlabs(rc.extras?.ecc_slabs), owsp_slabs: cleanSlabs(rc.extras?.owsp_slabs) },
@@ -644,7 +647,81 @@ function Slabs({ slabs = [], onChange, unit = "₹" }) {
 }
 
 // Rate card in the same format as the Maganova/BillFlow shipping calculator.
-function RateCard({ rc, onChange }) {
+// DTDC, Shadowfax and custom couriers use a flat rate card: weight slabs per zone + excess ₹/kg above the last slab.
+const FLAT_CARRIERS = ["dtdc", "shadowfax", "custom"];
+
+function FlatZones({ rc, set, setZone }) {
+  const zones = rc.zones || [];
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "10px 0 6px" }}>
+        <div className="label-sm" style={{ margin: 0 }}>
+          Zones &amp; rates
+        </div>
+        <button type="button" className="btn btn-sm" onClick={() => set("zones", [...zones, { zone: String.fromCharCode(65 + zones.length), slabs: [{ up_to_kg: "", price: "" }], additional_per_kg: 0 }])}>
+          + Add Zone
+        </button>
+      </div>
+      {zones.map((z, i) => {
+        const slabs = z.slabs || [];
+        const setSlab = (j, k, v) => setZone(i, { ...z, slabs: slabs.map((x, m) => (m === j ? { ...x, [k]: n(v) } : x)) });
+        return (
+          <div key={i} className="card" style={{ padding: 12, marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <input style={{ width: 160 }} value={z.zone || ""} placeholder="Zone" onChange={(e) => setZone(i, { ...z, zone: e.target.value.trim() })} />
+              <button type="button" className="link-btn text-red" title="Delete zone" onClick={() => set("zones", zones.filter((_, j) => j !== i))}>
+                Delete zone
+              </button>
+            </div>
+            {slabs.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 8, marginTop: 10, alignItems: "end" }}>
+                <div className="muted small">UP TO (KG)</div>
+                <div className="muted small">PRICE (₹)</div>
+                <div />
+                {slabs.map((sl, j) => (
+                  <Fragment key={j}>
+                    <input type="number" step="0.01" min="0" value={sl.up_to_kg ?? ""} onChange={(e) => setSlab(j, "up_to_kg", e.target.value)} />
+                    <input type="number" step="0.01" min="0" value={sl.price ?? ""} onChange={(e) => setSlab(j, "price", e.target.value)} />
+                    <button type="button" className="link-btn text-red" title="Delete slab" onClick={() => setZone(i, { ...z, slabs: slabs.filter((_, m) => m !== j) })}>
+                      ✕
+                    </button>
+                  </Fragment>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10, padding: 8, border: "1px solid var(--border, #e5e7eb)", borderRadius: 6 }}>
+              <button type="button" className="btn btn-sm" onClick={() => setZone(i, { ...z, slabs: [...slabs, { up_to_kg: "", price: "" }] })}>
+                + Slab
+              </button>
+              <span className="small">
+                <strong>Excess weight above last slab: ₹</strong>
+              </span>
+              <input type="number" step="0.01" min="0" style={{ width: 100 }} value={z.additional_per_kg ?? ""} onChange={(e) => setZone(i, { ...z, additional_per_kg: n(e.target.value) })} />
+              <span className="small">per kg</span>
+            </div>
+          </div>
+        );
+      })}
+      <p className="muted small" style={{ fontStyle: "italic" }}>
+        Rule: for any weight, we charge the cheaper of (flat slab price) OR (previous slab + excess × per-kg). Example: slabs 24kg=₹475, 42kg=₹550, per-kg=₹19 → for 30kg we take ₹550 (slab 2) instead of ₹475 + 6×₹19 = ₹589.
+      </p>
+      <Field label="Default Zone (used when pincode list is empty)" hint="If you haven't uploaded a pincode-zone list for this courier, all pincodes are treated as serviceable at this zone's rate.">
+        <select value={rc.default_zone || ""} onChange={(e) => set("default_zone", e.target.value)}>
+          <option value="">No default zone</option>
+          {zones
+            .filter((z) => z.zone)
+            .map((z) => (
+              <option key={z.zone} value={z.zone}>
+                Zone {z.zone}
+              </option>
+            ))}
+        </select>
+      </Field>
+    </>
+  );
+}
+
+function RateCard({ rc, onChange, flat }) {
   const [paste, setPaste] = useState(null);
   const x = rc.extras || {};
   const set = (k, v) => onChange({ ...rc, [k]: v });
@@ -688,6 +765,15 @@ function RateCard({ rc, onChange }) {
       )}
       {rc.enabled && (
         <>
+          {flat ? (
+            <>
+              <Field label="Volumetric divisor" hint="DTDC 5000">
+                <input type="number" min="1" value={rc.volumetric_divisor ?? ""} onChange={(e) => set("volumetric_divisor", n(e.target.value))} />
+              </Field>
+              <FlatZones rc={rc} set={set} setZone={setZone} />
+            </>
+          ) : (
+          <>
           <p className="muted small">
             Chargeable weight = the higher of dead weight and L×B×H ÷ divisor, rounded up to a whole kg. Slab rates charge the cheapest of: a slab's price (weight within it) or its price + extra kg × additional per kg. Then fuel, docket, ECC, OWSP, RAS, IDC, EFSS, FOV, custom charges and COD (higher of flat or %), and GST on the total.
           </p>
@@ -745,6 +831,8 @@ function RateCard({ rc, onChange }) {
           <button type="button" className="btn btn-sm" onClick={() => set("zones", [...rc.zones, { zone: String.fromCharCode(65 + rc.zones.length), slabs: [], additional_per_kg: 0, per_kg_rate: 0 }])}>
             + Add zone
           </button>
+          </>
+          )}
 
           <div className="label-sm" style={{ marginTop: 12 }}>
             Surcharges
@@ -756,17 +844,23 @@ function RateCard({ rc, onChange }) {
             <Field label="Docket ₹">
               <input {...num("docket_charge")} />
             </Field>
-            <Field label="IDC % of freight">
-              <input {...num("idc_pct")} />
-            </Field>
-            <Field label="EFSS % of freight">
-              <input {...num("efss_pct")} />
-            </Field>
+            {!flat && (
+              <>
+                <Field label="IDC % of freight">
+                  <input {...num("idc_pct")} />
+                </Field>
+                <Field label="EFSS % of freight">
+                  <input {...num("efss_pct")} />
+                </Field>
+              </>
+            )}
           </div>
           <div className="row-4">
-            <Field label="FOV % of order value">
-              <input {...num("fov_pct")} />
-            </Field>
+            {!flat && (
+              <Field label="FOV % of order value">
+                <input {...num("fov_pct")} />
+              </Field>
+            )}
             <Field label="COD flat ₹">
               <input {...num("cod_flat")} />
             </Field>
@@ -777,6 +871,8 @@ function RateCard({ rc, onChange }) {
               <input {...num("gst_pct")} />
             </Field>
           </div>
+          {!flat && (
+          <>
           <div className="row-2">
             <Field label="ECC districts" hint="One per line: State | District. Aliases like “Gautam Buddha Nagar (Noida)” work.">
               <textarea
@@ -813,6 +909,8 @@ function RateCard({ rc, onChange }) {
               </div>
             </Field>
           </div>
+          </>
+          )}
           {[1, 2].map((k) => (
             <div className="row-3" key={k}>
               <Field label={`Custom charge ${k} — label`}>
@@ -837,7 +935,7 @@ function RateCard({ rc, onChange }) {
 }
 
 // Upload the courier's pincode lists: zones (pincode, zone), EDL and ECC pincodes.
-function PincodeLists({ acc }) {
+function PincodeLists({ acc, flat }) {
   const [c, setC] = useState(null);
   const [replace, setReplace] = useState(true);
   const [busy, setBusy] = useState("");
@@ -882,7 +980,7 @@ function PincodeLists({ acc }) {
       <div className="label-sm">Pincode lists</div>
       <table className="table compact">
         <tbody>
-          {KINDS.map(([k, l, h]) => (
+          {KINDS.filter(([k]) => !(flat && k === "ecc")).map(([k, l, h]) => (
             <tr key={k}>
               <td>
                 <strong>{l}</strong>

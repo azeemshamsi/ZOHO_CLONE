@@ -277,3 +277,10 @@ test("slab freight takes the cheapest qualifying slab", () => {
   assert.equal(slabFreight(6, z, "slab"), 110);
   assert.equal(slabFreight(12, z, "slab"), 200);
 });
+
+test("flat rate card example (DTDC / Shadowfax / custom): 30 kg → ₹550, not ₹475 + 6×₹19", () => {
+  const z = { slabs: [{ up_to_kg: 24, price: 475 }, { up_to_kg: 42, price: 550 }], additional_per_kg: 19 };
+  assert.equal(slabFreight(30, z, "slab"), 550);
+  assert.equal(slabFreight(20, z, "slab"), 475);
+  assert.equal(slabFreight(45, z, "slab"), 550 + 3 * 19);
+});
