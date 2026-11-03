@@ -83,7 +83,7 @@ function incomeAccounts(lines = []) {
 }
 
 // A purchase adjustment posted to its own account (TDS) can include a few paise of round-off, which goes to Rounding.
-const roundOffPart = (d) => (d.adjustmentAccount && Math.abs(d.adjustmentRoundOff || 0) < 5 && Math.abs(d.adjustmentRoundOff || 0) < Math.abs(d.adjustment || 0) ? d.adjustmentRoundOff || 0 : 0);
+const roundOffPart = (d) => (d.adjustmentAccount && Math.abs(d.adjustmentRoundOff || 0) < 5 ? d.adjustmentRoundOff || 0 : 0);
 
 // The cash/bank account money went through: the one picked, else by payment mode.
 const modeAccount = (mode, bankAccount) => bankAccount || (mode === "cash" ? "cash" : "bank");

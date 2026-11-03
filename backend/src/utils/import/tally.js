@@ -301,7 +301,8 @@ function normalise(xml, known = {}) {
       const amt = num(text(e.AMOUNT));
       return { ledger: text(e.LEDGERNAME), debit: amt < 0 ? -amt : 0, credit: amt > 0 ? amt : 0, bills: arr(e["BILLALLOCATIONS.LIST"]).map((b) => ({ name: text(b.NAME), type: text(b.BILLTYPE), amount: Math.abs(num(text(b.AMOUNT))) })) };
     });
-    const inv = [...arr(v["ALLINVENTORYENTRIES.LIST"]), ...arr(v["INVENTORYENTRIES.LIST"])];
+    // Stock lines (Tally sometimes exports an empty inventory entry on a ledger-only voucher: skip those).
+    const inv = [...arr(v["ALLINVENTORYENTRIES.LIST"]), ...arr(v["INVENTORYENTRIES.LIST"])].filter((it) => text(it.STOCKITEMNAME) || num(text(it.AMOUNT)));
     // Inventory entries' accounting allocations (sales/purchase ledgers) are part of the entries.
     // Several stock lines usually share one sales/purchase ledger: add their amounts together.
     const alloc = new Map();
@@ -417,7 +418,9 @@ function normalise(xml, known = {}) {
       lines.forEach((l, i) => (l.taxRate = rates[i]));
       // Freight, discounts, round-off and anything else become the adjustment, so totals match Tally.
       const other = entries.filter((e) => e.ledger !== partyEntry.ledger && !isTax(e.ledger) && !incomeSide.includes(e) && !e.fromInventory && !e.asLine && (e.debit || e.credit));
-      const otherSigned = other.reduce((s, e) => s + (sales ? e.credit - e.debit : e.debit - e.credit), 0);
+      // Adjustment sign follows the document: invoices and vendor credits add credits, bills and credit notes debits.
+      const creditSide = kind === "invoices" || kind === "vendorCredits";
+      const otherSigned = other.reduce((s, e) => s + (creditSide ? e.credit - e.debit : e.debit - e.credit), 0);
       // When the whole adjustment is one real ledger (TDS deducted on a bill), post it there instead of Rounding.
       const adjLedgers = [...new Set(other.filter((e) => !isRound(e.ledger)).map((e) => e.ledger))];
       const roundOff = other.filter((e) => isRound(e.ledger)).reduce((s, e) => s + Math.abs(e.debit - e.credit), 0);
@@ -425,7 +428,7 @@ function normalise(xml, known = {}) {
       // round-off beside it goes to Rounding.
       const adjustmentLedger = adjLedgers.length === 1 && !["debtors", "creditors"].includes(groupOf(adjLedgers[0])) ? adjLedgers[0] : "";
       void roundOff;
-      const roundSigned = other.filter((e) => isRound(e.ledger)).reduce((t, e) => t + (sales ? e.credit - e.debit : e.debit - e.credit), 0);
+      const roundSigned = other.filter((e) => isRound(e.ledger)).reduce((t, e) => t + (creditSide ? e.credit - e.debit : e.debit - e.credit), 0);
       // The same party can have two vouchers with one number (e.g. bill "100" on two dates): keep both.
       const dupKey = `${kind}|${clean(partyEntry.ledger).toLowerCase()}|${clean(number).toLowerCase()}`;
       let docNumber = number;
