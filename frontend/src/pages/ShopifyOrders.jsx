@@ -59,8 +59,20 @@ function ResultsModal({ results, title, onClose }) {
   if (!results) return null;
   const bad = results.filter((r) => r.error);
   const good = results.filter((r) => !r.error);
+  const shipped = title === "Shipments" ? good.filter((r) => r.awb).map((r) => r.id) : [];
+  const footer = (
+    <>
+      {shipped.length > 0 && (
+        <>
+          <button className="btn" onClick={() => openPdf("/shopify/orders/labels", { ids: shipped, format: "4x6" })}>Download label 4x6</button>
+          <button className="btn" onClick={() => openPdf("/shopify/orders/labels", { ids: shipped, format: "a4" })}>Label A4</button>
+        </>
+      )}
+      <button className="btn btn-primary" onClick={onClose}>Done</button>
+    </>
+  );
   return (
-    <Modal open title={title} onClose={onClose} footer={<button className="btn btn-primary" onClick={onClose}>Done</button>}>
+    <Modal open title={title} onClose={onClose} footer={footer}>
       <p>
         <strong>{good.length}</strong> done{bad.length ? <>, <strong className="text-red">{bad.length}</strong> couldn't be done</> : ""}.
       </p>
@@ -70,6 +82,7 @@ function ResultsModal({ results, title, onClose }) {
             <tr key={r.id}>
               <td>{r.name}</td>
               <td className={r.error ? "text-red" : ""}>{r.error || [r.skipped ? "Already invoiced" : "", r.invoiceNumber, r.courierName, r.awb, r.text, r.warning].filter(Boolean).join(" · ") || "Done"}</td>
+              {shipped.length > 0 && <td>{r.awb && <button className="btn btn-sm" onClick={() => openPdf(`/shopify/orders/${r.id}/label`)}>Label</button>}</td>}
             </tr>
           ))}
         </tbody>
