@@ -417,7 +417,10 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
   const save = async () => {
     setBusy(true);
     try {
-      const body = { ...f, name: f.name || c.label };
+      // A dropdown shows its first choice when nothing is saved: save that choice too, so what you see is what's used.
+      const options = { ...f.options };
+      for (const k of c.fields.options) if (SELECTS[k] && !options[k]) options[k] = SELECTS[k][0][0];
+      const body = { ...f, options, name: f.name || c.label };
       const { data } = isNew ? await api.post("/shopify/couriers", body) : await api.put(`/shopify/couriers/${acc._id}`, body);
       if (f.carrier !== "custom") {
         try {
@@ -435,6 +438,7 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
   };
   const setP = (k) => (e) => setF({ ...f, pickup: { ...f.pickup, [k]: e.target.value } });
   const setO = (k, v) => setF((x) => ({ ...x, options: { ...x.options, [k]: v } }));
+
   const [warehouses, setWarehouses] = useState([]);
   useEffect(() => {
     api.get("/warehouses").then((r) => setWarehouses(r.data.filter((w) => w.active !== false && w.address?.pincode))).catch(() => {});

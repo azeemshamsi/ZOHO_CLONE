@@ -307,7 +307,7 @@ const dtdc = {
     const origin = { name: p.name || s.seller.name, phone: phone10(p.phone), address1: p.address, address2: "", pincode: p.pincode, city: p.city, stateName: stateName(p.state) };
     const consignment = {
       customer_code: acc.options.customerCode,
-      service_type_id: acc.options.serviceType || "B2C PRIORITY",
+      service_type_id: acc.options.serviceType || "B2C SMART EXPRESS", // the settings form's first choice
       load_type: "NON-DOCUMENT",
       description: s.description,
       dimension_unit: "cm",
