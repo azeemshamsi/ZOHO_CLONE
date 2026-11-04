@@ -44,6 +44,18 @@ function errorsOf(d) {
   return [...new Set(out)];
 }
 
+// Read the public key however it was pasted: "BEGIN PUBLIC KEY" or "BEGIN RSA PUBLIC KEY" (labels are often swapped),
+// with or without the BEGIN/END lines, line breaks or spaces.
+function publicKeyOf(text) {
+  const der = Buffer.from(String(text).replace(/-----[^-]+-----/g, "").replace(/[^A-Za-z0-9+/=]/g, ""), "base64");
+  for (const type of ["spki", "pkcs1"]) {
+    try {
+      return crypto.createPublicKey({ key: der, format: "der", type });
+    } catch {}
+  }
+  return crypto.createPublicKey(text); // last try as pasted (gives the real error)
+}
+
 const need = (acc) => {
   const miss = [["clientId", "client ID"], ["clientSecret", "client secret"], ["username", "API username"], ["password", "API password"], ["publicKey", "Clear's public key"]].filter(([k]) => !acc[k]).map(([, l]) => l);
   if (miss.length) throw new Error(`Add the ${miss.join(", ")} in GST → e-Invoices → Clear (GSP)`);
@@ -70,7 +82,7 @@ async function login(acc, gstin, force = false) {
   const payload = Buffer.from(JSON.stringify({ UserName: acc.username, Password: acc.password, AppKey: appKey.toString("base64"), ForceRefreshAccessToken: !!force })).toString("base64");
   let enc;
   try {
-    enc = crypto.publicEncrypt({ key: acc.publicKey, padding: crypto.constants.RSA_PKCS1_PADDING }, Buffer.from(payload)).toString("base64");
+    enc = crypto.publicEncrypt({ key: publicKeyOf(acc.publicKey), padding: crypto.constants.RSA_PKCS1_PADDING }, Buffer.from(payload)).toString("base64");
   } catch (e) {
     throw new Error(`Clear's public key couldn't be used (${e.message}). Paste the whole key including the BEGIN/END lines.`);
   }
@@ -174,4 +186,4 @@ async function check(acc, gstin) {
   return { ok: true, note: `Logged in as ${acc.username}` };
 }
 
-module.exports = { HOSTS, login, call, generateIrn, getByIrn, cancelIrn, ewbByIrn, ewbNonIrn, cancelEwb, check, openData, aes };
+module.exports = { HOSTS, publicKeyOf, login, call, generateIrn, getByIrn, cancelIrn, ewbByIrn, ewbNonIrn, cancelEwb, check, openData, aes };
