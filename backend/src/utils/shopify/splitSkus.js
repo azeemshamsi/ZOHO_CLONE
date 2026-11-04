@@ -73,7 +73,7 @@ async function splitMergedItems({ dryRun = false, log = console.log } = {}) {
     for (const [, rs] of bySku) {
       const r0 = rs[rs.length - 1];
       const sku = latestSku.get(r0.variantId) || r0.sku;
-      let target = await Item.findOne({ organization: org, _id: { $ne: it._id }, sku: new RegExp(`^${esc(sku)}$`, "i") });
+      let target = (await Item.findOne({ organization: org, _id: { $ne: it._id }, sku })) || (await Item.findOne({ organization: org, _id: { $ne: it._id }, sku: new RegExp(`^${esc(sku)}$`, "i") }));
       if (!target) target = await Item.findOne({ organization: org, _id: { $ne: it._id }, $or: [{ shopifyVariantId: r0.variantId }, { "shopifyLinks.variantId": r0.variantId }] });
       let made = false;
       if (!target && !dryRun) {

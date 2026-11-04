@@ -3,6 +3,7 @@ const Joi = require("joi");
 const Item = require("../models/Item");
 const Invoice = require("../models/Invoice");
 const { ah, validate, HttpError } = require("../utils/http");
+const { textMatch } = require("../utils/textMatch");
 
 const GST_RATES = [0, 0.25, 3, 5, 12, 18, 28];
 
@@ -54,14 +55,12 @@ router.get(
   "/",
   ah(async (req, res) => {
     const filter = { organization: req.org };
-    if (req.query.q) {
-      const rx = new RegExp(req.query.q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      filter.$or = [{ name: rx }, { sku: rx }, { hsnSac: rx }, { "shopifyLinks.sku": rx }, { "shopifyLinks.title": rx }];
-    }
     if (req.query.status === "active") filter.active = true;
     if (req.query.status === "inactive") filter.active = false;
     if (req.query.inventory === "tracked") filter.trackInventory = true;
-    res.send(await withStock(req.org, await Item.find(filter).sort({ name: 1 }).lean()));
+    let items = await Item.find(filter).sort({ name: 1 }).lean();
+    if (req.query.q) items = items.filter((i) => textMatch(req.query.q, [i.name, i.sku, i.hsnSac, (i.shopifyLinks || []).map((l) => [l.sku, l.title])]));
+    res.send(await withStock(req.org, items));
   })
 );
 

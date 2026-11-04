@@ -5,6 +5,7 @@ const Invoice = require("../models/Invoice");
 const Payment = require("../models/Payment");
 const CreditNote = require("../models/CreditNote");
 const { ah, validate, HttpError, round2 } = require("../utils/http");
+const { textMatch } = require("../utils/textMatch");
 const { journalNet, journalsOf, split } = require("../utils/partyJournals");
 
 const address = Joi.object({
@@ -58,17 +59,14 @@ router.get(
   "/",
   ah(async (req, res) => {
     const filter = { organization: req.org };
-    if (req.query.q) {
-      const rx = new RegExp(req.query.q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      filter.$or = [{ displayName: rx }, { companyName: rx }, { email: rx }, { phone: rx }];
-    }
     if (req.query.status === "active") filter.active = true;
     if (req.query.status === "inactive") filter.active = false;
     const [customers, recv] = await Promise.all([
       Customer.find(filter).sort({ displayName: 1 }).lean(),
       receivablesByCustomer(req.org),
     ]);
-    res.send(customers.map((c) => ({ ...c, receivables: recv[String(c._id)] || 0 })));
+    const list = req.query.q ? customers.filter((c) => textMatch(req.query.q, [c.displayName, c.companyName, c.email, c.phone, c.gstin])) : customers;
+    res.send(list.map((c) => ({ ...c, receivables: recv[String(c._id)] || 0 })));
   })
 );
 

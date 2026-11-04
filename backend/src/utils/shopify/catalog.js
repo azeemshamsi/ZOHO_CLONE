@@ -106,13 +106,14 @@ async function itemFor(orgId, line, store, cache = new Map()) {
       await Item.updateOne({ _id: item._id }, { sku });
     }
   }
-  if (!item && sku) item = await Item.findOne({ organization: orgId, sku: new RegExp(`^${esc(sku)}$`, "i") });
+  // Exact match first (reliable on every database), then ignoring case.
+  if (!item && sku) item = (await Item.findOne({ organization: orgId, sku })) || (await Item.findOne({ organization: orgId, sku: new RegExp(`^${esc(sku)}$`, "i") }));
   // By name only for an item no Shopify product has claimed yet (e.g. from Tally): no SKU, no listing.
   if (!item) {
-    const nameRx = new RegExp(`^${esc(itemName(line))}$`, "i");
-    item = sku
-      ? await Item.findOne({ organization: orgId, name: nameRx, sku: { $in: ["", null] }, shopifyVariantId: { $in: ["", null] }, "shopifyLinks.0": { $exists: false } })
-      : await Item.findOne({ organization: orgId, name: nameRx });
+    const nm = itemName(line);
+    const unclaimed = (it) => it && !it.sku && !it.shopifyVariantId && !(it.shopifyLinks || []).length;
+    const byName = (await Item.find({ organization: orgId, name: nm })).concat(await Item.find({ organization: orgId, name: new RegExp(`^${esc(nm)}$`, "i") }));
+    item = (sku ? byName.find(unclaimed) : byName[0]) || null;
   }
   let created = false;
   if (!item) {

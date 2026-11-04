@@ -7,6 +7,7 @@ const Organization = require("../models/Organization");
 const { nextNumber } = require("../models/Counter");
 const { settleInvoice: settle } = require("../utils/salesDoc");
 const { ah, validate, HttpError, round2 } = require("../utils/http");
+const { textMatch } = require("../utils/textMatch");
 
 const schema = Joi.object({
   customer: Joi.string().required().label("Customer"),
@@ -27,11 +28,8 @@ router.get(
   ah(async (req, res) => {
     const filter = { organization: req.org };
     if (req.query.customer) filter.customer = req.query.customer;
-    if (req.query.q) {
-      const rx = new RegExp(req.query.q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      filter.$or = [{ paymentNumber: rx }, { customerName: rx }, { reference: rx }];
-    }
-    res.send(await Payment.find(filter).sort({ date: -1, createdAt: -1 }));
+    const list = await Payment.find(filter).sort({ date: -1, createdAt: -1 }).lean();
+    res.send(req.query.q ? list.filter((p) => textMatch(req.query.q, [p.paymentNumber, p.customerName, p.reference])) : list);
   })
 );
 

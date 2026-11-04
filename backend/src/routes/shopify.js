@@ -207,26 +207,42 @@ function filterOf(req) {
   if (q.courier) f["shipment.account"] = mongoose.isValidObjectId(q.courier) ? new mongoose.Types.ObjectId(q.courier) : q.courier;
   if (q.invoiced === "yes") f.invoice = { $exists: true, $ne: null };
   if (q.invoiced === "no") f.$or = [{ invoice: { $exists: false } }, { invoice: null }];
-  if (q.tag) f.tags = new RegExp(`^${esc(q.tag)}$`, "i");
+  if (q.tag) f.tags = q.tag; // values come from the tag list
   if (q.min || q.max) {
     f.total = {};
     if (q.min) f.total.$gte = Number(q.min);
     if (q.max) f.total.$lte = Number(q.max);
   }
-  if (q.q) {
-    const rx = new RegExp(esc(q.q.trim().replace(/^#/, "")), "i");
-    const digits = q.q.replace(/\D/g, "");
-    const or = [{ name: rx }, { "customer.name": rx }, { "customer.email": rx }, { "customer.phone": rx }, { "shippingAddress.phone": rx }, { "shippingAddress.zip": rx }, { "shippingAddress.city": rx }, { "shipment.awb": rx }, { "lines.sku": rx }, { "lines.title": rx }, { invoiceNumber: rx }];
-    if (digits && digits.length <= 9) or.push({ orderNumber: Number(digits) });
-    f.$and = [...(f.$and || []), { $or: or }];
-  }
   return f;
+}
+
+// Text search over orders, done here rather than with database regexes (unreliable on the Oracle MongoDB API).
+// Every word typed must appear in the order's number, customer, phone, email, address, AWB / tracking numbers,
+// SKUs, item names, invoice number or tags. Adds an _id filter to f.
+const SEARCH_FIELDS = { name: 1, customer: 1, "shippingAddress.name": 1, "shippingAddress.phone": 1, "shippingAddress.zip": 1, "shippingAddress.city": 1, "shipment.awb": 1, "shipment.courierName": 1, "shopifyFulfillments.number": 1, "lines.sku": 1, "lines.title": 1, "lines.variantTitle": 1, invoiceNumber: 1, tags: 1, remarks: 1 };
+async function withSearch(req, f) {
+  const text = String(req.query.q || "").trim().toLowerCase();
+  if (!text) return f;
+  const words = text.split(/\s+/).map((w) => w.replace(/^#/, "")).filter(Boolean);
+  const base = { ...f };
+  delete base.status;
+  const docs = await ShopifyOrder.find(base, SEARCH_FIELDS).lean();
+  const ids = [];
+  for (const o of docs) {
+    const phones = [o.customer?.phone, o.shippingAddress?.phone].map((p) => String(p || "").replace(/\D/g, ""));
+    const hay = [o.name, o.customer?.name, o.customer?.email, o.customer?.phone, o.shippingAddress?.name, o.shippingAddress?.zip, o.shippingAddress?.city, o.shipment?.awb, o.shipment?.courierName, o.invoiceNumber, o.remarks, ...phones, ...(o.shopifyFulfillments || []).map((x) => x.number), ...(o.lines || []).flatMap((l) => [l.sku, l.title, l.variantTitle]), ...(o.tags || [])]
+      .filter(Boolean)
+      .join(" | ")
+      .toLowerCase();
+    if (words.every((w) => hay.includes(w) || (/^\+?\d{10,}$/.test(w) && hay.includes(w.replace(/\D/g, "").slice(-10))))) ids.push(o._id);
+  }
+  return { ...f, _id: { $in: ids } };
 }
 
 router.get(
   "/orders",
   ah(async (req, res) => {
-    const f = filterOf(req);
+    const f = await withSearch(req, filterOf(req));
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(200, Math.max(10, Number(req.query.limit) || 50));
     const sort = { oldest: { orderDate: 1 }, amount: { total: -1 }, newest: { orderDate: -1 } }[req.query.sort] || { orderDate: -1 };
@@ -261,7 +277,7 @@ router.get(
 router.get(
   "/orders/export",
   ah(async (req, res) => {
-    const rows = await ShopifyOrder.find(filterOf(req)).sort({ orderDate: -1 }).limit(20000).lean();
+    const rows = await ShopifyOrder.find(await withSearch(req, filterOf(req))).sort({ orderDate: -1 }).limit(20000).lean();
     const csv = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const head = ["Order", "Date", "Customer", "Phone", "Email", "City", "State", "Pincode", "Payment", "Financial status", "Status", "Items", "Total", "Courier", "AWB", "Invoice"];
     const out = [head.map(csv).join(",")];
@@ -824,4 +840,5 @@ router.moduleOf = function (req) {
   if (/^\/(store|locations)/.test(p)) return ["store_settings", "store_orders", "store_shipping", "store_returns"];
   return "store_orders";
 };
+router.withSearch = withSearch; // for tests
 module.exports = router;
