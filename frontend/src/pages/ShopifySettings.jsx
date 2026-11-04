@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { STATES } from "../lib/constants";
 import { PageHeader, Spinner, Field, Modal, toast } from "../components/ui";
-import { breakdownText } from "../components/rates";
 
 const FIELD_LABEL = {
   email: "API user email",
@@ -204,7 +203,7 @@ function Invoicing({ store, onSaved }) {
           <input type="checkbox" checked={f.trackInventory} onChange={set("trackInventory")} /> Track stock for items created from Shopify
         </label>
         <p className="muted small">
-          Package weight and size come from each product's package type — set them up under <a href="#packages">Package types</a> below.
+          Package weight and size come from each product's package type — set them up under <Link to="/package-types">Store → Package Types</Link>.
         </p>
         <label className="check">
           <input type="checkbox" checked={ful.fulfillInShopify} onChange={(e) => setFul({ ...ful, fulfillInShopify: e.target.checked })} /> When a shipment is booked, mark the order fulfilled in Shopify with the tracking number
@@ -1018,208 +1017,6 @@ function PincodeLists({ acc, flat }) {
   );
 }
 
-// Rate calculator: every active courier for a pincode, weight and size.
-function RateCalculator() {
-  const [f, setF] = useState({ to: "", weight: "", length: "", breadth: "", height: "", value: "", cod: false });
-  const [r, setR] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
-  const go = async (e) => {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      const body = { ...f, weight: Number(f.weight), length: Number(f.length) || 0, breadth: Number(f.breadth) || 0, height: Number(f.height) || 0, value: Number(f.value) || 0 };
-      setR((await api.post("/shopify/couriers/calculate", body)).data);
-    } catch (err) {
-      toast(errMsg(err), "error");
-    }
-    setBusy(false);
-  };
-  return (
-    <form className="card form" id="rate-calculator" style={{ marginTop: 18 }} onSubmit={go}>
-      <h4 className="section-title" style={{ marginTop: 0 }}>
-        Rate calculator
-      </h4>
-      <div className="row-4">
-        <Field label="Destination pincode" required>
-          <input value={f.to} onChange={set("to")} maxLength={6} />
-        </Field>
-        <Field label="Dead weight (kg)" required>
-          <input type="number" step="0.01" min="0" value={f.weight} onChange={set("weight")} />
-        </Field>
-        <Field label="Order value ₹">
-          <input type="number" step="0.01" min="0" value={f.value} onChange={set("value")} />
-        </Field>
-        <label className="check" style={{ alignSelf: "end" }}>
-          <input type="checkbox" checked={f.cod} onChange={set("cod")} /> COD
-        </label>
-      </div>
-      <div className="row-4">
-        <Field label="Length (cm)">
-          <input type="number" step="0.1" min="0" value={f.length} onChange={set("length")} />
-        </Field>
-        <Field label="Breadth (cm)">
-          <input type="number" step="0.1" min="0" value={f.breadth} onChange={set("breadth")} />
-        </Field>
-        <Field label="Height (cm)">
-          <input type="number" step="0.1" min="0" value={f.height} onChange={set("height")} />
-        </Field>
-        <button className="btn btn-primary" style={{ alignSelf: "end" }} disabled={busy}>
-          {busy ? "Calculating…" : "Calculate"}
-        </button>
-      </div>
-      {r && (
-        <>
-          <p className="muted small">
-            {f.to}: {r.destination?.district ? `${r.destination.district}, ${r.destination.state}` : "location not found"}
-          </p>
-          <table className="table compact">
-            <thead>
-              <tr>
-                <th>Courier</th>
-                <th>Pincode</th>
-                <th>Zone · weight</th>
-                <th className="num">Total</th>
-                <th>Breakdown</th>
-              </tr>
-            </thead>
-            <tbody>
-              {r.rows.map((q) => (
-                <tr key={q.account} className={q.serviceable === false ? "muted" : ""}>
-                  <td>
-                    {q.name}
-                    {q.edl && <span className="pill pill-amber" style={{ marginLeft: 6 }}>EDL</span>}
-                  </td>
-                  <td className="small">{q.serviceable === true ? "Serviceable" : q.serviceable === false ? <span className="text-red">Not serviceable</span> : "Not checked"}{q.note && <div className="muted small">{q.note}</div>}</td>
-                  <td className="small">
-                    {q.zone || "—"} · {q.chargeableWeight} kg
-                  </td>
-                  <td className="num">{q.charge != null ? <strong>₹{q.charge}</strong> : "—"} <span className="muted small">{q.source === "api" ? "API" : q.source}</span></td>
-                  <td className="small muted" style={{ whiteSpace: "pre-line" }}>
-                    {breakdownText(q).split("\n").pop()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-    </form>
-  );
-}
-
-function PackageTypes() {
-  const [rows, setRows] = useState(null);
-  const [f, setF] = useState(null);
-  const load = () => api.get("/shopify/package-types").then((r) => setRows(r.data));
-  useEffect(() => {
-    load().catch(() => setRows([]));
-  }, []);
-  const save = async () => {
-    try {
-      const body = { name: f.name, weight: Number(f.weight), length: Number(f.length), breadth: Number(f.breadth), height: Number(f.height) };
-      if (f._id) await api.put(`/shopify/package-types/${f._id}`, body);
-      else await api.post("/shopify/package-types", body);
-      toast("Package type saved");
-      setF(null);
-      load();
-    } catch (e) {
-      toast(errMsg(e), "error");
-    }
-  };
-  const remove = async () => {
-    try {
-      await api.delete(`/shopify/package-types/${f._id}`);
-      toast("Package type deleted");
-      setF(null);
-      load();
-    } catch (e) {
-      toast(errMsg(e), "error");
-    }
-  };
-  return (
-    <div className="card form" id="packages" style={{ marginTop: 18 }}>
-      <h4 className="section-title" style={{ marginTop: 0 }}>
-        Package types
-        <button className="btn btn-sm btn-primary" onClick={() => setF({ name: "", weight: "", length: "", breadth: "", height: "" })}>
-          + Add Package Type
-        </button>
-      </h4>
-      <p className="muted small">The box a product ships in, with its packed weight and size. Give each product a package type (Items or Inventory) and bookings and courier rates use it automatically; you can also pick one, or type the weight and size, when booking.</p>
-      {!rows ? (
-        <Spinner />
-      ) : !rows.length ? (
-        <p className="muted">No package types yet.</p>
-      ) : (
-        <table className="table compact table-click">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th className="num">Weight</th>
-              <th>Size (L × B × H)</th>
-              <th className="num">Products</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((p) => (
-              <tr key={p._id} onClick={() => setF(p)}>
-                <td>
-                  <strong>{p.name}</strong>
-                </td>
-                <td className="num">{p.weight} kg</td>
-                <td>
-                  {p.length} × {p.breadth} × {p.height} cm
-                </td>
-                <td className="num">{p.items}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {f && (
-        <Modal
-          open
-          title={f._id ? `Edit ${f.name}` : "Add package type"}
-          onClose={() => setF(null)}
-          footer={
-            <>
-              {f._id && (
-                <button className="btn btn-danger" style={{ marginRight: "auto" }} onClick={remove}>
-                  Delete
-                </button>
-              )}
-              <button className="btn" onClick={() => setF(null)}>
-                Cancel
-              </button>
-              <button className="btn btn-primary" onClick={save}>
-                Save
-              </button>
-            </>
-          }
-        >
-          <div className="form-grid">
-            <Field label="Name" required>
-              <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="e.g. Box M, Flyer L, Metal table carton" autoFocus />
-            </Field>
-            <div className="row-4">
-              {[
-                ["weight", "Weight (kg)"],
-                ["length", "Length (cm)"],
-                ["breadth", "Breadth (cm)"],
-                ["height", "Height (cm)"],
-              ].map(([k, l]) => (
-                <Field key={k} label={l} required>
-                  <input type="number" step="0.01" min="0" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
-                </Field>
-              ))}
-            </div>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
 function Couriers({ carriers }) {
   const [rows, setRows] = useState(null);
   const [edit, setEdit] = useState(null);
@@ -1305,9 +1102,7 @@ export function ShopifySettings() {
       <Invoicing store={store} onSaved={saved} />
       <InventorySync store={store} onSaved={saved} />
       <Rules key={JSON.stringify(store.rules).length} store={store} onSaved={saved} />
-      <PackageTypes />
       <Couriers carriers={store.carriers} />
-      <RateCalculator />
     </>
   );
 }

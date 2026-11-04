@@ -5,6 +5,7 @@ import { money } from "../lib/format";
 import { PageHeader, Spinner, Modal, Field, SearchBox, useDebounced, toast } from "../components/ui";
 import Icon from "../components/Icon";
 import ShopifyLookup from "../components/ShopifyLookup";
+import PackagePicker from "../components/PackagePicker";
 
 const TABS = [
   ["all", "All"],
@@ -306,14 +307,7 @@ function ItemStock({ id, racks, onClose, onChanged }) {
             </Field>
           </div>
           <Field label="Package type" hint="Used for courier booking and rates">
-            <select value={f.packageType || ""} onChange={(e) => setF({ ...f, packageType: e.target.value })}>
-              <option value="">None — enter weight and size when booking</option>
-              {packages.map((p) => (
-                <option key={p._id} value={p._id}>
-                  {p.name} — {p.weight} kg, {p.length}×{p.breadth}×{p.height} cm
-                </option>
-              ))}
-            </select>
+            <PackagePicker value={f.packageType} packages={packages} onChange={(v) => setF((x) => ({ ...x, packageType: v }))} />
           </Field>
           <div className="small">
             {d.shopifyVariantId ? "Own Shopify listing" : "No own Shopify listing"} · {d.links.length} linked listing{d.links.length === 1 ? "" : "s"}{" "}

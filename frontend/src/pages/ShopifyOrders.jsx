@@ -6,6 +6,8 @@ import { stateName } from "../lib/constants";
 import { PageHeader, Spinner, Empty, Modal, Field, SearchBox, useDebounced, toast } from "../components/ui";
 import Icon from "../components/Icon";
 import { breakdownText } from "../components/rates";
+import SearchSelect from "../components/SearchSelect";
+import PackagePicker, { packageOptions } from "../components/PackagePicker";
 import { useAuth } from "../lib/auth";
 
 const TABS = [
@@ -126,23 +128,107 @@ const choicesOf = (rows) =>
       : [{ ...r, key: r.account, courierId: "" }]
   );
 
+// Each product's package type, settable right here so its next orders book faster.
+function LinePackages({ lines, packages, onChanged }) {
+  const set = async (l, packageType) => {
+    try {
+      await api.post("/shopify/package-types/assign", { items: [l.item], packageType: packageType || null });
+      toast(packageType ? `Package type set on ${l.sku || l.title}` : "Package type removed");
+      onChanged?.();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  const list = (lines || []).filter((l) => l.item);
+  if (!list.length) return null;
+  return (
+    <table className="table compact">
+      <tbody>
+        {list.map((l) => (
+          <tr key={l.item + l.sku}>
+            <td style={{ width: "45%" }}>
+              <strong>{l.sku || "—"}</strong> <span className="muted small">{l.title}</span>
+              {l.quantity > 1 && <span className="muted small"> × {l.quantity}</span>}
+            </td>
+            <td>
+              <PackagePicker value={l.packageType} packages={packages} onChange={(v) => v !== (l.packageType || "") && set(l, v)} placeholder="No package type — search to set one" />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// Save the weight and size typed when booking as a package type, and give it to the order's product.
+function SaveAsPackage({ dims, lines, onSaved }) {
+  const prods = (lines || []).filter((l) => l.item);
+  const oneProduct = prods.length === 1;
+  const [name, setName] = useState(prods.map((l) => l.sku || l.title).join(" + ").slice(0, 80));
+  const [assign, setAssign] = useState(oneProduct);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post("/shopify/package-types", { name, ...Object.fromEntries(Object.entries(dims).map(([k, v]) => [k, Number(v)])), items: assign ? prods.map((l) => l.item) : [] });
+      toast(`Package type “${data.name}” saved${data.assigned ? ` and set on ${prods.map((l) => l.sku || l.title).join(", ")}` : ""}`);
+      onSaved(data);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="card" style={{ padding: 10, background: "var(--bg-soft, #f8fafc)" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
+        <Field label="Save as package type">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" style={{ minWidth: 220 }} />
+        </Field>
+        <button type="button" className="btn" disabled={busy || !name.trim()} onClick={save}>
+          {busy ? "Saving…" : "Save package type"}
+        </button>
+      </div>
+      {prods.length > 0 && (
+        <label className="check small" style={{ marginTop: 6 }}>
+          <input type="checkbox" checked={assign} onChange={(e) => setAssign(e.target.checked)} /> Use it for {oneProduct ? "this product" : "these products"} ({prods.map((l) => l.sku || l.title).join(", ")}) from now on
+          {oneProduct && prods[0].quantity > 1 ? ` — note: this size is for ${prods[0].quantity} units` : ""}
+          {!oneProduct ? " — note: this is the size of the whole order" : ""}
+        </label>
+      )}
+    </div>
+  );
+}
+
 // Live serviceability + expected charges for one order (read-only, in the order view).
 function CourierRates({ id }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState("");
+  const [packages, setPackages] = useState([]);
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    api.get("/shopify/package-types").then((r) => setPackages(r.data)).catch(() => {});
+  }, []);
   useEffect(() => {
     api
       .post("/shopify/orders/quotes", { ids: [id] })
       .then((r) => setD(r.data.orders[0]))
       .catch((e) => setErr(errMsg(e)));
-  }, [id]);
+  }, [id, n]);
   if (err) return <p className="muted small">Courier charges: {err}</p>;
   if (!d) return <p className="muted small">Checking couriers for this pincode…</p>;
-  if (d.error || d.needsPackage) return <p className="muted small">{d.error || "Its products have no package type — set one on the item (Items / Inventory), or enter the weight and size when booking, to see courier charges."}</p>;
+  const linePkgs = <LinePackages lines={d.lines} packages={packages} onChanged={() => setN((x) => x + 1)} />;
+  if (d.error || d.needsPackage)
+    return (
+      <>
+        <p className="muted small">{d.error || "Set a package type on the product below (or enter the weight and size when booking) to see courier charges."}</p>
+        {linePkgs}
+      </>
+    );
   const rows = choicesOf(d.rows);
   if (!rows.length) return <p className="muted small">No active couriers. Add one in Store Settings → Couriers.</p>;
   return (
     <>
+      {linePkgs}
       <div className="muted small" style={{ margin: "4px 0" }}>
         To {d.pincode} {d.city} · {d.cod ? `COD ${money(d.codAmount)}` : "Prepaid"} · Package: {pkgText(d.pkg)}
       </div>
@@ -184,12 +270,15 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
   const [invoiceFirst, setInvoiceFirst] = useState(false);
   const [skipCheck, setSkipCheck] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  const [saved, setSaved] = useState(false);
   const manualOk = ["weight", "length", "breadth", "height"].every((k) => Number(manualPkg[k]) > 0);
   const pkgBody = mode === "auto" ? {} : mode === "manual" ? (manualOk ? Object.fromEntries(Object.entries(manualPkg).map(([k, v]) => [k, Number(v)])) : null) : { packageType: mode };
-  const pkgKey = JSON.stringify(pkgBody);
+  const pkgKey = JSON.stringify(pkgBody) + refresh;
+  const loadPackages = () => api.get("/shopify/package-types").then((r) => setPackages(r.data)).catch(() => {});
 
   useEffect(() => {
-    api.get("/shopify/package-types").then((r) => setPackages(r.data)).catch(() => {});
+    loadPackages();
   }, []);
   useEffect(() => {
     if (!pkgBody || !active.length) return;
@@ -265,16 +354,29 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
       ) : (
         <div className="form-grid">
           <Field label="Package" hint={mode === "auto" ? (single ? (order?.pkg ? `From the products: ${pkgText(order.pkg)}` : order?.needsPackage ? "Its products have no package type — choose one or enter the size" : "") : "Each order uses its own products' package types") : ""}>
-            <select value={mode} onChange={(e) => setMode(e.target.value)}>
-              <option value="auto">From the products' package types</option>
-              {packages.map((p) => (
-                <option key={p._id} value={p._id}>
-                  {p.name} — {p.weight} kg, {p.length}×{p.breadth}×{p.height} cm
-                </option>
-              ))}
-              <option value="manual">Enter weight and size</option>
-            </select>
+            <SearchSelect
+              value={mode}
+              options={[{ value: "auto", label: "From the products' package types" }, { value: "manual", label: "Enter weight and size" }, ...packageOptions(packages)]}
+              onChange={(v) => v && setMode(v)}
+              placeholder="Search package types…"
+            />
           </Field>
+          {single && (order?.lines || quotes?.orders?.[0]?.lines)?.length > 0 && (mode === "auto" || mode === "manual") && (
+            <>
+              <div className="label-sm" style={{ marginBottom: -6 }}>
+                Product package type <span className="muted">(used automatically for this product's orders)</span>
+              </div>
+              <LinePackages
+                lines={order?.lines || quotes?.orders?.[0]?.lines}
+                packages={packages}
+                onChanged={() => {
+                  loadPackages();
+                  setMode("auto");
+                  setRefresh((x) => x + 1);
+                }}
+              />
+            </>
+          )}
           {mode === "manual" && (
             <div className="row-4">
               {[
@@ -284,10 +386,24 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
                 ["height", "Height (cm)"],
               ].map(([k, l]) => (
                 <Field key={k} label={l} required>
-                  <input type="number" step="0.01" min="0" value={manualPkg[k]} onChange={(e) => setManualPkg({ ...manualPkg, [k]: e.target.value })} />
+                  <input type="number" step="0.01" min="0" value={manualPkg[k]} onChange={(e) => (setManualPkg({ ...manualPkg, [k]: e.target.value }), setSaved(false))} />
                 </Field>
               ))}
             </div>
+          )}
+          {single && mode === "manual" && manualOk && !saved && (
+            <SaveAsPackage
+              dims={manualPkg}
+              lines={order?.lines || quotes?.orders?.[0]?.lines}
+              onSaved={(pt) => {
+                setSaved(true);
+                // Given to the product: book "from the products" (and its next orders will too); else use it here.
+                loadPackages().then(() => {
+                  setMode(pt.assigned ? "auto" : pt._id);
+                  setRefresh((x) => x + 1);
+                });
+              }}
+            />
           )}
           {autoMissing > 0 && mode === "auto" && <p className="alert alert-warn">{autoMissing} of these orders have products without a package type — they won't be booked. Choose a package above to use it for all.</p>}
 

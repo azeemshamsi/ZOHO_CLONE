@@ -30,6 +30,8 @@ import { Currencies } from "./pages/Currencies";
 import { Import } from "./pages/Import";
 import { ShopifyOrders } from "./pages/ShopifyOrders";
 import { ShopifySettings } from "./pages/ShopifySettings";
+import { PackageTypes } from "./pages/PackageTypes";
+import { ShippingCalculator } from "./pages/ShippingCalculator";
 import { Inventory } from "./pages/Inventory";
 import { ReturnScan } from "./pages/ReturnScan";
 import { GstCompliance } from "./pages/GstCompliance";
@@ -97,6 +99,8 @@ export default function App() {
           <Route path="import" element={<Import />} />
           <Route path="shopify-orders" element={<ShopifyOrders />} />
           <Route path="shopify-settings" element={<ShopifySettings />} />
+          <Route path="package-types" element={<PackageTypes />} />
+          <Route path="shipping-calculator" element={<ShippingCalculator />} />
           <Route path="inventory" element={<Inventory />} />
           <Route path="returns-scan" element={<ReturnScan />} />
           <Route path="no-access" element={<div className="card center no-access"><h3>No pages to show</h3><p className="muted">Your role doesn't include any part of the app yet. Ask an admin.</p></div>} />

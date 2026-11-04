@@ -7,6 +7,7 @@ import { docLink } from "./Accounts";
 import { useLocations } from "../lib/locations";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Confirm } from "../components/ui";
 import ShopifyLookup from "../components/ShopifyLookup";
+import PackagePicker from "../components/PackagePicker";
 import Icon from "../components/Icon";
 import { LinkPicker } from "./Inventory";
 import { useAuth } from "../lib/auth";
@@ -244,15 +245,8 @@ export function ItemForm() {
           <>
             <h4 className="section-title">Shipping</h4>
             <div className="form-grid">
-              <Field label="Package type" hint={packages.length ? "Its packed weight and size are used when booking couriers and for courier rates" : "Add package types in Store Settings → Package types"}>
-                <select value={form.packageType || ""} onChange={set("packageType")}>
-                  <option value="">None — enter weight and size when booking</option>
-                  {packages.map((p) => (
-                    <option key={p._id} value={p._id}>
-                      {p.name} — {p.weight} kg, {p.length}×{p.breadth}×{p.height} cm
-                    </option>
-                  ))}
-                </select>
+              <Field label="Package type" hint={packages.length ? "Its packed weight and size are used when booking couriers and for courier rates" : "Add package types in Store → Package Types"}>
+                <PackagePicker value={form.packageType} packages={packages} onChange={(v) => setForm((x) => ({ ...x, packageType: v }))} />
               </Field>
             </div>
             <h4 className="section-title">Inventory</h4>

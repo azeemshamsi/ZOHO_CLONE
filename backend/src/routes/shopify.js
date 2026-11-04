@@ -280,7 +280,7 @@ router.get(
 router.get(
   "/orders/:id",
   ah(async (req, res) => {
-    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg }).populate("lines.item", "name sku hsnSac taxRate needsReview reviewNote trackInventory").lean();
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg }).populate("lines.item", "name sku hsnSac taxRate needsReview reviewNote trackInventory packageType").lean();
     if (!o) throw new HttpError(404, "Order not found");
     // Where to pick each item from.
     const ids = o.lines.map((l) => l.item?._id).filter(Boolean);
@@ -355,7 +355,8 @@ router.post(
     const allItems = new Map((await Item.find({ _id: { $in: orders.flatMap((o) => o.lines.map((l) => l.item)).filter(Boolean) } }).lean()).map((i) => [String(i._id), i]));
     const out = [];
     const one = async (o) => {
-      const base = { id: String(o._id), name: o.name, pincode: o.shippingAddress?.zip || "", city: o.shippingAddress?.city || "", cod: false, rows: [] };
+      const lines = o.lines.filter((l) => l.quantity > 0).map((l) => ({ item: l.item ? String(l.item) : "", sku: l.sku || allItems.get(String(l.item))?.sku || "", title: l.variantTitle ? `${l.title} - ${l.variantTitle}` : l.title, quantity: l.quantity, packageType: allItems.get(String(l.item))?.packageType ? String(allItems.get(String(l.item)).packageType) : "" }));
+      const base = { id: String(o._id), name: o.name, pincode: o.shippingAddress?.zip || "", city: o.shippingAddress?.city || "", cod: false, rows: [], lines };
       let p;
       try {
         p = await resolvePackage(o, d.pkg, req.storeOrg, allItems);
@@ -734,28 +735,49 @@ router.post(
 );
 
 /* ---------------- package types ---------------- */
-const ptJoi = Joi.object({ name: Joi.string().trim().required().label("Name"), weight: Joi.number().greater(0).required().label("Weight"), length: Joi.number().greater(0).required().label("Length"), breadth: Joi.number().greater(0).required().label("Breadth"), height: Joi.number().greater(0).required().label("Height"), active: Joi.boolean() });
+const ptJoi = Joi.object({ name: Joi.string().trim().required().label("Name"), weight: Joi.number().greater(0).required().label("Weight"), length: Joi.number().greater(0).required().label("Length"), breadth: Joi.number().greater(0).required().label("Breadth"), height: Joi.number().greater(0).required().label("Height"), active: Joi.boolean(), items: Joi.array().items(Joi.string()).max(2000) });
+const itemOrgs = (req) => [req.org, req.storeOrg];
+// List, with search by name, size or the SKU / name of a product using it.
 router.get(
   "/package-types",
   ah(async (req, res) => {
-    const rows = await PackageType.find({ organization: req.storeOrg, active: true }).sort({ name: 1 }).lean();
-    const counts = await Item.aggregate([{ $match: { packageType: { $in: rows.map((r) => r._id) } } }, { $group: { _id: "$packageType", n: { $sum: 1 } } }]);
-    const by = new Map(counts.map((c) => [String(c._id), c.n]));
-    res.send(rows.map((r) => ({ ...r, items: by.get(String(r._id)) || 0 })));
+    const filter = { organization: req.storeOrg, active: true };
+    const q = String(req.query.q || "").trim();
+    if (q) {
+      const rx = new RegExp(esc(q), "i");
+      const viaItems = await Item.distinct("packageType", { organization: { $in: itemOrgs(req) }, packageType: { $ne: null }, $or: [{ sku: rx }, { name: rx }, { "shopifyLinks.sku": rx }] });
+      filter.$or = [{ name: rx }, { _id: { $in: viaItems } }];
+      const n = Number(q);
+      if (n > 0) filter.$or.push({ weight: n }, { length: n }, { breadth: n }, { height: n });
+    }
+    const rows = await PackageType.find(filter).sort({ name: 1 }).limit(500).lean();
+    const used = await Item.find({ organization: { $in: itemOrgs(req) }, packageType: { $in: rows.map((r) => r._id) } }, { packageType: 1, sku: 1, name: 1 }).lean();
+    const by = new Map();
+    for (const it of used) {
+      const k = String(it.packageType);
+      if (!by.has(k)) by.set(k, []);
+      by.get(k).push({ _id: it._id, sku: it.sku || "", name: it.name });
+    }
+    res.send(rows.map((r) => ({ ...r, items: (by.get(String(r._id)) || []).length, products: (by.get(String(r._id)) || []).slice(0, 50) })));
   })
 );
+// Create; optionally give it to products straight away (e.g. from the booking screen).
 router.post(
   "/package-types",
   ah(async (req, res) => {
-    ownerOnly(req);
-    res.send(await PackageType.create({ ...validate(ptJoi, req.body), organization: req.storeOrg }));
+    const { items, ...d } = validate(ptJoi, req.body);
+    const pt = await PackageType.create({ ...d, organization: req.storeOrg });
+    let assigned = 0;
+    if (items?.length) assigned = (await Item.updateMany({ _id: { $in: items }, organization: { $in: itemOrgs(req) } }, { packageType: pt._id })).modifiedCount;
+    res.send({ ...pt.toObject(), assigned });
   })
 );
 router.put(
   "/package-types/:id",
   ah(async (req, res) => {
-    ownerOnly(req);
-    const pt = await PackageType.findOneAndUpdate({ _id: req.params.id, organization: req.storeOrg }, validate(ptJoi, req.body), { new: true });
+    const { items, ...d } = validate(ptJoi, req.body);
+    void items;
+    const pt = await PackageType.findOneAndUpdate({ _id: req.params.id, organization: req.storeOrg }, d, { new: true });
     if (!pt) throw new HttpError(404, "Package type not found");
     res.send(pt);
   })
@@ -763,21 +785,23 @@ router.put(
 router.delete(
   "/package-types/:id",
   ah(async (req, res) => {
-    ownerOnly(req);
     const pt = await PackageType.findOneAndUpdate({ _id: req.params.id, organization: req.storeOrg }, { active: false });
     if (!pt) throw new HttpError(404, "Package type not found");
     await Item.updateMany({ packageType: pt._id }, { packageType: null });
     res.send({ ok: true });
   })
 );
-// Give several items a package type at once.
+// Set (or clear, with packageType null) the package type of products.
 router.post(
-  "/package-types/:id/assign",
+  "/package-types/assign",
   ah(async (req, res) => {
-    const d = validate(Joi.object({ items: Joi.array().items(Joi.string()).min(1).max(2000).required() }), req.body);
-    const pt = await PackageType.findOne({ _id: req.params.id, organization: req.storeOrg, active: true });
-    if (!pt) throw new HttpError(404, "Package type not found");
-    const r = await Item.updateMany({ _id: { $in: d.items }, organization: req.org }, { packageType: pt._id });
+    const d = validate(Joi.object({ items: Joi.array().items(Joi.string()).min(1).max(2000).required(), packageType: Joi.string().allow(null, "") }), req.body);
+    let pt = null;
+    if (d.packageType) {
+      pt = await PackageType.findOne({ _id: d.packageType, organization: req.storeOrg, active: true });
+      if (!pt) throw new HttpError(404, "Package type not found");
+    }
+    const r = await Item.updateMany({ _id: { $in: d.items }, organization: { $in: itemOrgs(req) } }, { packageType: pt ? pt._id : null });
     res.send({ updated: r.modifiedCount });
   })
 );
@@ -789,7 +813,7 @@ router.moduleOf = function (req) {
   if (/^\/orders\/(ship|track|labels)$|^\/orders\/[^/]+\/(label|cancel-shipment)$/.test(p)) return "store_shipping";
   if (p === "/orders/quotes" || p === "/couriers/calculate") return ["store_orders", "store_shipping", "store_settings"];
   if (/^\/couriers\/[^/]+\/pincodes/.test(p)) return req.method === "GET" ? ["store_shipping", "store_settings"] : "store_settings";
-  if (/^\/package-types/.test(p)) return req.method === "GET" ? ["store_shipping", "store_settings", "store_orders"] : /assign$/.test(p) ? ["store_settings", "store_shipping"] : "store_settings";
+  if (/^\/package-types/.test(p)) return ["store_shipping", "store_settings", "store_orders"];
   if (/^\/couriers/.test(p)) return req.method === "GET" ? ["store_shipping", "store_settings"] : "store_settings";
   if (/^\/(store|locations|rules)/.test(p) && req.method !== "GET") return "store_settings";
   if (/^\/(store|locations)/.test(p)) return ["store_settings", "store_orders", "store_shipping", "store_returns"];
