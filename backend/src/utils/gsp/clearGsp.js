@@ -30,7 +30,24 @@ function openData(sek, data) {
   }
 }
 
+// Clear's gateway errors come as text: 'AuthenticationException: {"statusCode":"0","error":"<base64>"}'.
+function gatewayError(d) {
+  const text = typeof d === "string" ? d : typeof d?.raw === "string" ? d.raw : "";
+  const m = text.match(/(\w+Exception)?:?\s*(\{[\s\S]*\})/);
+  if (!m) return "";
+  try {
+    const j = JSON.parse(m[2]);
+    let e = String(j.error || j.message || "");
+    if (/^[A-Za-z0-9+/=]{12,}$/.test(e)) e = Buffer.from(e, "base64").toString("utf8");
+    return [m[1], e].filter(Boolean).join(": ");
+  } catch {
+    return "";
+  }
+}
+
 function errorsOf(d) {
+  const gw = gatewayError(d);
+  if (gw) return [gw];
   const lists = [d?.ErrorDetails, d?.errorDetails, d?.error?.errors, d?.errors];
   const out = [];
   for (const l of lists)
@@ -60,12 +77,16 @@ const need = (acc) => {
   const miss = [["clientId", "client ID"], ["clientSecret", "client secret"], ["username", "API username"], ["password", "API password"], ["publicKey", "Clear's public key"]].filter(([k]) => !acc[k]).map(([, l]) => l);
   if (miss.length) throw new Error(`Add the ${miss.join(", ")} in GST → e-Invoices → Clear (GSP)`);
 };
+// Both spellings: NIC's client_id / client_secret / user_name, and the hyphenated form Clear's gateway reads
+// (gateways often drop header names with underscores).
 const headersOf = (acc, gstin, withToken) => ({
   client_id: acc.clientId,
+  "client-id": acc.clientId,
   client_secret: acc.clientSecret,
+  "client-secret": acc.clientSecret,
   Gstin: gstin,
-  ...(acc.token ? { "X-CT-Auth-Token": acc.token } : {}),
-  ...(withToken ? { user_name: acc.username, AuthToken: acc.authToken } : {}),
+  ...(acc.token ? { "X-CT-Auth-Token": acc.token, "x-cleartax-auth-token": acc.token } : {}),
+  ...(withToken ? { user_name: acc.username, "user-name": acc.username, AuthToken: acc.authToken, "auth-token": acc.authToken } : {}),
 });
 
 function check401(res) {
@@ -186,4 +207,4 @@ async function check(acc, gstin) {
   return { ok: true, note: `Logged in as ${acc.username}` };
 }
 
-module.exports = { HOSTS, publicKeyOf, login, call, generateIrn, getByIrn, cancelIrn, ewbByIrn, ewbNonIrn, cancelEwb, check, openData, aes };
+module.exports = { HOSTS, publicKeyOf, errorsOf, login, call, generateIrn, getByIrn, cancelIrn, ewbByIrn, ewbNonIrn, cancelEwb, check, openData, aes };
