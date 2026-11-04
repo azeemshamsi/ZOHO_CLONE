@@ -737,28 +737,33 @@ router.post(
 /* ---------------- package types ---------------- */
 const ptJoi = Joi.object({ name: Joi.string().trim().required().label("Name"), weight: Joi.number().greater(0).required().label("Weight"), length: Joi.number().greater(0).required().label("Length"), breadth: Joi.number().greater(0).required().label("Breadth"), height: Joi.number().greater(0).required().label("Height"), active: Joi.boolean(), items: Joi.array().items(Joi.string()).max(2000) });
 const itemOrgs = (req) => [req.org, req.storeOrg];
-// List, with search by name, size or the SKU / name of a product using it.
+// List, with search by name, size or the SKU / name of a product using it (filtered here: the list is small).
 router.get(
   "/package-types",
   ah(async (req, res) => {
-    const filter = { organization: req.storeOrg, active: true };
-    const q = String(req.query.q || "").trim();
-    if (q) {
-      const rx = new RegExp(esc(q), "i");
-      const viaItems = await Item.distinct("packageType", { organization: { $in: itemOrgs(req) }, packageType: { $ne: null }, $or: [{ sku: rx }, { name: rx }, { "shopifyLinks.sku": rx }] });
-      filter.$or = [{ name: rx }, { _id: { $in: viaItems } }];
-      const n = Number(q);
-      if (n > 0) filter.$or.push({ weight: n }, { length: n }, { breadth: n }, { height: n });
-    }
-    const rows = await PackageType.find(filter).sort({ name: 1 }).limit(500).lean();
-    const used = await Item.find({ organization: { $in: itemOrgs(req) }, packageType: { $in: rows.map((r) => r._id) } }, { packageType: 1, sku: 1, name: 1 }).lean();
+    const rows = await PackageType.find({ organization: req.storeOrg, active: true }).sort({ name: 1 }).lean();
+    const ids = rows.map((r) => r._id);
+    const used = ids.length ? await Item.find({ organization: { $in: itemOrgs(req) }, packageType: { $in: ids } }, { packageType: 1, sku: 1, name: 1, shopifyLinks: 1 }).lean() : [];
     const by = new Map();
     for (const it of used) {
       const k = String(it.packageType);
       if (!by.has(k)) by.set(k, []);
-      by.get(k).push({ _id: it._id, sku: it.sku || "", name: it.name });
+      by.get(k).push({ _id: it._id, sku: it.sku || "", name: it.name, links: (it.shopifyLinks || []).map((l) => l.sku).filter(Boolean) });
     }
-    res.send(rows.map((r) => ({ ...r, items: (by.get(String(r._id)) || []).length, products: (by.get(String(r._id)) || []).slice(0, 50) })));
+    const q = String(req.query.q || "").trim().toLowerCase();
+    const hit = (r) => {
+      if (!q) return true;
+      const prods = by.get(String(r._id)) || [];
+      const text = [r.name, `${r.length}x${r.breadth}x${r.height}`, `${r.length}×${r.breadth}×${r.height}`, ...prods.flatMap((p) => [p.sku, p.name, ...p.links])].join(" ").toLowerCase();
+      const n = Number(q);
+      return q.split(/\s+/).every((w) => text.includes(w)) || (n > 0 && [r.weight, r.length, r.breadth, r.height].includes(n));
+    };
+    res.send(
+      rows.filter(hit).map((r) => {
+        const prods = (by.get(String(r._id)) || []).map(({ links, ...p }) => p);
+        return { ...r, items: prods.length, products: prods.slice(0, 50) };
+      })
+    );
   })
 );
 // Create; optionally give it to products straight away (e.g. from the booking screen).
