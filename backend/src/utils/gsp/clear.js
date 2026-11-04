@@ -165,4 +165,23 @@ async function check(acc, gstin) {
   return { ok: true, note: errorsOf(d)[0] || "" };
 }
 
-module.exports = { HOSTS, hostOf, generateIrn, getByIrn, cancelIrn, ewbByIrn, ewbNonIrn, cancelEwb, check, nonIrnBody, transport, errorsOf, CANCEL_REASONS: Object.keys(CANCEL_CODE) };
+// Two ways to connect: Clear's auth token (E-Invoicing API), or client ID/secret + API username/password
+// (E-Invoicing GSP API, NIC login and encryption — utils/gsp/clearGsp.js).
+const byToken = { generateIrn, getByIrn, cancelIrn, ewbByIrn, ewbNonIrn, cancelEwb, check };
+const pick = (name) => (acc, ...args) => (acc?.mode === "gsp" ? require("./clearGsp")[name] : byToken[name])(acc, ...args);
+
+module.exports = {
+  HOSTS,
+  hostOf,
+  generateIrn: pick("generateIrn"),
+  getByIrn: pick("getByIrn"),
+  cancelIrn: pick("cancelIrn"),
+  ewbByIrn: pick("ewbByIrn"),
+  ewbNonIrn: pick("ewbNonIrn"),
+  cancelEwb: pick("cancelEwb"),
+  check: pick("check"),
+  nonIrnBody,
+  transport,
+  errorsOf,
+  CANCEL_REASONS: Object.keys(CANCEL_CODE),
+};

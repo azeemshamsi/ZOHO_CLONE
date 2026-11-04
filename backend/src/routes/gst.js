@@ -278,7 +278,7 @@ const GspAccount = require("../models/GspAccount");
 // The company's active Clear connection and the GSTIN to send as. required=false → null when not connected.
 async function gspOf(req, required = true) {
   const acc = await GspAccount.findOne({ organization: req.org });
-  if (!acc?.active || !acc.token) {
+  if (!acc?.active || (acc.mode === "gsp" ? !acc.clientId : !acc.token)) {
     if (required) throw new HttpError(400, "Connect Clear first: GST → e-Invoices → Clear (GSP) settings");
     return null;
   }
@@ -314,8 +314,14 @@ router.put(
     const d = validate(
       Joi.object({
         env: Joi.string().valid("sandbox", "production").required(),
+        mode: Joi.string().valid("token", "gsp").default("gsp"),
         host: Joi.string().trim().allow("").uri({ scheme: ["https"] }).label("API address"),
         token: Joi.string().trim().allow(""),
+        clientId: Joi.string().trim().allow(""),
+        clientSecret: Joi.string().trim().allow(""),
+        username: Joi.string().trim().allow(""),
+        password: Joi.string().allow(""),
+        publicKey: Joi.string().trim().allow(""),
         gstin: Joi.string().trim().uppercase().allow("").pattern(/^[0-9]{2}[A-Z0-9]{13}$/).label("GSTIN"),
         active: Joi.boolean().required(),
       }),
@@ -326,8 +332,17 @@ router.put(
     acc.env = d.env;
     acc.host = d.host || "";
     acc.gstin = d.gstin || "";
-    if (d.token) acc.token = d.token; // blank = keep
-    acc.active = d.active && !!acc.token;
+    acc.mode = d.mode;
+    if (d.token) acc.token = d.token; // blank = keep (secrets)
+    if (d.clientId !== undefined && d.clientId !== "") acc.clientId = d.clientId;
+    if (d.clientSecret) acc.clientSecret = d.clientSecret;
+    if (d.username !== undefined && d.username !== "") acc.username = d.username;
+    if (d.password) acc.password = d.password;
+    if (d.publicKey) acc.publicKey = d.publicKey;
+    // Credentials or environment changed: log in afresh.
+    acc.authToken = "";
+    acc.sek = "";
+    acc.active = d.active && (acc.mode === "gsp" ? !!(acc.clientId && acc.clientSecret && acc.username && acc.password && acc.publicKey) : !!acc.token);
     // Check the connection whenever it's turned on.
     let message = "Saved";
     if (acc.active) {
@@ -344,9 +359,9 @@ router.put(
       acc.lastCheckAt = new Date();
     }
     await acc.save();
-    await Organization.updateOne({ _id: req.org }, { gsp: { provider: "clear", active: acc.active, env: acc.env } });
+    await Organization.updateOne({ _id: req.org }, { gsp: { provider: "clear", active: acc.active, env: acc.env, mode: acc.mode } });
     if (!message) throw new HttpError(400, `Saved, but Clear didn't accept the connection: ${acc.lastError}`);
-    res.send({ account: acc, message, organizationGsp: { provider: "clear", active: acc.active, env: acc.env } });
+    res.send({ account: acc, message, organizationGsp: { provider: "clear", active: acc.active, env: acc.env, mode: acc.mode } });
   })
 );
 

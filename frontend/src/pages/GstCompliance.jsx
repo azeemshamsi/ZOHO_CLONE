@@ -20,7 +20,7 @@ function ClearSettings() {
       .then((r) => {
         setD(r.data);
         const a = r.data.account;
-        setF({ env: a.env || "sandbox", host: a.host || "", gstin: a.gstin || "", token: "", active: a.active || !a.tokenSaved });
+        setF({ env: a.env || "sandbox", mode: a.mode === "token" && a.tokenSaved ? "token" : "gsp", host: a.host || "", gstin: a.gstin || "", token: "", clientId: a.clientId || "", clientSecret: "", username: a.username || "", password: "", publicKey: "" });
       })
       .catch(() => {});
   }, []);
@@ -43,7 +43,7 @@ function ClearSettings() {
   };
   const off = async () => {
     try {
-      const { data } = await api.put("/gst/gsp", { env: f.env, host: f.host, gstin: f.gstin, token: "", active: false });
+      const { data } = await api.put("/gst/gsp", { env: f.env, mode: f.mode, host: f.host, gstin: f.gstin, active: false });
       setD({ ...d, account: data.account });
       setOrganization({ ...organization, gsp: data.organizationGsp });
       toast("Clear disconnected — e-invoices and e-way bills go back to JSON upload");
@@ -59,7 +59,7 @@ function ClearSettings() {
           {a.active ? <span className="status status-paid">Connected · {a.env === "production" ? "Live" : "Sandbox"}</span> : <span className="status status-draft">Not connected</span>}
           <div className="muted small">
             {a.active
-              ? `IRNs and e-way bills are generated and cancelled straight from OrdexaGo through Clear${a.gstin ? ` as GSTIN ${a.gstin}` : ""}. Token …${a.tokenEnd}.`
+              ? `IRNs and e-way bills are generated and cancelled straight from OrdexaGo through Clear${a.gstin ? ` as GSTIN ${a.gstin}` : ""}${a.mode === "gsp" ? ` · API user ${a.username}` : ` · token …${a.tokenEnd}`}.`
               : a.lastError
               ? `Last check failed: ${a.lastError}`
               : "Connect your Clear account to generate IRNs and e-way bills in one click instead of uploading JSON."}
@@ -68,7 +68,7 @@ function ClearSettings() {
         {isAdmin && (
           <div style={{ display: "flex", gap: 6 }}>
             <button className="btn btn-sm" onClick={() => setOpen(!open)}>
-              {open ? "Close" : a.tokenSaved ? "Edit connection" : "Connect Clear"}
+              {open ? "Close" : a.tokenSaved || a.secretSaved ? "Edit connection" : "Connect Clear"}
             </button>
             {a.active && (
               <button className="btn btn-sm btn-ghost" onClick={off}>
@@ -87,23 +87,61 @@ function ClearSettings() {
                 <option value="production">Live (production)</option>
               </select>
             </Field>
-            <Field label="Auth token" required={!a.tokenSaved} hint={a.tokenSaved ? `Saved (…${a.tokenEnd}). Leave blank to keep it.` : "From Clear for this workspace"}>
-              <input type="password" autoComplete="new-password" value={f.token} onChange={(e) => setF({ ...f, token: e.target.value.trim() })} />
+            <Field label="What Clear gave you">
+              <select value={f.mode} onChange={(e) => setF({ ...f, mode: e.target.value })}>
+                <option value="gsp">Client ID, secret, API username & password</option>
+                <option value="token">An auth token</option>
+              </select>
             </Field>
             <Field label="GSTIN" hint={`Blank = this company's GSTIN${organization?.gstin ? ` (${organization.gstin})` : ""}. In sandbox use Clear's test GSTIN.`}>
               <input value={f.gstin} onChange={(e) => setF({ ...f, gstin: e.target.value.toUpperCase() })} maxLength={15} />
             </Field>
           </div>
+          {f.mode === "gsp" ? (
+            <>
+              <div className="row-2">
+                <Field label="Client ID" required>
+                  <input value={f.clientId} autoComplete="off" onChange={(e) => setF({ ...f, clientId: e.target.value.trim() })} />
+                </Field>
+                <Field label="Client secret" required={!a.secretSaved} hint={a.secretSaved ? "Saved. Leave blank to keep it." : ""}>
+                  <input type="password" autoComplete="new-password" value={f.clientSecret} onChange={(e) => setF({ ...f, clientSecret: e.target.value.trim() })} />
+                </Field>
+              </div>
+              <div className="row-2">
+                <Field label="API username" required>
+                  <input value={f.username} autoComplete="off" onChange={(e) => setF({ ...f, username: e.target.value.trim() })} />
+                </Field>
+                <Field label="API password" required={!a.passwordSaved} hint={a.passwordSaved ? "Saved. Leave blank to keep it." : ""}>
+                  <input type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
+                </Field>
+              </div>
+              <Field
+                label="Clear's public key"
+                required={!a.publicKeySaved}
+                hint={
+                  a.publicKeySaved
+                    ? "Saved. Paste a new one only if you switch between sandbox and live."
+                    : `Copy it from docs.cleartax.in → E-Invoicing GSP API → API Reference → "${f.env === "production" ? "Production" : "Sandbox"} Public Key" (or ask Clear). Paste everything including the BEGIN and END lines.`
+                }
+              >
+                <textarea rows={4} style={{ fontFamily: "monospace", fontSize: 12 }} placeholder={"-----BEGIN PUBLIC KEY-----\n…\n-----END PUBLIC KEY-----"} value={f.publicKey} onChange={(e) => setF({ ...f, publicKey: e.target.value })} />
+              </Field>
+            </>
+          ) : (
+            <Field label="Auth token" required={!a.tokenSaved} hint={a.tokenSaved ? `Saved (…${a.tokenEnd}). Leave blank to keep it.` : "From Clear for this workspace"}>
+              <input type="password" autoComplete="new-password" value={f.token} onChange={(e) => setF({ ...f, token: e.target.value.trim() })} />
+            </Field>
+          )}
           <Field label="API address (optional)" hint={`Blank = Clear's default: ${d.hosts?.[f.env] || ""}. Only change it if Clear gave you a different address.`}>
             <input value={f.host} onChange={(e) => setF({ ...f, host: e.target.value.trim() })} placeholder={d.hosts?.[f.env] || ""} />
           </Field>
           <div>
-            <button className="btn btn-primary" disabled={busy || (!a.tokenSaved && !f.token)} onClick={save}>
+            <button className="btn btn-primary" disabled={busy || (f.mode === "token" ? !a.tokenSaved && !f.token : !f.clientId || !f.username || (!a.secretSaved && !f.clientSecret) || (!a.passwordSaved && !f.password) || (!a.publicKeySaved && !f.publicKey))} onClick={save}>
               {busy ? "Checking with Clear…" : "Save & Connect"}
             </button>
           </div>
           <p className="muted small" style={{ margin: 0 }}>
-            Each company has its own connection — switch company at the top to set up the other one. One Clear workspace token can cover both GSTINs if both are added in that workspace.
+            Each company has its own connection — switch company at the top to set up the other one. The API username and password are the ones created when Clear was added as your GSP on the e-invoice portal, so each GSTIN usually has its own. With these details, e-way bills are made for invoices that have an IRN; B2C e-way bills need Clear's e-way bill API (use Download JSON for those).
           </p>
         </div>
       )}

@@ -156,7 +156,7 @@ export function GstPanel({ kind, doc, onChanged, eligible }) {
           <div className="gst-actions">
             {w.status !== "generated" ? (
               <>
-                {clearOn && (
+                {clearOn && (organization?.gsp?.mode !== "gsp" || e.status === "generated") && (
                   <button className="btn btn-sm btn-primary" disabled={!!busy} onClick={() => viaClear("ewb")}>
                     {busy === "ewb" ? "Generating…" : "Generate e-Way Bill (Clear)"}
                   </button>
