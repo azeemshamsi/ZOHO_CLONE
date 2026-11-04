@@ -801,7 +801,17 @@ export function ShopifyOrders() {
     return p;
   }, [tab, page, filters, q]);
 
-  const load = () => api.get("/shopify/orders", { params: query }).then((r) => setData(r.data));
+  // Only the latest request's answer is shown (an older, slower one can't overwrite it).
+  const reqNo = useRef(0);
+  const [loading, setLoading] = useState(false);
+  const load = () => {
+    const n = ++reqNo.current;
+    setLoading(true);
+    return api
+      .get("/shopify/orders", { params: query })
+      .then((r) => n === reqNo.current && setData({ ...r.data, q: query.q || "" }))
+      .finally(() => n === reqNo.current && setLoading(false));
+  };
   const loadReview = () => api.get("/shopify/items/review").then((r) => setReview(r.data));
   const loadStore = () =>
     api.get("/shopify/store").then((r) => {
@@ -823,7 +833,7 @@ export function ShopifyOrders() {
 
   // A search with nothing in this tab: jump to the tab that has the match (or All Orders).
   useEffect(() => {
-    if (!q || !data || data.rows.length || !data.counts?.all) return;
+    if (!q || !data || data.q !== q || data.rows.length || !data.counts?.all) return;
     const hits = TABS.map(([k]) => k).filter((k) => k !== "all" && data.counts[k] > 0);
     const to = hits.length === 1 ? hits[0] : "all";
     if (to !== tab) setTab(to);
@@ -1068,7 +1078,7 @@ export function ShopifyOrders() {
         ) : !rows.length ? (
           <div className="empty-row muted">{data.counts.all ? "No orders match." : store?.connected ? "No orders yet — click Sync Orders." : "No orders."}</div>
         ) : (
-          <table className="table table-click ship-table">
+          <table className="table table-click ship-table" style={{ opacity: loading ? 0.55 : 1, transition: "opacity .15s" }}>
             <thead>
               <tr>
                 <th style={{ width: 32 }}>

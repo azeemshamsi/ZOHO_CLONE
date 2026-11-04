@@ -23,6 +23,7 @@ const { quoteAccount, sortQuotes } = require("../utils/couriers/rates");
 const CourierPincode = require("../models/CourierPincode");
 const { resolvePackage } = require("../utils/shopify/package");
 const PackageType = require("../models/PackageType");
+const { orderIndex, filterEntries } = require("../utils/shopify/orderIndex");
 
 const STATUSES = ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "return_created", "returned", "cancelled"];
 const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -191,76 +192,24 @@ router.post(
 );
 
 /* ---------------- orders ---------------- */
-function filterOf(req) {
-  const q = req.query;
-  const f = { organization: req.storeOrg };
-  if (q.status && q.status !== "all") f.status = q.status;
-  if (q.from || q.to) {
-    f.orderDate = {};
-    if (q.from) f.orderDate.$gte = new Date(`${q.from}T00:00:00+05:30`);
-    if (q.to) f.orderDate.$lte = new Date(`${q.to}T23:59:59.999+05:30`);
-  }
-  if (q.payment) f.paymentMode = q.payment;
-  if (q.financial) f.financialStatus = q.financial;
-  if (q.fulfillment) f.fulfillmentStatus = q.fulfillment;
-  if (q.state) f["shippingAddress.state"] = q.state;
-  if (q.courier) f["shipment.account"] = mongoose.isValidObjectId(q.courier) ? new mongoose.Types.ObjectId(q.courier) : q.courier;
-  if (q.invoiced === "yes") f.invoice = { $exists: true, $ne: null };
-  if (q.invoiced === "no") f.$or = [{ invoice: { $exists: false } }, { invoice: null }];
-  if (q.tag) f.tags = q.tag; // values come from the tag list
-  if (q.min || q.max) {
-    f.total = {};
-    if (q.min) f.total.$gte = Number(q.min);
-    if (q.max) f.total.$lte = Number(q.max);
-  }
-  return f;
-}
-
-// Text search over orders, done here rather than with database regexes (unreliable on the Oracle MongoDB API).
-// Every word typed must appear in the order's number, customer, phone, email, address, AWB / tracking numbers,
-// SKUs, item names, invoice number or tags. Adds an _id filter to f.
-const SEARCH_FIELDS = { name: 1, customer: 1, "shippingAddress.name": 1, "shippingAddress.phone": 1, "shippingAddress.zip": 1, "shippingAddress.city": 1, "shipment.awb": 1, "shipment.courierName": 1, "shopifyFulfillments.number": 1, "lines.sku": 1, "lines.title": 1, "lines.variantTitle": 1, invoiceNumber: 1, tags: 1, remarks: 1 };
-async function withSearch(req, f) {
-  const text = String(req.query.q || "").trim().toLowerCase();
-  if (!text) return f;
-  const words = text.split(/\s+/).map((w) => w.replace(/^#/, "")).filter(Boolean);
-  const base = { ...f };
-  delete base.status;
-  const docs = await ShopifyOrder.find(base, SEARCH_FIELDS).lean();
-  const ids = [];
-  for (const o of docs) {
-    const phones = [o.customer?.phone, o.shippingAddress?.phone].map((p) => String(p || "").replace(/\D/g, ""));
-    const hay = [o.name, o.customer?.name, o.customer?.email, o.customer?.phone, o.shippingAddress?.name, o.shippingAddress?.zip, o.shippingAddress?.city, o.shipment?.awb, o.shipment?.courierName, o.invoiceNumber, o.remarks, ...phones, ...(o.shopifyFulfillments || []).map((x) => x.number), ...(o.lines || []).flatMap((l) => [l.sku, l.title, l.variantTitle]), ...(o.tags || [])]
-      .filter(Boolean)
-      .join(" | ")
-      .toLowerCase();
-    if (words.every((w) => hay.includes(w) || (/^\+?\d{10,}$/.test(w) && hay.includes(w.replace(/\D/g, "").slice(-10))))) ids.push(o._id);
-  }
-  return { ...f, _id: { $in: ids } };
-}
-
+const LIST_FIELDS = { "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 };
+// The order list: filters, counts, sort and search from the in-memory index; only the page shown is read.
 router.get(
   "/orders",
   ah(async (req, res) => {
-    const f = await withSearch(req, filterOf(req));
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.min(200, Math.max(10, Number(req.query.limit) || 50));
-    const sort = { oldest: { orderDate: 1 }, amount: { total: -1 }, newest: { orderDate: -1 } }[req.query.sort] || { orderDate: -1 };
-    const countFilter = { ...f };
-    delete countFilter.status;
-    const [rows, total, byStatus] = await Promise.all([
-      ShopifyOrder.find(f, { "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 })
-        .sort(sort)
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .lean(),
-      ShopifyOrder.countDocuments(f),
-      ShopifyOrder.aggregate([{ $match: countFilter }, { $group: { _id: "$status", n: { $sum: 1 } } }]),
-    ]);
+    const q = req.query;
+    const page = Math.max(1, Number(q.page) || 1);
+    const limit = Math.min(200, Math.max(10, Number(q.limit) || 50));
+    const matched = filterEntries(await orderIndex(req.storeOrg), q);
     const counts = Object.fromEntries(STATUSES.map((s) => [s, 0]));
-    for (const b of byStatus) counts[b._id] = b.n;
-    counts.all = Object.values(counts).reduce((a, b) => a + b, 0);
-    res.send({ rows, total, page, limit, counts });
+    for (const e of matched) counts[e.status] = (counts[e.status] || 0) + 1;
+    counts.all = matched.length;
+    const list = q.status && q.status !== "all" ? matched.filter((e) => e.status === q.status) : matched;
+    const cmp = { oldest: (a, b) => a.orderDate - b.orderDate, amount: (a, b) => b.total - a.total }[q.sort] || ((a, b) => b.orderDate - a.orderDate);
+    const pageIds = [...list].sort(cmp).slice((page - 1) * limit, page * limit).map((e) => e._id);
+    const docs = pageIds.length ? await ShopifyOrder.find({ _id: { $in: pageIds } }, LIST_FIELDS).lean() : [];
+    const by = new Map(docs.map((d) => [String(d._id), d]));
+    res.send({ rows: pageIds.map((id) => by.get(String(id))).filter(Boolean), total: list.length, page, limit, counts });
   })
 );
 
@@ -277,7 +226,8 @@ router.get(
 router.get(
   "/orders/export",
   ah(async (req, res) => {
-    const rows = await ShopifyOrder.find(await withSearch(req, filterOf(req))).sort({ orderDate: -1 }).limit(20000).lean();
+    const ids = filterEntries(await orderIndex(req.storeOrg), req.query).filter((e) => !req.query.status || req.query.status === "all" || e.status === req.query.status).map((e) => e._id);
+    const rows = await ShopifyOrder.find({ _id: { $in: ids } }).sort({ orderDate: -1 }).limit(20000).lean();
     const csv = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const head = ["Order", "Date", "Customer", "Phone", "Email", "City", "State", "Pincode", "Payment", "Financial status", "Status", "Items", "Total", "Courier", "AWB", "Invoice"];
     const out = [head.map(csv).join(",")];
@@ -840,5 +790,4 @@ router.moduleOf = function (req) {
   if (/^\/(store|locations)/.test(p)) return ["store_settings", "store_orders", "store_shipping", "store_returns"];
   return "store_orders";
 };
-router.withSearch = withSearch; // for tests
 module.exports = router;

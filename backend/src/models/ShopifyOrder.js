@@ -116,5 +116,6 @@ shopifyOrderSchema.index({ organization: 1, orderDate: -1 });
 shopifyOrderSchema.index({ organization: 1, "shipment.awb": 1 });
 shopifyOrderSchema.index({ organization: 1, name: 1 });
 shopifyOrderSchema.index({ organization: 1, orderNumber: 1 });
+shopifyOrderSchema.index({ organization: 1, updatedAt: -1 });
 
 module.exports = mongoose.model("ShopifyOrder", shopifyOrderSchema);
