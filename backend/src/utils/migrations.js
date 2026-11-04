@@ -56,6 +56,19 @@ const MIGRATIONS = [
       await db.collection("migration_reports").updateOne({ _id: "split-items-by-sku" }, { $set: { at: new Date(), ...r } }, { upsert: true });
     },
   },
+  {
+    // Orders still "shipped" although their Shopify fulfilment was cancelled.
+    id: "2026-11-cancelled-shopify-fulfilments",
+    run: async () => {
+      const ShopifyOrder = require("../models/ShopifyOrder");
+      const { undoCancelledFulfilment } = require("./shopify/sync");
+      const list = await ShopifyOrder.find({ status: { $in: ["shipped", "ready_to_ship"] }, fulfillmentStatus: { $in: ["UNFULFILLED", "OPEN", "PENDING_FULFILLMENT", "ON_HOLD", "SCHEDULED"] } });
+      let n = 0;
+      // Fulfilments were stored without their status, so a stored one on an unfulfilled order was cancelled.
+      for (const o of list) if (undoCancelledFulfilment(o, (o.shopifyFulfillments || []).length > 0)) (await o.save(), n++);
+      console.log(`Cancelled Shopify fulfilments: ${n} order(s) put back`);
+    },
+  },
 ];
 
 async function runMigrations() {

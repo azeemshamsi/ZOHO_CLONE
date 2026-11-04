@@ -631,6 +631,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
               </div>
               {sh.trackStatus && <div className="muted small">{TRACK_LABEL[sh.trackStatus] || sh.trackStatus}{sh.trackedAt ? ` · checked ${new Date(sh.trackedAt).toLocaleString("en-IN")}` : ""}</div>}
               {sh.shopifyFulfilled && <div className="muted small">Marked fulfilled in Shopify</div>}
+              {sh.error && <div className="text-red small">{sh.error}</div>}
             </>
           ) : (
             <span className="muted">Not booked{sh.error ? ` — ${sh.error}` : ""}</span>
@@ -819,6 +820,14 @@ export function ShopifyOrders() {
     load().catch((e) => toast(errMsg(e), "error"));
     setSel(new Set());
   }, [query]);
+
+  // A search with nothing in this tab: jump to the tab that has the match (or All Orders).
+  useEffect(() => {
+    if (!q || !data || data.rows.length || !data.counts?.all) return;
+    const hits = TABS.map(([k]) => k).filter((k) => k !== "all" && data.counts[k] > 0);
+    const to = hits.length === 1 ? hits[0] : "all";
+    if (to !== tab) setTab(to);
+  }, [data]);
 
   const watchSync = () => {
     poll.current = setTimeout(async () => {
@@ -1126,6 +1135,7 @@ export function ShopifyOrders() {
                             <div>{sh.awb}</div>
                           )}
                           {sh.trackStatus && <div className="muted">{TRACK_LABEL[sh.trackStatus] || sh.trackStatus}</div>}
+                          {sh.error && /cancelled in Shopify/.test(sh.error) && <div className="text-red small">Fulfilment cancelled in Shopify</div>}
                         </>
                       ) : (
                         <>

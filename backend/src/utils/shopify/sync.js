@@ -25,7 +25,7 @@ const ORDERS_QUERY = `query Orders($first: Int!, $after: String, $query: String)
       totalTaxSet { ${MONEY} }
       currentTotalPriceSet { ${MONEY} }
       totalOutstandingSet { ${MONEY} }
-      fulfillments(first: 5) { trackingInfo(first: 1) { company number url } }
+      fulfillments(first: 10) { status trackingInfo(first: 1) { company number url } }
       transactions(first: 30) { kind status gateway amountSet { ${MONEY} } }
       lineItems(first: 50) {
         nodes {
@@ -144,8 +144,37 @@ function normalise(o) {
     total: amt(o.currentTotalPriceSet),
     outstanding: amt(o.totalOutstandingSet),
     lines,
-    shopifyFulfillments: (o.fulfillments || []).flatMap((f) => f.trackingInfo || []).map((t) => ({ company: t.company || "", number: t.number || "", url: t.url || "" })),
+    // Cancelled fulfilments don't count.
+    shopifyFulfillments: (o.fulfillments || []).filter((f) => !["CANCELLED", "ERROR", "FAILURE"].includes(f.status)).flatMap((f) => f.trackingInfo || []).map((t) => ({ company: t.company || "", number: t.number || "", url: t.url || "" })),
   };
+}
+
+// Fulfilment statuses that mean nothing has been sent (e.g. the fulfilment was cancelled in Shopify).
+const NOT_FULFILLED = ["UNFULFILLED", "OPEN", "PENDING_FULFILLMENT", "ON_HOLD", "SCHEDULED"];
+
+// The Shopify fulfilment was cancelled after the order was marked shipped (wasFulfilled: Shopify had a fulfilment).
+// From Shopify only → back to New. Booked in OrdexaGo → back to Ready to Ship while the courier hasn't picked it
+// up (so the shipment can be cancelled or kept), with a note either way.
+function undoCancelledFulfilment(o, wasFulfilled) {
+  if (!wasFulfilled || !NOT_FULFILLED.includes(o.fulfillmentStatus) || !["shipped", "ready_to_ship"].includes(o.status)) return false;
+  const sh = o.shipment || {};
+  const when = new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" });
+  if (!sh.account) {
+    if (sh.carrier !== "shopify") return false; // marked shipped by hand
+    const was = [sh.courierName, sh.awb].filter(Boolean).join(" ");
+    o.shipment = {};
+    o.status = "new";
+    o.remarks = `${o.remarks ? `${o.remarks}\n` : ""}Shopify fulfilment${was ? ` ${was}` : ""} was cancelled in Shopify (${when})`;
+  } else {
+    const moving = ["in_transit", "out_for_delivery", "delivered"].includes(sh.trackStatus);
+    if (o.status === "ready_to_ship" && !sh.shopifyFulfilled) return false;
+    o.shipment.shopifyFulfilled = false;
+    o.shipment.error = moving ? "The fulfilment was cancelled in Shopify, but the courier shows it moving" : `The fulfilment was cancelled in Shopify (${when}) — cancel this ${sh.courierName || ""} shipment too if it isn't going`;
+    if (!moving) o.status = "ready_to_ship";
+    o.markModified("shipment");
+  }
+  o.statusChangedAt = new Date();
+  return true;
 }
 
 // Save one order; OrdexaGo's own workflow status is kept, except for cancellations and fulfilments done in Shopify.
@@ -164,6 +193,7 @@ async function upsert(orgId, n) {
     return "created";
   }
   if (existing.shopifyUpdatedAt && n.shopifyUpdatedAt <= existing.shopifyUpdatedAt) return "same";
+  const wasFulfilled = existing.fulfillmentStatus === "FULFILLED" || existing.fulfillmentStatus === "PARTIALLY_FULFILLED";
   Object.assign(existing, n);
   if (n.cancelledAt && existing.status !== "cancelled" && !["shipped", "delivered", "rto"].includes(existing.status)) {
     existing.status = "cancelled";
@@ -178,6 +208,10 @@ async function upsert(orgId, n) {
     existing.statusChangedAt = new Date();
     const f = n.shopifyFulfillments[0];
     if (f && !existing.shipment?.awb) existing.shipment = { ...(existing.shipment || {}), carrier: "shopify", courierName: f.company, awb: f.number, trackingUrl: f.url };
+  } else if (!undoCancelledFulfilment(existing, wasFulfilled) && existing.shipment?.carrier === "shopify" && !existing.shipment.account && n.shopifyFulfillments[0] && n.shopifyFulfillments[0].number !== existing.shipment.awb) {
+    // Fulfilled again in Shopify with a new tracking number.
+    const f = n.shopifyFulfillments[0];
+    existing.shipment = { ...existing.shipment.toObject?.() || existing.shipment, courierName: f.company, awb: f.number, trackingUrl: f.url };
   }
   await existing.save();
   return "updated";
@@ -228,7 +262,7 @@ async function autoSyncAll() {
   }
 }
 
-module.exports = { syncStore, autoSyncAll, normalise, upsert, ORDERS_QUERY };
+module.exports = { syncStore, autoSyncAll, normalise, upsert, ORDERS_QUERY, undoCancelledFulfilment };
 
 // Real-time: Shopify calls OrdexaGo when orders are created or updated (Dev Dashboard apps; signed with the client secret).
 async function registerWebhooks(store, baseUrl) {
