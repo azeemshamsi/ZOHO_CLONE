@@ -37,6 +37,19 @@ export function GstPanel({ kind, doc, onChanged, eligible }) {
   const e = doc.einvoice || {};
   const w = doc.eway || {};
   const einvOn = organization?.einvoicing?.enabled && eligible;
+  const clearOn = !!organization?.gsp?.active;
+  const [busy, setBusy] = useState("");
+  const viaClear = async (what) => {
+    setBusy(what);
+    try {
+      const { data } = await api.post(what === "irn" ? `/gst/einvoice/${kind}/${doc._id}/generate` : `/gst/eway/${doc._id}/generate`);
+      toast(what === "irn" ? `IRN generated${data.ackNo ? ` · Ack ${data.ackNo}` : ""}` : `e-Way bill ${data.ewbNo} generated${data.note ? ` · ${data.note}` : ""}`);
+      onChanged();
+    } catch (x) {
+      setModal({ type: "errors", title: what === "irn" ? "Couldn't generate the IRN" : "Couldn't generate the e-way bill", errors: errMsg(x).replace(/^Clear: /, "").split("; ") });
+    }
+    setBusy("");
+  };
   const goods = (doc.lineItems || []).some((l) => !String(l.hsnSac || "").startsWith("99"));
   const ewayOn = kind === "invoice" && organization?.ewayBills?.enabled && goods && doc.status !== "draft";
   if (!einvOn && !ewayOn && e.status !== "generated" && w.status !== "generated") return null;
@@ -58,16 +71,6 @@ export function GstPanel({ kind, doc, onChanged, eligible }) {
       if (data.skipped.length) return setModal({ type: "errors", title: "Fix these before uploading", errors: data.skipped[0].errors });
       downloadJson(data.json, `ewaybill-${doc.invoiceNumber}.json`);
       toast("JSON downloaded — upload it on ewaybillgst.gov.in (Generate Bulk)");
-    } catch (x) {
-      toast(errMsg(x), "error");
-    }
-  };
-  const run = async (fn, msg) => {
-    try {
-      const r = await fn();
-      toast(msg);
-      if (r?.data?.warning) toast(r.data.warning, "error");
-      onChanged();
     } catch (x) {
       toast(errMsg(x), "error");
     }
@@ -94,16 +97,21 @@ export function GstPanel({ kind, doc, onChanged, eligible }) {
                 </div>
               </div>
             ) : (
-              <div className="muted small">Download the JSON, upload it on the e-invoice portal, then record the IRN it returns.</div>
+              <div className="muted small">{clearOn ? "Generate the IRN through Clear in one click, or download the JSON for the portal." : "Download the JSON, upload it on the e-invoice portal, then record the IRN it returns."}</div>
             )}
           </div>
           <div className="gst-actions">
             {e.status !== "generated" && doc.status !== "draft" && (
               <>
+                {clearOn && (
+                  <button className="btn btn-sm btn-primary" disabled={!!busy} onClick={() => viaClear("irn")}>
+                    {busy === "irn" ? "Generating…" : "Generate IRN (Clear)"}
+                  </button>
+                )}
                 <button className="btn btn-sm" onClick={getJson}>
                   Download JSON
                 </button>
-                <button className="btn btn-sm btn-primary" onClick={() => setModal({ type: "irn" })}>
+                <button className={`btn btn-sm ${clearOn ? "" : "btn-primary"}`} onClick={() => setModal({ type: "irn" })}>
                   Record IRN
                 </button>
               </>
@@ -138,6 +146,8 @@ export function GstPanel({ kind, doc, onChanged, eligible }) {
                 <>
                   {MODES.find((m) => m[0] === w.transMode)?.[1]} · {w.distance} km {w.vehicleNo && `· ${w.vehicleNo}`} {w.transporterName && `· ${w.transporterName}`}
                 </>
+              ) : clearOn ? (
+                <span className="muted">Generate through Clear: distance is worked out from the PIN codes; add a vehicle number now or later (Part B).</span>
               ) : (
                 <span className="muted">{Number(doc.total) * (doc.exchangeRate || 1) >= (organization?.ewayBills?.threshold ?? 50000) ? "Required: consignment value is ₹50,000 or more." : "Optional for this value."} Add transport details to create the JSON.</span>
               )}
@@ -146,6 +156,11 @@ export function GstPanel({ kind, doc, onChanged, eligible }) {
           <div className="gst-actions">
             {w.status !== "generated" ? (
               <>
+                {clearOn && (
+                  <button className="btn btn-sm btn-primary" disabled={!!busy} onClick={() => viaClear("ewb")}>
+                    {busy === "ewb" ? "Generating…" : "Generate e-Way Bill (Clear)"}
+                  </button>
+                )}
                 <button className="btn btn-sm" onClick={() => setModal({ type: "transport" })}>
                   Transport Details
                 </button>
@@ -161,8 +176,8 @@ export function GstPanel({ kind, doc, onChanged, eligible }) {
                 )}
               </>
             ) : (
-              <button className="btn btn-sm" onClick={() => run(() => api.post(`/gst/eway/${doc._id}/cancel`), "E-way bill marked cancelled")}>
-                Mark Cancelled
+              <button className="btn btn-sm" onClick={() => setModal({ type: "cancelEway" })}>
+                {clearOn ? "Cancel e-Way Bill" : "Mark Cancelled"}
               </button>
             )}
           </div>
@@ -178,7 +193,8 @@ export function GstPanel({ kind, doc, onChanged, eligible }) {
         </Modal>
       )}
       {modal?.type === "irn" && <IrnModal kind={kind} doc={doc} onClose={() => setModal(null)} onSaved={() => (setModal(null), onChanged())} />}
-      {modal?.type === "cancel" && <CancelModal kind={kind} doc={doc} onClose={() => setModal(null)} onSaved={() => (setModal(null), onChanged())} />}
+      {modal?.type === "cancel" && <CancelModal kind={kind} doc={doc} viaClear={clearOn} onClose={() => setModal(null)} onSaved={() => (setModal(null), onChanged())} />}
+      {modal?.type === "cancelEway" && <CancelModal kind={kind} doc={doc} what="eway" viaClear={clearOn} onClose={() => setModal(null)} onSaved={() => (setModal(null), onChanged())} />}
       {modal?.type === "transport" && <TransportModal doc={doc} onClose={() => setModal(null)} onSaved={() => (setModal(null), onChanged())} />}
       {modal?.type === "ewb" && <EwbModal doc={doc} onClose={() => setModal(null)} onSaved={() => (setModal(null), onChanged())} />}
     </div>
@@ -235,22 +251,47 @@ function IrnModal({ kind, doc, onClose, onSaved }) {
   );
 }
 
-function CancelModal({ kind, doc, onClose, onSaved }) {
+function CancelModal({ kind, doc, what = "einvoice", viaClear, onClose, onSaved }) {
   const [reason, setReason] = useState("Data entry mistake");
+  const [remarks, setRemarks] = useState("");
+  const [onlyHere, setOnlyHere] = useState(!viaClear);
+  const [busy, setBusy] = useState(false);
+  const label = what === "eway" ? "e-Way Bill" : "e-Invoice";
   const save = async () => {
+    setBusy(true);
     try {
-      const { data } = await api.post(`/gst/einvoice/${kind}/${doc._id}/cancel`, { reason });
-      toast("e-Invoice marked cancelled");
-      if (data.warning) toast(data.warning, "error");
+      const url = what === "eway" ? `/gst/eway/${doc._id}/cancel` : `/gst/einvoice/${kind}/${doc._id}/cancel`;
+      const { data } = await api.post(url, { reason, remarks, onlyHere });
+      toast(onlyHere ? `${label} marked cancelled` : `${label} cancelled on the portal (via Clear)`);
+      if (data?.warning) toast(data.warning, "error");
       onSaved();
     } catch (x) {
       toast(errMsg(x), "error");
     }
+    setBusy(false);
   };
   return (
-    <Modal open title="Cancel e-Invoice" onClose={onClose} footer={<><button className="btn btn-danger" onClick={save}>Mark Cancelled</button><button className="btn" onClick={onClose}>Back</button></>}>
+    <Modal
+      open
+      title={`Cancel ${label}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn btn-danger" disabled={busy} onClick={save}>
+            {busy ? "Cancelling…" : onlyHere ? "Mark Cancelled" : `Cancel ${label}`}
+          </button>
+          <button className="btn" onClick={onClose}>
+            Back
+          </button>
+        </>
+      }
+    >
       <div className="form-grid">
-        <p className="muted">First cancel the IRN on the e-invoice portal (allowed within 24 hours). Then mark it cancelled here so you can edit or void the document.</p>
+        <p className="muted">
+          {viaClear && !onlyHere
+            ? `This cancels the ${label.toLowerCase()} on the government portal through Clear (allowed within 24 hours of generation)${what === "einvoice" && kind === "invoice" ? "; cancel its e-way bill first if it has one" : ""}.`
+            : `First cancel it on the ${what === "eway" ? "e-way bill" : "e-invoice"} portal (allowed within 24 hours). Then mark it cancelled here.`}
+        </p>
         <Field label="Reason">
           <select value={reason} onChange={(e) => setReason(e.target.value)}>
             {["Duplicate", "Data entry mistake", "Order cancelled", "Others"].map((r) => (
@@ -258,6 +299,14 @@ function CancelModal({ kind, doc, onClose, onSaved }) {
             ))}
           </select>
         </Field>
+        <Field label="Remarks">
+          <input value={remarks} maxLength={what === "eway" ? 50 : 100} onChange={(e) => setRemarks(e.target.value)} />
+        </Field>
+        {viaClear && (
+          <label className="check small">
+            <input type="checkbox" checked={onlyHere} onChange={(e) => setOnlyHere(e.target.checked)} /> Already cancelled on the portal — only mark it cancelled in OrdexaGo
+          </label>
+        )}
       </div>
     </Modal>
   );

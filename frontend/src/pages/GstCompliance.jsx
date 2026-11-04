@@ -3,8 +3,113 @@ import { Link } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { money, date, isoDate } from "../lib/format";
-import { PageHeader, Spinner, toast } from "../components/ui";
+import { PageHeader, Spinner, Field, Modal, toast } from "../components/ui";
 import { downloadJson } from "../components/GstPanel";
+
+// Clear (GSP) connection: auth token, test / live, GSTIN. One per company.
+function ClearSettings() {
+  const { organization, setOrganization, user } = useAuth();
+  const [d, setD] = useState(null);
+  const [f, setF] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const isAdmin = !user?.permissions || user.permissions.settings === "full";
+  useEffect(() => {
+    api
+      .get("/gst/gsp")
+      .then((r) => {
+        setD(r.data);
+        const a = r.data.account;
+        setF({ env: a.env || "sandbox", host: a.host || "", gstin: a.gstin || "", token: "", active: a.active || !a.tokenSaved });
+      })
+      .catch(() => {});
+  }, []);
+  if (!d || !f) return null;
+  const a = d.account;
+  const save = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.put("/gst/gsp", { ...f, active: true });
+      setD({ ...d, account: data.account });
+      setOrganization({ ...organization, gsp: data.organizationGsp });
+      setF({ ...f, token: "" });
+      toast(data.message);
+      setOpen(false);
+    } catch (e) {
+      toast(errMsg(e), "error");
+      api.get("/gst/gsp").then((r) => setD(r.data));
+    }
+    setBusy(false);
+  };
+  const off = async () => {
+    try {
+      const { data } = await api.put("/gst/gsp", { env: f.env, host: f.host, gstin: f.gstin, token: "", active: false });
+      setD({ ...d, account: data.account });
+      setOrganization({ ...organization, gsp: data.organizationGsp });
+      toast("Clear disconnected — e-invoices and e-way bills go back to JSON upload");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  return (
+    <div className="card form" style={{ marginTop: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <strong>Clear (GSP)</strong>{" "}
+          {a.active ? <span className="status status-paid">Connected · {a.env === "production" ? "Live" : "Sandbox"}</span> : <span className="status status-draft">Not connected</span>}
+          <div className="muted small">
+            {a.active
+              ? `IRNs and e-way bills are generated and cancelled straight from OrdexaGo through Clear${a.gstin ? ` as GSTIN ${a.gstin}` : ""}. Token …${a.tokenEnd}.`
+              : a.lastError
+              ? `Last check failed: ${a.lastError}`
+              : "Connect your Clear account to generate IRNs and e-way bills in one click instead of uploading JSON."}
+          </div>
+        </div>
+        {isAdmin && (
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="btn btn-sm" onClick={() => setOpen(!open)}>
+              {open ? "Close" : a.tokenSaved ? "Edit connection" : "Connect Clear"}
+            </button>
+            {a.active && (
+              <button className="btn btn-sm btn-ghost" onClick={off}>
+                Disconnect
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {open && (
+        <div className="form-grid" style={{ marginTop: 12 }}>
+          <div className="row-3">
+            <Field label="Environment">
+              <select value={f.env} onChange={(e) => setF({ ...f, env: e.target.value })}>
+                <option value="sandbox">Sandbox (testing)</option>
+                <option value="production">Live (production)</option>
+              </select>
+            </Field>
+            <Field label="Auth token" required={!a.tokenSaved} hint={a.tokenSaved ? `Saved (…${a.tokenEnd}). Leave blank to keep it.` : "From Clear for this workspace"}>
+              <input type="password" autoComplete="new-password" value={f.token} onChange={(e) => setF({ ...f, token: e.target.value.trim() })} />
+            </Field>
+            <Field label="GSTIN" hint={`Blank = this company's GSTIN${organization?.gstin ? ` (${organization.gstin})` : ""}. In sandbox use Clear's test GSTIN.`}>
+              <input value={f.gstin} onChange={(e) => setF({ ...f, gstin: e.target.value.toUpperCase() })} maxLength={15} />
+            </Field>
+          </div>
+          <Field label="API address (optional)" hint={`Blank = Clear's default: ${d.hosts?.[f.env] || ""}. Only change it if Clear gave you a different address.`}>
+            <input value={f.host} onChange={(e) => setF({ ...f, host: e.target.value.trim() })} placeholder={d.hosts?.[f.env] || ""} />
+          </Field>
+          <div>
+            <button className="btn btn-primary" disabled={busy || (!a.tokenSaved && !f.token)} onClick={save}>
+              {busy ? "Checking with Clear…" : "Save & Connect"}
+            </button>
+          </div>
+          <p className="muted small" style={{ margin: 0 }}>
+            Each company has its own connection — switch company at the top to set up the other one. One Clear workspace token can cover both GSTINs if both are added in that workspace.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const docUrl = (r) => (r.kind === "creditNote" ? `/credit-notes/${r.id}` : `/invoices/${r.id}`);
 
@@ -36,7 +141,27 @@ export function GstCompliance({ tab: initial = "einvoice" }) {
       toast(errMsg(e), "error");
     }
   };
-  const ok = (rows || []).filter((r) => !r.errors?.length);
+  const clearOn = !!organization?.gsp?.active;
+  // Through Clear, the e-way bill distance / vehicle can be left out (distance from PINs, Part B later).
+  const apiOk = (r) => !r.errors?.length || (clearOn && tab === "eway" && r.errors.every((x) => /distance|vehicle number, or a transporter/i.test(x)));
+  const ok = (rows || []).filter(apiOk);
+  const [results, setResults] = useState(null);
+  const [generating, setGenerating] = useState(false);
+  const bulkClear = async () => {
+    setGenerating(true);
+    try {
+      const chosen = rows.filter((r) => picked.has(String(r.id)));
+      const { data } =
+        tab === "einvoice"
+          ? await api.post("/gst/einvoice/bulk-generate", { docs: chosen.map((r) => ({ kind: r.kind, id: r.id })) })
+          : await api.post("/gst/eway/bulk-generate", { ids: chosen.map((r) => r.id) });
+      setResults(data.results.map((x) => ({ ...x, number: x.number || chosen.find((c) => String(c.id) === String(x.id))?.number })));
+      load();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setGenerating(false);
+  };
   const bulk = async () => {
     try {
       const chosen = rows.filter((r) => picked.has(String(r.id)));
@@ -97,6 +222,21 @@ export function GstCompliance({ tab: initial = "einvoice" }) {
             : "How it works: add transport details on the invoice → select invoices → Download JSON → on ewaybillgst.gov.in use e-Waybill → Generate Bulk → open the invoice → Record EWB No. The e-way bill number then prints on the invoice and PDF."}
         </p>
       </div>
+      <ClearSettings />
+      {results && (
+        <Modal open title={`Clear: ${results.filter((x) => !x.error).length} done, ${results.filter((x) => x.error).length} failed`} onClose={() => setResults(null)} footer={<button className="btn btn-primary" onClick={() => setResults(null)}>OK</button>}>
+          <table className="table compact">
+            <tbody>
+              {results.map((x) => (
+                <tr key={String(x.id)}>
+                  <td>{x.number}</td>
+                  <td className={x.error ? "text-danger small" : "small"}>{x.error || (x.irn ? `IRN ${x.irn.slice(0, 16)}… · Ack ${x.ackNo || ""}` : `EWB ${x.ewbNo}`) + (x.already ? " (already had one)" : "")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Modal>
+      )}
       {on && (
         <div className="card flush">
           <div className="pad-row" style={{ padding: "10px 16px" }}>
@@ -112,9 +252,16 @@ export function GstCompliance({ tab: initial = "einvoice" }) {
               ))}
             </div>
             {status === "pending" && (
-              <button className="btn btn-primary btn-sm" disabled={!picked.size} onClick={bulk}>
-                Download JSON ({picked.size})
-              </button>
+              <div style={{ display: "flex", gap: 6 }}>
+                {clearOn && (
+                  <button className="btn btn-primary btn-sm" disabled={!picked.size || generating} onClick={bulkClear}>
+                    {generating ? "Generating…" : `Generate via Clear (${picked.size})`}
+                  </button>
+                )}
+                <button className={`btn btn-sm ${clearOn ? "" : "btn-primary"}`} disabled={!picked.size} onClick={bulk}>
+                  Download JSON ({picked.size})
+                </button>
+              </div>
             )}
           </div>
           {!rows ? (
@@ -142,7 +289,7 @@ export function GstCompliance({ tab: initial = "einvoice" }) {
                       <td>
                         <input
                           type="checkbox"
-                          disabled={!!r.errors?.length}
+                          disabled={!apiOk(r)}
                           checked={picked.has(String(r.id))}
                           onChange={() => {
                             const n = new Set(picked);
@@ -163,7 +310,7 @@ export function GstCompliance({ tab: initial = "einvoice" }) {
                     <td className="num">{tab === "einvoice" ? money(r.total, r.currency) : money(r.value)}</td>
                     <td className="small">
                       {status === "pending" ? (
-                        r.errors?.length ? (
+                        r.errors?.length && !apiOk(r) ? (
                           <span className="text-danger" title={r.errors.join("\n")}>
                             {r.errors.length} problem{r.errors.length > 1 ? "s" : ""}: {r.errors[0]}
                           </span>

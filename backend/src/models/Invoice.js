@@ -11,6 +11,8 @@ const invoiceSchema = new mongoose.Schema(
       ackNo: { type: String, default: "" },
       ackDate: { type: Date },
       signedQr: { type: String, default: "" },
+      signedInvoice: { type: String, default: "", select: false },
+      via: { type: String, default: "" }, // "clear" when generated through the GSP
       cancelReason: { type: String, default: "" },
       cancelledAt: { type: Date },
     },
@@ -29,6 +31,8 @@ const invoiceSchema = new mongoose.Schema(
       ewbNo: { type: String, default: "" },
       ewbDate: { type: Date },
       validUpto: { type: Date },
+      via: { type: String, default: "" }, // "clear" when generated through the GSP
+      cancelReason: { type: String, default: "" },
     },
     invoiceNumber: { type: String, required: true },
     orderNumber: { type: String, default: "" },

@@ -49,6 +49,8 @@ const organizationSchema = new mongoose.Schema(
     fxAutoUpdate: { type: Boolean, default: false }, // fetch exchange rates daily
     einvoicing: { enabled: { type: Boolean, default: false }, fromDate: { type: Date } },
     ewayBills: { enabled: { type: Boolean, default: false }, threshold: { type: Number, default: 50000 } },
+    // GSP connection summary (details and token in GspAccount)
+    gsp: { provider: { type: String, default: "" }, active: { type: Boolean, default: false }, env: { type: String, default: "" } },
     // Google Gemini API key, used to read scanned bills and photos.
     ai: { geminiKey: { type: String, default: "" }, model: { type: String, default: "" }, resolvedModel: { type: String, default: "" } },
     gstFiling: { frequency: { type: String, enum: ["monthly", "quarterly"], default: "monthly" } },

@@ -32,6 +32,8 @@ const creditNoteSchema = new mongoose.Schema(
       ackNo: { type: String, default: "" },
       ackDate: { type: Date },
       signedQr: { type: String, default: "" },
+      signedInvoice: { type: String, default: "", select: false },
+      via: { type: String, default: "" }, // "clear" when generated through the GSP
       cancelReason: { type: String, default: "" },
       cancelledAt: { type: Date },
     },

@@ -116,9 +116,20 @@ router.post(
 router.post(
   "/einvoice/:kind/:id/cancel",
   ah(async (req, res) => {
-    const { reason } = validate(Joi.object({ reason: Joi.string().valid("Duplicate", "Data entry mistake", "Order cancelled", "Others").required(), remarks: Joi.string().allow("") }), req.body);
+    const { reason, remarks, onlyHere } = validate(Joi.object({ reason: Joi.string().valid("Duplicate", "Data entry mistake", "Order cancelled", "Others").required(), remarks: Joi.string().allow(""), onlyHere: Joi.boolean().default(false) }), req.body);
     const d = await findDoc(req, req.params.kind, req.params.id);
     if (d.einvoice?.status !== "generated") throw new HttpError(400, "There's no active e-invoice to cancel");
+    if (!onlyHere) {
+      const g = await gspOf(req, false);
+      if (g) {
+        if (req.params.kind === "invoice" && d.eway?.status === "generated") throw new HttpError(400, "Cancel the e-way bill first — an IRN with an active e-way bill can't be cancelled");
+        try {
+          await clear.cancelIrn(g.acc, g.gstin, d.einvoice.irn, reason, remarks);
+        } catch (e) {
+          throw new HttpError(400, `Clear: ${e.message}`);
+        }
+      }
+    }
     d.einvoice.status = "cancelled";
     d.einvoice.cancelReason = reason;
     d.einvoice.cancelledAt = new Date();
@@ -226,9 +237,21 @@ router.post(
 router.post(
   "/eway/:id/cancel",
   ah(async (req, res) => {
+    const { reason, remarks, onlyHere } = validate(Joi.object({ reason: Joi.string().valid("Duplicate", "Data entry mistake", "Order cancelled", "Others").default("Others"), remarks: Joi.string().allow(""), onlyHere: Joi.boolean().default(false) }), req.body || {});
     const d = await findDoc(req, "invoice", req.params.id);
     if (d.eway?.status !== "generated") throw new HttpError(400, "No e-way bill to cancel");
+    if (!onlyHere) {
+      const g = await gspOf(req, false);
+      if (g) {
+        try {
+          await clear.cancelEwb(g.acc, g.gstin, d.eway.ewbNo, reason, remarks);
+        } catch (e) {
+          throw new HttpError(400, `Clear: ${e.message}`);
+        }
+      }
+    }
     d.eway.status = "cancelled";
+    d.eway.cancelReason = reason;
     await d.save();
     res.send(d);
   })
@@ -244,6 +267,183 @@ router.delete(
     d.eway.validUpto = null;
     await d.save();
     res.send(d);
+  })
+);
+
+
+/* ----------------------------- Clear (GSP) ----------------------------- */
+const clear = require("../utils/gsp/clear");
+const GspAccount = require("../models/GspAccount");
+
+// The company's active Clear connection and the GSTIN to send as. required=false → null when not connected.
+async function gspOf(req, required = true) {
+  const acc = await GspAccount.findOne({ organization: req.org });
+  if (!acc?.active || !acc.token) {
+    if (required) throw new HttpError(400, "Connect Clear first: GST → e-Invoices → Clear (GSP) settings");
+    return null;
+  }
+  const org = await Organization.findById(req.org, { gstin: 1 }).lean();
+  return { acc, gstin: (acc.gstin || org.gstin || "").toUpperCase() };
+}
+// In Clear's sandbox the seller is Clear's test GSTIN: send that instead of the company's.
+const asSeller = (g, json, field) => {
+  if (g.acc.env === "sandbox" && g.gstin) {
+    if (field === "einv") {
+      json.SellerDtls.Gstin = g.gstin;
+      json.SellerDtls.Stcd = g.gstin.slice(0, 2);
+    } else {
+      json.fromGstin = g.gstin;
+      json.userGstin = g.gstin;
+    }
+  }
+  return json;
+};
+
+router.get(
+  "/gsp",
+  ah(async (req, res) => {
+    const acc = await GspAccount.findOne({ organization: req.org });
+    res.send({ account: acc || { provider: "clear", env: "sandbox", host: "", gstin: "", active: false, tokenSaved: false }, hosts: clear.HOSTS });
+  })
+);
+
+router.put(
+  "/gsp",
+  ah(async (req, res) => {
+    if (req.perms?.settings !== "full") throw new HttpError(403, "Only admins can change GST settings");
+    const d = validate(
+      Joi.object({
+        env: Joi.string().valid("sandbox", "production").required(),
+        host: Joi.string().trim().allow("").uri({ scheme: ["https"] }).label("API address"),
+        token: Joi.string().trim().allow(""),
+        gstin: Joi.string().trim().uppercase().allow("").pattern(/^[0-9]{2}[A-Z0-9]{13}$/).label("GSTIN"),
+        active: Joi.boolean().required(),
+      }),
+      req.body
+    );
+    let acc = await GspAccount.findOne({ organization: req.org });
+    if (!acc) acc = new GspAccount({ organization: req.org });
+    acc.env = d.env;
+    acc.host = d.host || "";
+    acc.gstin = d.gstin || "";
+    if (d.token) acc.token = d.token; // blank = keep
+    acc.active = d.active && !!acc.token;
+    // Check the connection whenever it's turned on.
+    let message = "Saved";
+    if (acc.active) {
+      const org = await Organization.findById(req.org, { gstin: 1 }).lean();
+      try {
+        await clear.check(acc, (acc.gstin || org.gstin || "").toUpperCase());
+        acc.lastError = "";
+        message = `Connected to Clear (${acc.env === "production" ? "live" : "sandbox"})`;
+      } catch (e) {
+        acc.lastError = e.message;
+        acc.active = false;
+        message = "";
+      }
+      acc.lastCheckAt = new Date();
+    }
+    await acc.save();
+    await Organization.updateOne({ _id: req.org }, { gsp: { provider: "clear", active: acc.active, env: acc.env } });
+    if (!message) throw new HttpError(400, `Saved, but Clear didn't accept the connection: ${acc.lastError}`);
+    res.send({ account: acc, message, organizationGsp: { provider: "clear", active: acc.active, env: acc.env } });
+  })
+);
+
+// Generate the IRN (and e-way bill if Clear returns one) for one document.
+async function generateOne(req, g, org, kind, id) {
+  const d = await findDoc(req, kind, id);
+  if (d.einvoice?.status === "generated") return { number: numberOf(kind, d), irn: d.einvoice.irn, already: true };
+  if (d.status === "draft" || d.status === "void") throw new Error("Draft and void documents can't get an e-invoice");
+  const built = await buildEInvoice(org, d.toObject(), kind);
+  if (built.errors.length) throw new Error(built.errors.join("; "));
+  const r = await clear.generateIrn(g.acc, g.gstin, asSeller(g, built.json, "einv"));
+  d.einvoice = { status: "generated", irn: r.irn, ackNo: r.ackNo, ackDate: r.ackDate, signedQr: r.signedQr, signedInvoice: r.signedInvoice, via: "clear" };
+  if (kind === "invoice" && r.ewbNo) d.eway = { ...(d.eway?.toObject ? d.eway.toObject() : d.eway || {}), status: "generated", ewbNo: r.ewbNo, ewbDate: r.ewbDate, validUpto: r.ewbValidTill, via: "clear" };
+  await d.save();
+  return { number: numberOf(kind, d), irn: r.irn, ackNo: r.ackNo };
+}
+
+router.post(
+  "/einvoice/:kind/:id/generate",
+  ah(async (req, res) => {
+    const g = await gspOf(req);
+    const org = await Organization.findById(req.org);
+    try {
+      res.send(await generateOne(req, g, org, req.params.kind, req.params.id));
+    } catch (e) {
+      throw new HttpError(400, `Clear: ${e.message}`);
+    }
+  })
+);
+
+router.post(
+  "/einvoice/bulk-generate",
+  ah(async (req, res) => {
+    const { docs } = validate(Joi.object({ docs: Joi.array().items(Joi.object({ kind: Joi.string().valid("invoice", "creditNote").required(), id: Joi.string().required() })).min(1).max(200).required() }), req.body);
+    const g = await gspOf(req);
+    const org = await Organization.findById(req.org);
+    const results = [];
+    for (const x of docs) {
+      try {
+        results.push({ id: x.id, ...(await generateOne(req, g, org, x.kind, x.id)) });
+      } catch (e) {
+        results.push({ id: x.id, error: e.message });
+      }
+    }
+    res.send({ results });
+  })
+);
+
+// E-way bill through Clear: by IRN when the invoice has one, else from the invoice (B2C etc.).
+// Distance 0 lets Clear work it out; without a vehicle / transporter it's Part A only.
+async function ewayOne(req, g, org, id) {
+  const d = await findDoc(req, "invoice", id);
+  if (d.eway?.status === "generated") return { number: d.invoiceNumber, ewbNo: d.eway.ewbNo, already: true };
+  if (d.status === "draft" || d.status === "void") throw new Error("Draft and void invoices can't get an e-way bill");
+  const t = d.eway?.toObject ? d.eway.toObject() : d.eway || {};
+  let r;
+  if (d.einvoice?.status === "generated" && d.einvoice.irn) r = await clear.ewbByIrn(g.acc, g.gstin, d.einvoice.irn, t);
+  else {
+    const built = await buildEwayBill(org, d.toObject());
+    // Through the API the distance can be left to Clear and Part B added later: those checks don't apply.
+    const errors = built.errors.filter((e) => !/distance|vehicle number, or a transporter/i.test(e));
+    if (errors.length) throw new Error(errors.join("; "));
+    r = await clear.ewbNonIrn(g.acc, g.gstin, asSeller(g, built.json, "ewb"), t);
+  }
+  d.eway = { ...t, status: "generated", ewbNo: r.ewbNo, ewbDate: r.ewbDate, validUpto: r.validUpto, via: "clear" };
+  await d.save();
+  return { number: d.invoiceNumber, ewbNo: r.ewbNo, note: r.remarks };
+}
+
+router.post(
+  "/eway/:id/generate",
+  ah(async (req, res) => {
+    const g = await gspOf(req);
+    const org = await Organization.findById(req.org);
+    try {
+      res.send(await ewayOne(req, g, org, req.params.id));
+    } catch (e) {
+      throw new HttpError(400, `Clear: ${e.message}`);
+    }
+  })
+);
+
+router.post(
+  "/eway/bulk-generate",
+  ah(async (req, res) => {
+    const { ids } = validate(Joi.object({ ids: Joi.array().items(Joi.string()).min(1).max(200).required() }), req.body);
+    const g = await gspOf(req);
+    const org = await Organization.findById(req.org);
+    const results = [];
+    for (const id of ids) {
+      try {
+        results.push({ id, ...(await ewayOne(req, g, org, id)) });
+      } catch (e) {
+        results.push({ id, error: e.message });
+      }
+    }
+    res.send({ results });
   })
 );
 
