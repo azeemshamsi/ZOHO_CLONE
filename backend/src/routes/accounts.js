@@ -95,6 +95,43 @@ router.post(
 );
 
 // One account's transactions with a running balance.
+// Transactions of several ledgers at once (Tally's transaction view of a group / ledger list), for a period.
+router.get(
+  "/transactions",
+  ah(async (req, res) => {
+    const codes = new Set(String(req.query.codes || "").split(",").filter(Boolean));
+    if (!codes.size) return res.send({ rows: [], ledgers: [] });
+    const accounts = (await chartOfAccounts(req.org)).filter((a) => codes.has(a.code));
+    const byCode = new Map(accounts.map((a) => [a.code, a]));
+    const { from, to } = parseRange(req.query);
+    const entries = await buildEntries(req.org, { to });
+    const tot = new Map(accounts.map((a) => [a.code, { code: a.code, name: a.name, opening: 0, debit: 0, credit: 0 }]));
+    const rows = [];
+    for (const e of entries) {
+      for (const l of e.lines) {
+        const a = byCode.get(l.account);
+        if (!a) continue;
+        const sign = debitNormal(a.type) ? 1 : -1;
+        const t = tot.get(a.code);
+        if (from && new Date(e.date) < from) {
+          t.opening = round2(t.opening + sign * (l.debit - l.credit));
+          continue;
+        }
+        t.debit = round2(t.debit + l.debit);
+        t.credit = round2(t.credit + l.credit);
+        rows.push({ date: e.date, type: e.type, id: e.id, number: e.number, party: e.party, ledger: a.name, code: a.code, debit: l.debit, credit: l.credit });
+      }
+    }
+    rows.sort((x, y) => new Date(x.date) - new Date(y.date));
+    const ledgers = [...tot.values()].map((t) => {
+      const a = byCode.get(t.code);
+      const sign = debitNormal(a.type) ? 1 : -1;
+      return { ...t, closing: round2(t.opening + sign * (t.debit - t.credit)) };
+    });
+    res.send({ from, to, rows: rows.slice(0, 20000), more: rows.length > 20000, ledgers });
+  })
+);
+
 router.get(
   "/:code/transactions",
   ah(async (req, res) => {

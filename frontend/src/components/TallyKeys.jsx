@@ -152,6 +152,18 @@ export default function TallyKeys({ nav = [] }) {
         }
       }
 
+      // Ctrl+H change view, Alt+F5 detailed / condensed: pages with views listen for these.
+      if ((e.ctrlKey && !e.altKey && key.toLowerCase() === "h") || (e.altKey && key === "F5")) {
+        if (document.querySelector("[data-views]")) {
+          e.preventDefault();
+          window.dispatchEvent(new Event(key === "F5" ? "tally:detail" : "tally:view"));
+        } else if (key === "F5") {
+          e.preventDefault();
+          toast("Alt+F5 (detailed view) works on ledger lists");
+        }
+        return;
+      }
+
       // Alt+F2: change period (reports and account statements).
       if (key === "F2" && e.altKey && !e.ctrlKey) {
         e.preventDefault();
@@ -316,6 +328,8 @@ function Help({ onClose }) {
     ["Page Up / Page Down", "Previous (earlier) / next (later) voucher, on a voucher's page"],
     ["F2", "Change the date (jumps to the date field)"],
     ["Alt+F2", "Change period (reports, ledger statements)"],
+    ["Ctrl+H", "Change view: summary / detailed / transactions (ledger lists)"],
+    ["Alt+F5", "Detailed / condensed (ledger lists)"],
     ["Enter", "Next field on a form; Ctrl+A saves"],
     ["Alt+C", "Create new (on a list)"],
     ["Alt+P", "Print / PDF"],
