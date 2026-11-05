@@ -25,7 +25,7 @@ function ChangePeriod({ from, to, single, onApply, onClose }) {
   const [f, setF] = useState({ from: from || "", to: to || "" });
   const toRef = useRef(null);
   const apply = () => {
-    if (single ? !f.to : !f.from || !f.to || f.from > f.to) return;
+    if (!f.from || !f.to || f.from > f.to) return;
     onApply(f);
   };
   const keys = (next) => (e) => {
@@ -44,7 +44,7 @@ function ChangePeriod({ from, to, single, onApply, onClose }) {
   return (
     <Modal
       open
-      title={single ? "Change Date (Alt+F2)" : "Change Period (Alt+F2)"}
+      title="Change Period (Alt+F2)"
       onClose={onClose}
       footer={
         <>
@@ -58,18 +58,17 @@ function ChangePeriod({ from, to, single, onApply, onClose }) {
       }
     >
       <div className="row-2">
-        {!single && (
-          <label className="field">
-            <span className="field-label">From</span>
-            <input type="date" autoFocus value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} onKeyDown={keys(toRef)} />
-          </label>
-        )}
         <label className="field">
-          <span className="field-label">{single ? "As of" : "To"}</span>
-          <input ref={toRef} type="date" autoFocus={single} value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} onKeyDown={keys(null)} />
+          <span className="field-label">From</span>
+          <input type="date" autoFocus value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} onKeyDown={keys(toRef)} />
+        </label>
+        <label className="field">
+          <span className="field-label">To</span>
+          <input ref={toRef} type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} onKeyDown={keys(null)} />
         </label>
       </div>
-      {!single && f.from > f.to && f.to && <p className="text-red small">From must be on or before To</p>}
+      {f.from && f.to && f.from > f.to && <p className="text-red small">From must be on or before To</p>}
+      {single && <p className="muted small">This report is drawn as at the To date, as in Tally.</p>}
     </Modal>
   );
 }
@@ -115,6 +114,13 @@ export function PeriodPicker({ value, onChange }) {
   );
 }
 
+// 1 April of the financial year a date falls in.
+const fyStart = (d) => {
+  const x = d ? new Date(d) : new Date();
+  const y = x.getMonth() >= 3 ? x.getFullYear() : x.getFullYear() - 1;
+  return `${y}-04-01`;
+};
+
 function AsOfPicker({ value, onChange }) {
   const [changing, setChanging] = usePeriodKey();
   return (
@@ -122,6 +128,7 @@ function AsOfPicker({ value, onChange }) {
       {changing && (
         <ChangePeriod
           single
+          from={fyStart(value)}
           to={value}
           onClose={() => setChanging(false)}
           onApply={(r) => {
