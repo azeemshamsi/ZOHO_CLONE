@@ -212,7 +212,8 @@ export function DocForm({ kind, recurring = false }) {
           shippingCharge: data.shippingCharge,
           adjustment: data.adjustment,
           adjustmentAccount: data.adjustmentAccount || "",
-          ledger: data.ledger || "",
+          // Imported Tally invoices carry their sales ledger on the lines: show it when every line uses the same one.
+          ledger: data.ledger || (["invoice", "creditNote"].includes(kind.key) && data.lineItems.length && data.lineItems.every((l) => l.account && l.account === data.lineItems[0].account) ? data.lineItems[0].account : ""),
           customerNotes: data.customerNotes,
           terms: data.terms,
           status: data.status,

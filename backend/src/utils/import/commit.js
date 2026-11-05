@@ -830,6 +830,8 @@ async function commit(ctx, data, opts, progress) {
     }
   }
 
+  // Ledgers the imported vouchers post to become sales / purchase ledgers (pickers on invoices and bills).
+  await require("./ledgerKinds").markLedgerKinds(ctx.org).catch(() => {});
   return { results, warnings: [...new Set(warnings)] };
 }
 

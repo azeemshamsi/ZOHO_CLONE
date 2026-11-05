@@ -69,6 +69,14 @@ const MIGRATIONS = [
       console.log(`Cancelled Shopify fulfilments: ${n} order(s) put back`);
     },
   },
+  {
+    // Tally sales / purchase ledgers imported before they were marked as such: mark them from their use.
+    id: "2026-11-ledger-kinds-from-use",
+    run: async () => {
+      const r = await require("./import/ledgerKinds").markLedgerKinds();
+      console.log(`Ledger kinds: ${r.sales} sales and ${r.purchase} purchase ledger(s) marked`);
+    },
+  },
 ];
 
 async function runMigrations() {
