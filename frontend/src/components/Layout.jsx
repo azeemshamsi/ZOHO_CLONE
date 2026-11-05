@@ -4,6 +4,7 @@ import CompanySwitcher from "./CompanySwitcher";
 import Logo from "./Logo";
 import Icon from "./Icon";
 import { useAuth } from "../lib/auth";
+import TallyKeys from "./TallyKeys";
 
 const NAV = [
   { to: "/", label: "Home", icon: "home", end: true },
@@ -293,6 +294,7 @@ export default function Layout() {
             </div>
           </div>
         </header>
+        <TallyKeys nav={nav} />
         <main className={`content ${level === "view" ? "readonly" : ""}`}>
           {level === "none" ? (
             <div className="card center no-access">

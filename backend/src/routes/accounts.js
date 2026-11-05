@@ -19,6 +19,47 @@ const schema = Joi.object({
 
 router.get("/types", (req, res) => res.send(Object.keys(ACCOUNT_TYPES)));
 
+/* ---------- master ledgers (groups of sales / purchase ledgers) ---------- */
+const LedgerGroup = require("../models/LedgerGroup");
+const groupJoi = Joi.object({ kind: Joi.string().valid("sales", "purchase").required(), name: Joi.string().trim().max(100).required().label("Name"), members: Joi.array().items(Joi.string()).default([]) });
+// A ledger sits in one master at a time: adding it here takes it out of the others.
+async function saveGroup(req, g, d) {
+  Object.assign(g, d);
+  await g.save();
+  if (d.members.length) await LedgerGroup.updateMany({ organization: req.org, kind: d.kind, _id: { $ne: g._id } }, { $pull: { members: { $in: d.members } } });
+  return g;
+}
+router.get(
+  "/ledger-groups",
+  ah(async (req, res) => {
+    const rows = await LedgerGroup.find({ organization: req.org, ...(req.query.kind ? { kind: req.query.kind } : {}) }).lean();
+    res.send(rows.sort((a, b) => a.name.localeCompare(b.name)));
+  })
+);
+router.post(
+  "/ledger-groups",
+  ah(async (req, res) => {
+    const d = validate(groupJoi, req.body);
+    res.send(await saveGroup(req, new LedgerGroup({ organization: req.org }), d));
+  })
+);
+router.put(
+  "/ledger-groups/:id",
+  ah(async (req, res) => {
+    const d = validate(groupJoi, req.body);
+    const g = await LedgerGroup.findOne({ _id: req.params.id, organization: req.org });
+    if (!g) throw new HttpError(404, "Master ledger not found");
+    res.send(await saveGroup(req, g, d));
+  })
+);
+router.delete(
+  "/ledger-groups/:id",
+  ah(async (req, res) => {
+    await LedgerGroup.deleteOne({ _id: req.params.id, organization: req.org });
+    res.send({ ok: true });
+  })
+);
+
 // Mark sales / purchase ledgers from what invoices, credit notes and bills post to (e.g. after a Tally import).
 router.post(
   "/ledger-kinds/refresh",

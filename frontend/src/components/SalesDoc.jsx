@@ -141,6 +141,7 @@ export function DocForm({ kind, recurring = false }) {
   const { branches, warehouses } = useLocations();
   const [currencies, setCurrencies] = useState([]);
   const [ledgers, setLedgers] = useState([]);
+  const [ledgerGroups, setLedgerGroups] = useState([]);
   // Sales ledger (invoices, credit notes) / purchase ledger (bills, vendor credits), as in Tally.
   const ledgerKind = recurring ? "" : ["invoice", "creditNote"].includes(kind.key) ? "sales" : ["bill", "vendorCredit"].includes(kind.key) ? "purchase" : "";
   useEffect(() => {
@@ -148,6 +149,10 @@ export function DocForm({ kind, recurring = false }) {
     api
       .get("/accounts")
       .then((r) => setLedgers(r.data.filter((a) => a.ledgerKind === ledgerKind && a.active !== false)))
+      .catch(() => {});
+    api
+      .get("/accounts/ledger-groups", { params: { kind: ledgerKind } })
+      .then((r) => setLedgerGroups(r.data))
       .catch(() => {});
   }, [ledgerKind]);
   useEffect(() => {
@@ -477,11 +482,27 @@ export function DocForm({ kind, recurring = false }) {
                   }
                 >
                   <option value="">{ledgerKind === "sales" ? "Sales (default)" : "Cost of Goods Sold (default)"}</option>
-                  {ledgers.map((a) => (
-                    <option key={a.code} value={a.code}>
-                      {a.name}
-                    </option>
+                  {/* Grouped under their master ledger (e.g. "Invoice Sale"), then the rest. */}
+                  {ledgerGroups.map((g) => (
+                    <optgroup key={g._id} label={g.name}>
+                      {ledgers
+                        .filter((a) => g.members.includes(a.code))
+                        .map((a) => (
+                          <option key={a.code} value={a.code}>
+                            {a.name}
+                          </option>
+                        ))}
+                    </optgroup>
                   ))}
+                  {(() => {
+                    const rest = ledgers.filter((a) => !ledgerGroups.some((g) => g.members.includes(a.code)));
+                    const opts = rest.map((a) => (
+                      <option key={a.code} value={a.code}>
+                        {a.name}
+                      </option>
+                    ));
+                    return ledgerGroups.length && rest.length ? <optgroup label="Other ledgers">{opts}</optgroup> : opts;
+                  })()}
                   {form.ledger && !ledgers.some((a) => a.code === form.ledger) && <option value={form.ledger}>(current ledger)</option>}
                 </select>
               </Field>

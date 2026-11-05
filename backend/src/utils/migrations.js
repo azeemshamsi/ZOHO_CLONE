@@ -86,6 +86,22 @@ const MIGRATIONS = [
       await mongoose.connection.db.collection("migration_reports").updateOne({ _id: "ledger-kinds" }, { $set: { at: new Date(), ...r } }, { upsert: true });
     },
   },
+  {
+    // Azeem's master sales ledger "Invoice Sale": the Tally sales ledgers named "Invoice Sale …".
+    id: "2026-11-master-ledger-invoice-sale",
+    run: async () => {
+      const Account = require("../models/Account");
+      const LedgerGroup = require("../models/LedgerGroup");
+      const accounts = await Account.find({ ledgerKind: "sales" }, { name: 1, organization: 1 }).lean();
+      const byOrg = new Map();
+      for (const a of accounts) if (/^invoice\s+sale/i.test(a.name || "")) byOrg.set(String(a.organization), [...(byOrg.get(String(a.organization)) || []), String(a._id)]);
+      for (const [org, members] of byOrg) {
+        if (members.length < 2 || (await LedgerGroup.exists({ organization: org, kind: "sales", name: "Invoice Sale" }))) continue;
+        await LedgerGroup.create({ organization: org, kind: "sales", name: "Invoice Sale", members });
+        console.log(`Master ledger "Invoice Sale": ${members.length} ledgers (org ${org})`);
+      }
+    },
+  },
 ];
 
 async function runMigrations() {

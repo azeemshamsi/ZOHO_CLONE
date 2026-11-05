@@ -12,6 +12,96 @@ export const LEDGER_KINDS = {
   purchase: { title: "Purchase Ledgers", one: "purchase ledger", groups: ["Cost Of Goods Sold", "Expense", "Other Expense"], doc: "bills and vendor credits", fallback: "Cost of Goods Sold" },
 };
 
+// A master ledger: name + member ledgers (tick to add, untick to remove).
+function MasterModal({ group, kind, ledgers, groups, onClose, onSaved }) {
+  const [name, setName] = useState(group.name || "");
+  const [members, setMembers] = useState(new Set(group.members || []));
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const inOther = (code) => groups.find((g) => g._id !== group._id && g.members.includes(code))?.name;
+  const shown = ledgers.filter((a) => !q || a.name.toLowerCase().includes(q.toLowerCase()));
+  const save = async () => {
+    setBusy(true);
+    try {
+      const body = { kind, name, members: [...members] };
+      if (group._id) await api.put(`/accounts/ledger-groups/${group._id}`, body);
+      else await api.post("/accounts/ledger-groups", body);
+      toast("Master ledger saved");
+      onSaved();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  const remove = async () => {
+    if (!window.confirm(`Delete the master ledger "${group.name}"? Its ledgers stay; only the grouping goes.`)) return;
+    await api.delete(`/accounts/ledger-groups/${group._id}`);
+    toast("Master ledger deleted");
+    onSaved();
+  };
+  return (
+    <Modal
+      open
+      wide
+      title={group._id ? `Master ledger: ${group.name}` : "New master ledger"}
+      onClose={onClose}
+      footer={
+        <>
+          {group._id && (
+            <button className="btn btn-danger" style={{ marginRight: "auto" }} onClick={remove}>
+              Delete
+            </button>
+          )}
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" disabled={busy || !name.trim()} onClick={save}>
+            Save
+          </button>
+        </>
+      }
+    >
+      <div className="form-grid">
+        <Field label="Name" required>
+          <input value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="e.g. Invoice Sale" />
+        </Field>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <div className="label-sm" style={{ margin: 0 }}>
+            Ledgers in it ({members.size})
+          </div>
+          <input style={{ maxWidth: 260 }} placeholder="Search ledgers…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div style={{ maxHeight: 360, overflow: "auto", border: "1px solid var(--border, #e5e7eb)", borderRadius: 6 }}>
+          <table className="table compact">
+            <tbody>
+              {shown.map((a) => (
+                <tr key={a.code}>
+                  <td style={{ width: 30 }}>
+                    <input
+                      type="checkbox"
+                      checked={members.has(a.code)}
+                      onChange={(e) => {
+                        const n = new Set(members);
+                        e.target.checked ? n.add(a.code) : n.delete(a.code);
+                        setMembers(n);
+                      }}
+                    />
+                  </td>
+                  <td>
+                    {a.name}
+                    {!members.has(a.code) && inOther(a.code) && <span className="muted small"> · in {inOther(a.code)} (moves here if ticked)</span>}
+                  </td>
+                  <td className="num">{money(a.balance)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function LedgerList({ kind }) {
   const k = LEDGER_KINDS[kind];
   const navigate = useNavigate();
@@ -20,7 +110,10 @@ export function LedgerList({ kind }) {
   const [f, setF] = useState({ name: "", group: k.groups[0] });
   const [existing, setExisting] = useState("");
   const [busy, setBusy] = useState(false);
-  const load = () => api.get("/accounts").then((r) => setAccounts(r.data));
+  const [groups, setGroups] = useState([]);
+  const [master, setMaster] = useState(null);
+  const [openGroups, setOpenGroups] = useState(new Set());
+  const load = () => Promise.all([api.get("/accounts").then((r) => setAccounts(r.data)), api.get("/accounts/ledger-groups", { params: { kind } }).then((r) => setGroups(r.data)).catch(() => setGroups([]))]);
   useEffect(() => {
     setAccounts(null);
     load();
@@ -71,10 +164,59 @@ export function LedgerList({ kind }) {
         >
           Find ledgers from {kind === "sales" ? "invoices" : "bills"}
         </button>
+        <button className="btn" onClick={() => setMaster({})}>
+          + Master ledger
+        </button>
         <button className="btn btn-primary" onClick={() => setModal(true)}>
           <Icon name="plus" size={16} /> New {k.one}
         </button>
       </PageHeader>
+      {groups.length > 0 && (
+        <div className="card flush" style={{ marginBottom: 14 }}>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Master ledger</th>
+                <th>Ledgers</th>
+                <th className="num">Balance</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((g) => {
+                const members = ledgers.filter((a) => g.members.includes(a.code));
+                const open = openGroups.has(g._id);
+                return [
+                  <tr key={g._id} className="table-click" onClick={() => setOpenGroups((s) => (s.has(g._id) ? new Set([...s].filter((x) => x !== g._id)) : new Set([...s, g._id])))}>
+                    <td className="strong">
+                      {open ? "▾" : "▸"} {g.name}
+                    </td>
+                    <td>{members.length}</td>
+                    <td className="num strong">{money(members.reduce((t, a) => t + (Number(a.balance) || 0), 0))}</td>
+                    <td style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
+                      <button className="btn btn-sm" onClick={() => setMaster(g)}>
+                        Add / remove ledgers
+                      </button>
+                    </td>
+                  </tr>,
+                  ...(open
+                    ? members.map((a) => (
+                        <tr key={g._id + a.code} className="table-click" onClick={() => navigate(`/chart-of-accounts/${encodeURIComponent(a.code)}`)}>
+                          <td style={{ paddingLeft: 36 }} className="link">
+                            {a.name}
+                          </td>
+                          <td className="muted small">{a.group}</td>
+                          <td className="num">{money(a.balance)}</td>
+                          <td />
+                        </tr>
+                      ))
+                    : []),
+                ];
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
       {ledgers.length === 0 ? (
         <Empty
           icon="book"
@@ -93,6 +235,7 @@ export function LedgerList({ kind }) {
               <tr>
                 <th>Ledger</th>
                 <th>Account Type</th>
+                {groups.length > 0 && <th>Master ledger</th>}
                 <th className="num">Balance</th>
               </tr>
             </thead>
@@ -104,6 +247,7 @@ export function LedgerList({ kind }) {
                     {a.active === false && <span className="muted small"> (inactive)</span>}
                   </td>
                   <td>{a.group}</td>
+                  {groups.length > 0 && <td className="muted">{groups.find((g) => g.members.includes(a.code))?.name || "—"}</td>}
                   <td className="num">{money(a.balance)}</td>
                 </tr>
               ))}
@@ -114,6 +258,19 @@ export function LedgerList({ kind }) {
       <p className="muted small" style={{ marginTop: 10 }}>
         Documents without a ledger post to {k.fallback}.{kind === "purchase" ? " Stock items you track still go to Inventory Asset (and to Cost of Goods Sold when sold); the ledger gets the rest of the bill." : ""}
       </p>
+      {master && (
+        <MasterModal
+          group={master}
+          kind={kind}
+          ledgers={ledgers}
+          groups={groups}
+          onClose={() => setMaster(null)}
+          onSaved={() => {
+            setMaster(null);
+            load();
+          }}
+        />
+      )}
       <Modal open={modal} onClose={() => setModal(false)} title={`New ${k.one}`}>
         <form className="stack" onSubmit={create}>
           {candidates.length > 0 && (
