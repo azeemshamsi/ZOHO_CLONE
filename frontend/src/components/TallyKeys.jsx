@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Modal } from "./ui";
+import { Modal, toast } from "./ui";
+import api from "../lib/api";
 
 /**
  * Tally keyboard shortcuts across OrdexaGo.
@@ -11,8 +12,42 @@ import { Modal } from "./ui";
  *  Ctrl+F8 Credit Note · Ctrl+F9 Debit Note
  *  Alt+P print · Alt+D delete · Alt+C create (new of the current list)
  *  Gateway (when not typing): D Day Book · B Balance Sheet · P Profit & Loss · T Trial Balance · L Ledgers
+ *  Page Up / Page Down   previous (earlier) / next (later) voucher of the same kind, on a voucher's page
+ *  F2             change the date: jumps to the date field
+ *  Enter          next field on a form (as in Tally); Ctrl+A saves
  *  Ctrl+/         this list
  */
+// Voucher pages → the list they page through (newest first, as the API returns them).
+const PAGED = {
+  invoices: "/invoices",
+  bills: "/bills",
+  "credit-notes": "/credit-notes",
+  "vendor-credits": "/vendor-credits",
+  journals: "/journals",
+  payments: "/payments",
+  "payments-made": "/vendor-payments",
+  quotes: "/quotes",
+  "sales-orders": "/sales-orders",
+  "purchase-orders": "/purchase-orders",
+};
+const listCache = new Map(); // kind → ids, newest first
+async function neighbour(kind, id, dir) {
+  const load = async () => {
+    const { data } = await api.get(PAGED[kind]);
+    const ids = (Array.isArray(data) ? data : data.rows || []).map((d) => String(d._id));
+    listCache.set(kind, ids);
+    return ids;
+  };
+  let ids = listCache.get(kind) || (await load());
+  if (!ids.includes(id)) ids = await load();
+  const i = ids.indexOf(id);
+  if (i < 0) return null;
+  return dir === "earlier" ? ids[i + 1] : ids[i - 1];
+}
+const focusables = (root) =>
+  [...root.querySelectorAll("input, select, textarea, button[type=submit]")].filter(
+    (el) => visible(el) && el.tabIndex !== -1 && !el.readOnly && el.type !== "hidden" && el.type !== "file" && !el.closest(".ss-list") && !el.classList.contains("ss-req")
+  );
 const VOUCHERS = {
   F4: ["/banking", "Contra (Banking)"],
   F5: ["/payments-made/new", "Payment"],
@@ -100,6 +135,49 @@ export default function TallyKeys({ nav = [] }) {
         } else if (form && /\/(new|edit)$|settings/.test(locRef.current.pathname)) {
           e.preventDefault();
           form.requestSubmit ? form.requestSubmit() : form.submit();
+        }
+        return;
+      }
+
+      // Page Up / Page Down: previous (earlier) / next (later) voucher.
+      if ((key === "PageUp" || key === "PageDown") && !modal && !typing(t)) {
+        const m = locRef.current.pathname.match(/^\/([a-z-]+)\/([0-9a-f]{24})$/);
+        if (m && PAGED[m[1]]) {
+          e.preventDefault();
+          neighbour(m[1], m[2], key === "PageUp" ? "earlier" : "later")
+            .then((next) => (next ? go(`/${m[1]}/${next}`) : toast(key === "PageUp" ? "This is the first voucher" : "This is the last voucher")))
+            .catch(() => {});
+          return;
+        }
+      }
+
+      // F2: change the date.
+      if (key === "F2" && !e.ctrlKey && !e.altKey) {
+        const root = modal || document.querySelector("main");
+        const d = [...(root?.querySelectorAll('input[type="date"]') || [])].find(visible);
+        if (d) {
+          e.preventDefault();
+          d.focus();
+          try {
+            d.showPicker?.();
+          } catch {}
+        }
+        return;
+      }
+
+      // Enter: next field on a form (Tally). Not in text areas, buttons, or an open dropdown.
+      if (key === "Enter" && !e.ctrlKey && !e.altKey && !e.shiftKey && t && ["INPUT", "SELECT"].includes(t.tagName) && !["checkbox", "radio", "submit", "button"].includes(t.type)) {
+        const form = t.closest("form") || t.closest(".modal");
+        const editing = /\/(new|edit)$/.test(locRef.current.pathname) || !!t.closest(".modal");
+        if (form && editing && !document.querySelector(".ss-list")) {
+          const list = focusables(form);
+          const i = list.indexOf(t);
+          const next = list[i + 1];
+          if (i >= 0 && next) {
+            e.preventDefault();
+            next.focus();
+            if (next.select && next.tagName === "INPUT") next.select();
+          }
         }
         return;
       }
@@ -226,6 +304,9 @@ function Help({ onClose }) {
     ["Ctrl+A", "Accept — save the form or the open window"],
     ["Alt+G or Ctrl+G", "Go To any page, voucher or report"],
     ...Object.entries(VOUCHERS).map(([k, [, l]]) => [k, l]),
+    ["Page Up / Page Down", "Previous (earlier) / next (later) voucher, on a voucher's page"],
+    ["F2", "Change the date (jumps to the date field)"],
+    ["Enter", "Next field on a form; Ctrl+A saves"],
     ["Alt+C", "Create new (on a list)"],
     ["Alt+P", "Print / PDF"],
     ["Alt+D", "Delete"],
