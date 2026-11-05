@@ -1,35 +1,45 @@
 /**
- * Sales / purchase ledgers from use: income accounts that invoices and credit notes post to are sales ledgers;
- * accounts set as the purchase ledger of bills / vendor credits are purchase ledgers (as in Tally).
- * Only accounts with no kind yet are changed. Runs after Tally imports and once for existing data.
+ * Sales / purchase ledgers from use: income accounts that invoices and credit notes post to (and income accounts
+ * named like a sales ledger, "Sale 18% …") are sales ledgers; accounts set as the purchase ledger of bills /
+ * vendor credits are purchase ledgers (as in Tally). Only accounts with no kind yet change.
+ * Matching is done here and updates go by _id: "blank or missing" queries are unreliable on the Oracle MongoDB API.
  */
-const mongoose = require("mongoose");
 const Account = require("../../models/Account");
 const Invoice = require("../../models/Invoice");
 const CreditNote = require("../../models/CreditNote");
 const Bill = require("../../models/Bill");
 const VendorCredit = require("../../models/VendorCredit");
 
-const ids = (set) => [...set].filter((c) => /^[0-9a-f]{24}$/i.test(c)).map((c) => new mongoose.Types.ObjectId(c));
+const INCOME = ["Income", "Other Income"];
+const SALES_NAME = /\bsales?\b|\bsale\s*\d|outstate|out\s*state|interstate|local\s*sale|export\s*sale/i;
 
 async function markLedgerKinds(org) {
+  const f = org ? { organization: org } : {};
   const sales = new Set();
   const purchase = new Set();
-  const used = (docs, into, withLines) => {
-    for (const d of docs) {
-      if (d.ledger) into.add(String(d.ledger));
-      if (withLines) for (const l of d.lineItems || []) if (l.account) into.add(String(l.account));
-    }
-  };
-  const f = org ? { organization: org } : {};
-  const p = { ledger: 1, "lineItems.account": 1, organization: 1 };
-  used(await Invoice.find(f, p).lean(), sales, true);
-  used(await CreditNote.find(f, p).lean(), sales, true);
-  used(await Bill.find(f, { ledger: 1 }).lean(), purchase, false);
-  used(await VendorCredit.find(f, { ledger: 1 }).lean(), purchase, false);
-  const s = await Account.updateMany({ _id: { $in: ids(sales) }, group: { $in: ["Income", "Other Income"] }, ledgerKind: { $in: ["", null] }, ...f }, { ledgerKind: "sales" });
-  const q = await Account.updateMany({ _id: { $in: ids(purchase) }, ledgerKind: { $in: ["", null] }, ...f }, { ledgerKind: "purchase" });
-  return { sales: s.modifiedCount, purchase: q.modifiedCount };
+  for (const d of await Invoice.find(f, { ledger: 1, "lineItems.account": 1 }).lean()) {
+    if (d.ledger) sales.add(String(d.ledger));
+    for (const l of d.lineItems || []) if (l.account) sales.add(String(l.account));
+  }
+  for (const d of await CreditNote.find(f, { ledger: 1, "lineItems.account": 1 }).lean()) {
+    if (d.ledger) sales.add(String(d.ledger));
+    for (const l of d.lineItems || []) if (l.account) sales.add(String(l.account));
+  }
+  for (const d of await Bill.find(f, { ledger: 1 }).lean()) if (d.ledger) purchase.add(String(d.ledger));
+  for (const d of await VendorCredit.find(f, { ledger: 1 }).lean()) if (d.ledger) purchase.add(String(d.ledger));
+
+  const accounts = await Account.find(f, { name: 1, group: 1, ledgerKind: 1 }).lean();
+  const toSales = [];
+  const toPurchase = [];
+  for (const a of accounts) {
+    if (a.ledgerKind) continue;
+    const id = String(a._id);
+    if (INCOME.includes(a.group) && (sales.has(id) || SALES_NAME.test(a.name || ""))) toSales.push(a._id);
+    else if (purchase.has(id)) toPurchase.push(a._id);
+  }
+  if (toSales.length) await Account.updateMany({ _id: { $in: toSales } }, { $set: { ledgerKind: "sales" } });
+  if (toPurchase.length) await Account.updateMany({ _id: { $in: toPurchase } }, { $set: { ledgerKind: "purchase" } });
+  return { sales: toSales.length, purchase: toPurchase.length, accounts: accounts.length, usedBySales: sales.size };
 }
 
 module.exports = { markLedgerKinds };

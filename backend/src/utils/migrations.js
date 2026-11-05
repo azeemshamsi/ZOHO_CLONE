@@ -77,6 +77,15 @@ const MIGRATIONS = [
       console.log(`Ledger kinds: ${r.sales} sales and ${r.purchase} purchase ledger(s) marked`);
     },
   },
+  {
+    // Again, without the "blank or missing" query the Oracle MongoDB API didn't match.
+    id: "2026-11-ledger-kinds-from-use-2",
+    run: async () => {
+      const r = await require("./import/ledgerKinds").markLedgerKinds();
+      console.log(`Ledger kinds: ${r.sales} sales and ${r.purchase} purchase ledger(s) marked (${r.accounts} accounts, ${r.usedBySales} used by invoices)`);
+      await mongoose.connection.db.collection("migration_reports").updateOne({ _id: "ledger-kinds" }, { $set: { at: new Date(), ...r } }, { upsert: true });
+    },
+  },
 ];
 
 async function runMigrations() {

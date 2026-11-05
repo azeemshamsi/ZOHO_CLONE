@@ -125,7 +125,10 @@ async function commit(ctx, data, opts, progress) {
       const have = lookupAccount(a.name, { exact: true });
       if (have) {
         // Accounts from an earlier import learn whether they're a sales / purchase ledger.
-        if (a.ledgerKind && /^[0-9a-f]{24}$/i.test(have)) await Account.updateOne({ _id: have, organization: ctx.org, ledgerKind: { $in: ["", null] } }, { ledgerKind: a.ledgerKind });
+        if (a.ledgerKind && /^[0-9a-f]{24}$/i.test(have)) {
+          const cur = await Account.findOne({ _id: have, organization: ctx.org }, { ledgerKind: 1 }).lean();
+          if (cur && !cur.ledgerKind) await Account.updateOne({ _id: have }, { $set: { ledgerKind: a.ledgerKind } });
+        }
         R_("accounts").skipped++;
         continue;
       }

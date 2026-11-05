@@ -19,6 +19,14 @@ const schema = Joi.object({
 
 router.get("/types", (req, res) => res.send(Object.keys(ACCOUNT_TYPES)));
 
+// Mark sales / purchase ledgers from what invoices, credit notes and bills post to (e.g. after a Tally import).
+router.post(
+  "/ledger-kinds/refresh",
+  ah(async (req, res) => {
+    res.send(await require("../utils/import/ledgerKinds").markLedgerKinds(req.org));
+  })
+);
+
 // All accounts with their balance across every recorded transaction (or as of ?to=YYYY-MM-DD).
 router.get(
   "/",

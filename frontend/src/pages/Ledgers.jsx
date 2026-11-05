@@ -53,6 +53,24 @@ export function LedgerList({ kind }) {
   return (
     <>
       <PageHeader title={k.title}>
+        <button
+          className="btn"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const { data } = await api.post("/accounts/ledger-kinds/refresh");
+              const n = kind === "sales" ? data.sales : data.purchase;
+              toast(n ? `${n} ${k.one}${n > 1 ? "s" : ""} found and added` : `No new ${k.one}s found (${data.usedBySales} accounts used by invoices, ${data.accounts} accounts checked)`);
+              load();
+            } catch (err) {
+              toast(errMsg(err), "error");
+            }
+            setBusy(false);
+          }}
+        >
+          Find ledgers from {kind === "sales" ? "invoices" : "bills"}
+        </button>
         <button className="btn btn-primary" onClick={() => setModal(true)}>
           <Icon name="plus" size={16} /> New {k.one}
         </button>
