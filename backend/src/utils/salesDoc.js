@@ -122,9 +122,9 @@ async function prepareDoc(req, data, party = "customer") {
 }
 
 // The next number without using it up (for showing in the form).
+// The next number (continuing after the highest one used in the series, imported ones included).
 async function peekNumber(org, key, prefix) {
-  const c = await Counter.findOne({ organization: org, key });
-  return `${prefix}${String((c ? c.seq : 0) + 1).padStart(2, "0")}`;
+  return require("../models/Counter").peekNext(org, key, prefix);
 }
 
 // Bring an invoice's balance and status in line with payments and credits.
