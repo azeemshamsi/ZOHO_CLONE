@@ -15,6 +15,13 @@ const { round2 } = require("./http");
 
 const RATES = [0, 0.1, 0.25, 1, 1.5, 3, 5, 6, 7.5, 12, 18, 28, 40];
 const TAX = { output_cgst: "cgst", output_sgst: "sgst", output_igst: "igst" };
+// GST ledgers imported from Tally keep their own names ("CGST 2.5%", "Output IGST 18%"): recognise them by name.
+const taxTypeOf = (a) => {
+  if (TAX[a.code]) return TAX[a.code];
+  const n = a.name.toLowerCase();
+  if (/cess|input|itc|\brcm\b|reverse/.test(n)) return null;
+  return /igst/.test(n) ? "igst" : /cgst/.test(n) ? "cgst" : /sgst|utgst/.test(n) ? "sgst" : null;
+};
 
 // What the journal is: a cash sale we can turn into an invoice, or why not.
 async function analyse(org, journal) {
@@ -25,6 +32,7 @@ async function analyse(org, journal) {
   const cash = [];
   const income = [];
   const tax = { cgst: 0, sgst: 0, igst: 0 };
+  const taxAcc = { cgst: new Set(), sgst: new Set(), igst: new Set() };
   const other = [];
   for (const [code, amt] of net) {
     if (!amt) continue;
@@ -33,13 +41,19 @@ async function analyse(org, journal) {
     if (journal.lines.some((l) => l.account === code && (l.customer || l.vendor))) return { ok: false, reason: "It already names a customer or vendor" };
     if (["Cash", "Bank"].includes(a.group) && amt < 0) cash.push({ code, name: a.name, amount: -amt });
     else if (["Income", "Other Income"].includes(a.group) && amt > 0) income.push({ code, name: a.name, amount: amt });
-    else if (TAX[code] && amt > 0) tax[TAX[code]] = round2(tax[TAX[code]] + amt);
+    else if (taxTypeOf(a) && amt > 0) {
+      const t = taxTypeOf(a);
+      tax[t] = round2(tax[t] + amt);
+      taxAcc[t].add(code);
+    }
     else other.push({ code, name: a.name, amount: amt }); // round-off etc.: credit positive
   }
   if (cash.length !== 1) return { ok: false, reason: cash.length ? "It debits more than one cash / bank account" : "It isn't received in cash or bank (no cash / bank debit)" };
   if (!income.length) return { ok: false, reason: "It has no sales ledger" };
   if (other.length > 1) return { ok: false, reason: `It has more than one other account (${other.map((o) => o.name).join(", ")})` };
   if (Math.abs(tax.cgst - tax.sgst) > 0.02) return { ok: false, reason: "CGST and SGST differ" };
+  for (const t of ["cgst", "sgst", "igst"]) if (taxAcc[t].size > 1) return { ok: false, reason: `Its ${t.toUpperCase()} is split over more than one ledger` };
+  const taxAccounts = Object.fromEntries(["cgst", "sgst", "igst"].map((t) => [t, [...taxAcc[t]][0] || ""]).map(([t, c]) => [t, TAX[c] ? "" : c]));
   const taxable = round2(income.reduce((t, l) => t + l.amount, 0));
   const totalTax = round2(tax.cgst + tax.sgst + tax.igst);
   // GST rate per line: one rate for all when it fits, else the rate in each ledger's name ("… @ 18% …").
@@ -51,7 +65,8 @@ async function analyse(org, journal) {
     lines = income.map((l) => ({ ...l, rate: Number((l.name.match(/(\d+(?:\.\d+)?)\s*%/) || [])[1]) }));
     if (lines.some((l) => !RATES.includes(l.rate))) return { ok: false, reason: "The GST rate of each sales ledger can't be worked out" };
   }
-  return { ok: true, cash: cash[0], lines, tax, interState: tax.igst > 0, other: other[0] || null, total: cash[0].amount };
+  const { voucherNo } = require("../models/Counter");
+  return { ok: true, number: voucherNo(journal.number), cash: cash[0], lines, tax, taxAccounts, interState: tax.igst > 0, other: other[0] || null, total: cash[0].amount };
 }
 
 // ctx: { org, user }. Returns { invoice, payment }.
@@ -63,7 +78,7 @@ async function convert(ctx, journalId, customerId, { placeOfSupply } = {}) {
   if (!customer) throw new Error("Choose a customer");
   const a = await analyse(ctx.org, journal);
   if (!a.ok) throw new Error(`This journal can't be turned into an invoice: ${a.reason}`);
-  if (await Invoice.exists({ organization: ctx.org, invoiceNumber: journal.number })) throw new Error(`An invoice ${journal.number} already exists`);
+  if (await Invoice.exists({ organization: ctx.org, invoiceNumber: a.number })) throw new Error(`An invoice ${a.number} already exists`);
   const org = await Organization.findById(ctx.org);
   let pos = org.state;
   if (a.interState) {
@@ -77,7 +92,7 @@ async function convert(ctx, journalId, customerId, { placeOfSupply } = {}) {
     date: iso,
     dueDate: iso,
     placeOfSupply: pos,
-    invoiceNumber: journal.number,
+    invoiceNumber: a.number,
     lineItems: a.lines.map((l) => ({ name: l.name, description: journal.notes || "", quantity: 1, rate: l.amount, taxRate: l.rate, account: l.code === "sales" ? "" : l.code })),
     ...(singleLedger && singleLedger !== "sales" ? { ledger: singleLedger } : {}),
     adjustment: a.other ? a.other.amount : 0,
@@ -90,13 +105,15 @@ async function convert(ctx, journalId, customerId, { placeOfSupply } = {}) {
   try {
     invoice = await call(require("../routes/invoices"), "POST", "/", ctx, body);
     if (Math.abs(invoice.total - a.total) > 0.005) throw new Error(`The invoice comes to ₹${invoice.total}, the cash sale was ₹${a.total}`);
+    // GST to the same ledgers the journal used (e.g. Tally's "CGST 2.5%"), not the built-in Output CGST.
+    if (a.taxAccounts.cgst || a.taxAccounts.sgst || a.taxAccounts.igst) await Invoice.updateOne({ _id: invoice._id }, { $set: { taxAccounts: a.taxAccounts } });
     payment = await call(require("../routes/payments"), "POST", "/", ctx, {
       customer: String(customer._id),
       date: iso,
       amount: a.total,
       mode: a.cash.code === "cash" || /cash/i.test(a.cash.name) ? "cash" : "bank_transfer",
       bankAccount: a.cash.code,
-      reference: `Cash sale ${journal.number}`,
+      reference: `Cash sale ${a.number}`,
       allocations: [{ invoice: String(invoice._id), amount: a.total }],
     });
     // The two must post exactly what the journal posted.

@@ -301,7 +301,7 @@ export function JournalView() {
       {sale && (
         <div className="banner">
           <div style={{ flex: 1, minWidth: 220 }}>
-            <strong>Cash sale of {money(sale.total)}</strong> (received in {sale.cash.name}). Know who bought it? Name the customer and it becomes invoice {j.number} to them with a cash
+            <strong>Cash sale of {money(sale.total)}</strong> (received in {sale.cash.name}). Know who bought it? Name the customer and it becomes invoice {sale.number} to them with a cash
             receipt; the accounts and the trial balance stay exactly the same.
           </div>
           <button className="btn btn-primary" onClick={() => setNaming(true)}>
@@ -312,7 +312,7 @@ export function JournalView() {
       {naming && (
         <NameCustomer
           title={`Name the customer for ${j.number}`}
-          intro={`Creates invoice ${j.number} dated ${date(j.date)} for ${money(sale.total)} with the same sales ledger and GST, marked paid in ${sale.cash.name}, and removes this journal. If anything would post differently, nothing is changed.`}
+          intro={`Creates invoice ${sale.number} dated ${date(j.date)} for ${money(sale.total)} with the same sales ledger and GST, marked paid in ${sale.cash.name}, and removes this journal. If anything would post differently, nothing is changed.`}
           needState={sale.interState}
           busy={busy}
           onDone={toInvoice}

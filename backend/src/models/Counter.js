@@ -13,7 +13,7 @@ const Counter = mongoose.model("Counter", counterSchema);
 // Where each series' numbers live, so a new number continues after the highest one already used
 // (including vouchers imported from Tally or entered by hand).
 const SOURCES = {
-  invoice: [["Invoice", "invoiceNumber"], ["Journal", "number"]], // Tally cash sales are journals in the invoice series
+  invoice: [["Invoice", "invoiceNumber"], ["Journal", "number"]], // Tally cash sales are journals in the invoice series ("Sales SH/26-27/398")
   creditNote: ["CreditNote", "number"],
   quote: ["Quote", "number"],
   salesOrder: ["SalesOrder", "number"],
@@ -37,6 +37,12 @@ function seqOf(number, prefix) {
   return Number(m[2]) || 0;
 }
 
+// "Sales SH/26-27/398" → "SH/26-27/398": the last word, when the number has the voucher type in front.
+const voucherNo = (number) => {
+  const parts = String(number || "").trim().split(/\s+/);
+  return parts.length > 1 && /\d/.test(parts[parts.length - 1]) ? parts[parts.length - 1] : String(number || "").trim();
+};
+
 // Highest number used in the series (read in the app: regex queries are unreliable on the Oracle MongoDB API).
 async function highestUsed(organization, key, prefix) {
   const src = SOURCES[String(key).split(":")[0]];
@@ -45,7 +51,8 @@ async function highestUsed(organization, key, prefix) {
   for (const [model, field] of Array.isArray(src[0]) ? src : [src]) {
     const Model = mongoose.models[model] || require(`./${model}`);
     const docs = await Model.find({ organization }, { [field]: 1 }).lean();
-    for (const d of docs) max = Math.max(max, seqOf(d[field], prefix));
+    // A journal imported from Tally carries the voucher type before its number ("Sales SH/26-27/398").
+    for (const d of docs) max = Math.max(max, seqOf(d[field], prefix), model === "Journal" ? seqOf(voucherNo(d[field]), prefix) : 0);
   }
   return max;
 }
@@ -72,4 +79,4 @@ async function peekNext(organization, key, prefix, width = 2) {
   return `${prefix}${String(Math.max(c ? c.seq : 0, used) + 1).padStart(width, "0")}`;
 }
 
-module.exports = { Counter, nextNumber, peekNext, seqOf };
+module.exports = { Counter, nextNumber, peekNext, seqOf, voucherNo };

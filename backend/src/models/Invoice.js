@@ -4,6 +4,9 @@ const { salesDocFields, startOfToday } = require("./shared");
 const invoiceSchema = new mongoose.Schema(
   {
     ...salesDocFields(),
+    // GST ledgers this invoice posts to, when not the built-in Output CGST/SGST/IGST (a cash sale from Tally
+    // keeps Tally's own "CGST 2.5%" etc. ledgers, so naming the customer doesn't move GST between ledgers).
+    taxAccounts: { cgst: { type: String, default: "" }, sgst: { type: String, default: "" }, igst: { type: String, default: "" } },
     // GST e-invoice details returned by the IRP
     einvoice: {
       status: { type: String, enum: ["none", "generated", "cancelled"], default: "none" },

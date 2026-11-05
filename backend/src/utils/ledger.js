@@ -166,9 +166,9 @@ async function buildEntries(org, { to } = {}) {
         const income = incomeAccounts(i.lineItems);
         for (const [acct, amt] of income) cr(acct, amt);
         cr(i.ledger || "sales", i.subTotal - sumOf(income));
-        cr("output_cgst", i.cgst);
-        cr("output_sgst", i.sgst);
-        cr("output_igst", i.igst);
+        cr(i.taxAccounts?.cgst || "output_cgst", i.cgst);
+        cr(i.taxAccounts?.sgst || "output_sgst", i.sgst);
+        cr(i.taxAccounts?.igst || "output_igst", i.igst);
         cr("shipping_income", i.shippingCharge);
         // Adjustment: to its own account when set (e.g. packing charged), round-off part to Rounding.
         const ro = roundOffPart(i);
