@@ -8,6 +8,7 @@ import { PAYMENT_TERMS, modeName } from "../lib/constants";
 import { money, amount, date, round2 } from "../lib/format";
 import { PageHeader, Spinner, toast, Status, Confirm, Modal, MoreMenu, invoiceStatus } from "../components/ui";
 import { DocList, DocForm, DocPaper, MiniTable } from "../components/SalesDoc";
+import NameCustomer from "../components/NameCustomer";
 import Icon from "../components/Icon";
 import { DocEmail } from "../components/EmailDoc";
 import { GstPanel } from "../components/GstPanel";
@@ -157,6 +158,20 @@ export function InvoiceView() {
   const [confirm, setConfirm] = useState(null);
   const [credits, setCredits] = useState(0);
   const [applyOpen, setApplyOpen] = useState(false);
+  const [changing, setChanging] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const changeCustomer = async (customer) => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/invoices/${id}/change-customer`, { customer });
+      toast(`Customer changed from ${data.was} to ${data.invoice.customerName}${data.payments ? ` (and ${data.payments} payment${data.payments > 1 ? "s" : ""})` : ""}`);
+      setChanging(false);
+      load();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
 
   const load = () =>
     api.get(`/invoices/${id}`).then((r) => {
@@ -211,6 +226,7 @@ export function InvoiceView() {
         <MoreMenu
           items={[
             canTakeMoney && credits > 0 && { label: `Apply Credits (${money(credits)})`, onClick: () => setApplyOpen(true) },
+            inv.status !== "void" && { label: "Change customer", onClick: () => setChanging(true) },
             inv.status !== "draft" && inv.status !== "void" && { label: "Create Credit Note", onClick: () => navigate(`/credit-notes/new?invoice=${id}`) },
             noMoney && inv.status !== "void" && { label: "Void", onClick: () => setConfirm("void") },
             noMoney && { label: "Delete", danger: true, onClick: () => setConfirm("delete") },
@@ -254,6 +270,15 @@ export function InvoiceView() {
         />
       )}
 
+      {changing && (
+        <NameCustomer
+          title={`Change the customer on ${inv.invoiceNumber}`}
+          intro={`Now: ${inv.customerName}. Only the name changes (and on payments made just for this invoice); amounts, ledgers, GST and the trial balance stay the same. If the sale was already filed in GSTR-1, amend it there.`}
+          busy={busy}
+          onDone={changeCustomer}
+          onClose={() => setChanging(false)}
+        />
+      )}
       <GstPanel kind="invoice" doc={inv} onChanged={load} eligible={!!inv.customerGstin || (inv.currency && inv.currency !== "INR")} />
       <div className="doc-wrap">
         <DocPaper

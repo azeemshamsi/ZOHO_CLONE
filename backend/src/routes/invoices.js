@@ -110,6 +110,20 @@ router.put(
   })
 );
 
+// Put the sale in another customer's name (e.g. a cash sale whose buyer is now known). Amounts and accounts
+// stay the same, so the trial balance doesn't change; payments made only for this invoice move with it.
+router.post(
+  "/:id/change-customer",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ customer: Joi.string().required().label("Customer") }), req.body);
+    try {
+      res.send(await require("../utils/cashSale").changeCustomer({ org: req.org, user: req.user }, req.params.id, d.customer));
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+  })
+);
+
 router.post(
   "/:id/send",
   ah(async (req, res) => {

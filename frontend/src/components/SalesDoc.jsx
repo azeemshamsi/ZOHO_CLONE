@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { STATES, GST_RATES, PAYMENT_TERMS, stateName } from "../lib/constants";
+import { STATES, GST_RATES, PAYMENT_TERMS, PAYMENT_MODES, stateName } from "../lib/constants";
+import BankAccountSelect from "./BankAccountSelect";
 import { CREDIT_REASONS, VENDOR_CREDIT_REASONS } from "../lib/docKinds";
 import { money, amount, date, isoDate, addDays, round2, inWords } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Status } from "./ui";
@@ -138,6 +139,9 @@ export function DocForm({ kind, recurring = false }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [autoNumber, setAutoNumber] = useState("");
+  // New invoice paid on the spot (a cash sale): record the receipt with it.
+  const [paidNow, setPaidNow] = useState({ on: false, mode: "cash", bankAccount: "", reference: "" });
+  const canPayNow = kind.key === "invoice" && !id && !recurring;
   const { branches, warehouses } = useLocations();
   const [currencies, setCurrencies] = useState([]);
   const [ledgers, setLedgers] = useState([]);
@@ -402,7 +406,22 @@ export function DocForm({ kind, recurring = false }) {
         return;
       }
       const { data } = id ? await api.put(`${kind.api}/${id}`, body) : await api.post(kind.api, body);
-      toast(`${kind.label} ${id ? "updated" : "created"}`);
+      if (canPayNow && paidNow.on && status !== "draft" && data.total > 0) {
+        try {
+          const { data: p } = await api.post("/payments", {
+            customer: form.customer,
+            date: form.date,
+            amount: data.total,
+            mode: paidNow.mode,
+            bankAccount: paidNow.bankAccount || "",
+            reference: paidNow.reference || "",
+            allocations: [{ invoice: data._id, amount: data.total }],
+          });
+          toast(`${kind.label} ${data.invoiceNumber} created and marked paid (${p.paymentNumber})`);
+        } catch (e) {
+          toast(`${kind.label} created, but the payment wasn't recorded: ${errMsg(e)}`, "error");
+        }
+      } else toast(`${kind.label} ${id ? "updated" : "created"}`);
       navigate(`${kind.route}/${data._id}`);
     } catch (err) {
       setError(errMsg(err));
@@ -823,6 +842,33 @@ export function DocForm({ kind, recurring = false }) {
           </div>
         </div>
 
+        {canPayNow && (
+          <div className="card" style={{ marginTop: 16, padding: 14 }}>
+            <label className="check">
+              <input type="checkbox" checked={paidNow.on} onChange={(e) => setPaidNow({ ...paidNow, on: e.target.checked })} /> Payment received now (cash sale / paid on the spot)
+            </label>
+            {paidNow.on && (
+              <div className="row-3" style={{ marginTop: 10 }}>
+                <Field label="Mode">
+                  <select value={paidNow.mode} onChange={(e) => setPaidNow({ ...paidNow, mode: e.target.value })}>
+                    {PAYMENT_MODES.map(([v, l]) => (
+                      <option key={v} value={v}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <BankAccountSelect label="Received In" value={paidNow.bankAccount} mode={paidNow.mode} onChange={(v) => setPaidNow({ ...paidNow, bankAccount: v })} />
+                <Field label="Reference#">
+                  <input value={paidNow.reference} onChange={(e) => setPaidNow({ ...paidNow, reference: e.target.value })} />
+                </Field>
+                <p className="muted small" style={{ gridColumn: "1 / -1", margin: 0 }}>
+                  The full total ({amount(totals.total)}) is recorded as received against this invoice. For a walk-in buyer, pick a customer named "Cash" — you can change the customer later from the invoice's ⋯ menu.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
         {error && <div className="alert alert-error">{error}</div>}
         <div className="form-footer sticky-footer">
           {isDraft ? (

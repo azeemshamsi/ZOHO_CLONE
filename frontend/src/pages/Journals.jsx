@@ -6,6 +6,7 @@ import { money, amount, date, isoDate, round2 } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, toast, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
 import { useLocations } from "../lib/locations";
+import NameCustomer from "../components/NameCustomer";
 import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
 
 export function JournalList() {
@@ -265,9 +266,24 @@ export function JournalView() {
   const navigate = useNavigate();
   const [j, setJ] = useState(null);
   const [confirm, setConfirm] = useState(false);
+  const [sale, setSale] = useState(null); // cash sale from Tally that can be given a customer
+  const [naming, setNaming] = useState(false);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     api.get(`/journals/${id}`).then((r) => setJ(r.data));
+    api.get(`/journals/${id}/cash-sale`).then((r) => setSale(r.data.ok ? r.data : null)).catch(() => setSale(null));
   }, [id]);
+  const toInvoice = async (customer, placeOfSupply) => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/journals/${id}/to-invoice`, { customer, placeOfSupply });
+      toast(`${data.invoice.invoiceNumber} is now an invoice to ${data.invoice.customerName}, paid in cash. Trial balance unchanged.`);
+      navigate(`/invoices/${data.invoice._id}`);
+    } catch (e) {
+      toast(errMsg(e), "error");
+      setBusy(false);
+    }
+  };
   if (!j) return <Spinner />;
   return (
     <>
@@ -282,6 +298,27 @@ export function JournalView() {
           <Icon name="trash" />
         </button>
       </PageHeader>
+      {sale && (
+        <div className="banner">
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <strong>Cash sale of {money(sale.total)}</strong> (received in {sale.cash.name}). Know who bought it? Name the customer and it becomes invoice {j.number} to them with a cash
+            receipt; the accounts and the trial balance stay exactly the same.
+          </div>
+          <button className="btn btn-primary" onClick={() => setNaming(true)}>
+            Name the customer
+          </button>
+        </div>
+      )}
+      {naming && (
+        <NameCustomer
+          title={`Name the customer for ${j.number}`}
+          intro={`Creates invoice ${j.number} dated ${date(j.date)} for ${money(sale.total)} with the same sales ledger and GST, marked paid in ${sale.cash.name}, and removes this journal. If anything would post differently, nothing is changed.`}
+          needState={sale.interState}
+          busy={busy}
+          onDone={toInvoice}
+          onClose={() => setNaming(false)}
+        />
+      )}
       <div className="card">
         <dl className="details">
           <dt>Reference#</dt>

@@ -115,6 +115,28 @@ router.put(
   })
 );
 
+// Tally cash sale (Dr Cash, Cr Sales, Cr GST) → invoice to the customer + payment received in cash.
+router.get(
+  "/:id/cash-sale",
+  ah(async (req, res) => {
+    const j = await Journal.findOne({ _id: req.params.id, organization: req.org });
+    if (!j) throw new HttpError(404, "Journal not found");
+    res.send(await require("../utils/cashSale").analyse(req.org, j));
+  })
+);
+router.post(
+  "/:id/to-invoice",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ customer: Joi.string().required().label("Customer"), placeOfSupply: Joi.string().allow("") }), req.body);
+    try {
+      const r = await require("../utils/cashSale").convert({ org: req.org, user: req.user }, req.params.id, d.customer, { placeOfSupply: d.placeOfSupply });
+      res.send({ invoice: r.invoice._id, invoiceNumber: r.invoice.invoiceNumber, payment: r.payment._id });
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+  })
+);
+
 router.delete(
   "/:id",
   ah(async (req, res) => {

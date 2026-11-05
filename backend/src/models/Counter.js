@@ -13,7 +13,7 @@ const Counter = mongoose.model("Counter", counterSchema);
 // Where each series' numbers live, so a new number continues after the highest one already used
 // (including vouchers imported from Tally or entered by hand).
 const SOURCES = {
-  invoice: ["Invoice", "invoiceNumber"],
+  invoice: [["Invoice", "invoiceNumber"], ["Journal", "number"]], // Tally cash sales are journals in the invoice series
   creditNote: ["CreditNote", "number"],
   quote: ["Quote", "number"],
   salesOrder: ["SalesOrder", "number"],
@@ -41,10 +41,12 @@ function seqOf(number, prefix) {
 async function highestUsed(organization, key, prefix) {
   const src = SOURCES[String(key).split(":")[0]];
   if (!src) return 0;
-  const Model = mongoose.models[src[0]] || require(`./${src[0]}`);
-  const docs = await Model.find({ organization }, { [src[1]]: 1 }).lean();
   let max = 0;
-  for (const d of docs) max = Math.max(max, seqOf(d[src[1]], prefix));
+  for (const [model, field] of Array.isArray(src[0]) ? src : [src]) {
+    const Model = mongoose.models[model] || require(`./${model}`);
+    const docs = await Model.find({ organization }, { [field]: 1 }).lean();
+    for (const d of docs) max = Math.max(max, seqOf(d[field], prefix));
+  }
   return max;
 }
 
