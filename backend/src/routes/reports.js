@@ -37,6 +37,21 @@ function profitAndLoss(accounts, mv) {
   return { operatingIncome, cogs, grossProfit, operatingExpense, operatingProfit, otherIncome, otherExpense, netProfit };
 }
 
+// Net profit for a range as the P&L report shows it (Tally view: with opening and closing stock).
+function periodProfit(tally, accounts, entries, from, to) {
+  if (!tally) return profitAndLoss(accounts, movements(entries, { from, to })).netProfit;
+  const mv = movements(TV.tallyEntries(entries, accounts), { from, to });
+  const opening = round2((from ? TV.stockValue(entries, new Date(from.getTime() - 1)) : 0) + naturalBalance(TV.OPENING_STOCK, mv[TV.OPENING_STOCK.code]));
+  const closing = TV.stockValue(entries, to);
+  return round2(profitAndLoss(TV.tallyAccounts(accounts), mv).netProfit - opening + closing);
+}
+// Optional "from" for as-at reports (Tally's Alt+F2 period): start of that day.
+const periodFrom = (q) => {
+  if (!q.from) return null;
+  const d = new Date(`${q.from}T00:00:00.000Z`);
+  return isNaN(d) ? null : d;
+};
+
 router.get(
   "/profit-and-loss",
   ah(async (req, res) => {
@@ -74,11 +89,15 @@ router.get(
     const currentLiabilities = section(accounts, mvAll, ["Accounts Payable", "Other Current Liability"]);
     const longTermLiabilities = section(accounts, mvAll, ["Long Term Liability"]);
     const equity = section(accounts, mvAll, ["Equity"]);
-    const priorEnd = new Date(fy.from.getTime() - 1);
-    const retained = profitAndLoss(accounts, movements(entries, { to: priorEnd })).netProfit;
-    const currentYear = profitAndLoss(accounts, movements(entries, { from: fy.from, to })).netProfit;
-    if (retained) equity.rows.push({ code: "_retained", name: "Retained Earnings", amount: retained });
-    if (currentYear) equity.rows.push({ code: "_current", name: "Current Year Earnings", amount: currentYear });
+    // Period (Alt+F2 From–To): profit before From as the P&L opening, and the profit for the period, as in Tally.
+    const pFrom = periodFrom(req.query);
+    const start = pFrom && pFrom <= to ? pFrom : fy.from;
+    const priorEnd = new Date(start.getTime() - 1);
+    const tallyP = !!pFrom && isTally(req); // without a From, exactly as before
+    const retained = periodProfit(tallyP, accounts, entries, null, priorEnd);
+    const currentYear = periodProfit(tallyP, accounts, entries, start, to);
+    if (retained) equity.rows.push({ code: "_retained", name: pFrom ? "Profit & Loss A/c (opening)" : "Retained Earnings", amount: retained });
+    if (currentYear) equity.rows.push({ code: "_current", name: pFrom ? "Profit for the period" : "Current Year Earnings", amount: currentYear });
     // Tally view: stock on hand is Closing Stock.
     if (isTally(req)) currentAssets.rows = currentAssets.rows.map((r) => (r.code === "inventory" ? { ...r, name: "Closing Stock" } : r));
     equity.total = sum(equity.rows, (r) => r.amount);
@@ -86,6 +105,7 @@ router.get(
     const totalLiabilities = round2(currentLiabilities.total + longTermLiabilities.total);
     const totalLiabilitiesAndEquity = round2(totalLiabilities + equity.total);
     res.send({
+      from: pFrom && pFrom <= to ? pFrom : undefined,
       to,
       view: isTally(req) ? "tally" : "live",
       currentAssets,
@@ -110,15 +130,29 @@ router.get(
     const accounts = isTally(req) ? TV.tallyAccounts(accounts0) : accounts0;
     const entries = isTally(req) ? TV.tallyEntries(entries0, accounts0) : entries0;
     const mv = movements(entries);
+    // Period (Alt+F2 From–To), as Tally: income and expenses for the period only, earlier profit in one
+    // "Profit & Loss A/c" line; balance-sheet accounts as at To. Tally view: Opening Stock as at From.
+    const pFrom = periodFrom(req.query);
+    const period = pFrom && pFrom <= to;
+    const mvP = period ? movements(entries, { from: pFrom, to }) : null;
+    const plType = (a) => a.type === "income" || a.type === "expense";
     const rows = accounts
       .map((a) => {
-        const m = mv[a.code] || { debit: 0, credit: 0 };
+        let m = (period && plType(a) ? mvP[a.code] : mv[a.code]) || { debit: 0, credit: 0 };
+        if (period && isTally(req) && a.code === TV.OPENING_STOCK.code) {
+          const at = round2(TV.stockValue(entries0, new Date(pFrom.getTime() - 1)) + naturalBalance(TV.OPENING_STOCK, mvP[a.code]));
+          m = { debit: at, credit: 0 };
+        }
         const net = round2(m.debit - m.credit);
         return { code: a.code, name: a.name, group: a.group, type: a.type, debit: net > 0 ? net : 0, credit: net < 0 ? -net : 0 };
       })
       .filter((r) => r.debit || r.credit);
+    if (period) {
+      const prior = periodProfit(isTally(req), accounts0, entries0, null, new Date(pFrom.getTime() - 1));
+      if (prior) rows.push({ code: "_pl_opening", name: "Profit & Loss A/c", group: "Equity", type: "equity", debit: prior < 0 ? -prior : 0, credit: prior > 0 ? prior : 0 });
+    }
     const closingStock = isTally(req) ? TV.stockValue(entries0, to) : undefined;
-    res.send({ to, view: isTally(req) ? "tally" : "live", closingStock, rows, totalDebit: sum(rows, (r) => r.debit), totalCredit: sum(rows, (r) => r.credit) });
+    res.send({ from: period ? pFrom : undefined, to, view: isTally(req) ? "tally" : "live", closingStock, rows, totalDebit: sum(rows, (r) => r.debit), totalCredit: sum(rows, (r) => r.credit) });
   })
 );
 

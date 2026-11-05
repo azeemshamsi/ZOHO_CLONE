@@ -68,7 +68,7 @@ function ChangePeriod({ from, to, single, onApply, onClose }) {
         </label>
       </div>
       {f.from && f.to && f.from > f.to && <p className="text-red small">From must be on or before To</p>}
-      {single && <p className="muted small">This report is drawn as at the To date, as in Tally.</p>}
+      {single && <p className="muted small">Balances as at the To date; income and profit for From–To, as in Tally.</p>}
     </Modal>
   );
 }
@@ -121,19 +121,19 @@ const fyStart = (d) => {
   return `${y}-04-01`;
 };
 
-function AsOfPicker({ value, onChange }) {
+function AsOfPicker({ value, from, onChange }) {
   const [changing, setChanging] = usePeriodKey();
   return (
     <div className="period" data-period>
       {changing && (
         <ChangePeriod
           single
-          from={fyStart(value)}
+          from={from || fyStart(value)}
           to={value}
           onClose={() => setChanging(false)}
           onApply={(r) => {
             setChanging(false);
-            onChange(r.to);
+            onChange(r.to, r.from);
           }}
         />
       )}
@@ -333,6 +333,8 @@ export function ReportPage() {
   const { organization } = useAuth();
   const [range, setRange] = useState(() => ({ key: meta?.period || "this_fy", ...periodRange(meta?.period || "this_fy") }));
   const [asOf, setAsOf] = useState(isoDate());
+  const [asOfFrom, setAsOfFrom] = useState(""); // Alt+F2 period on as-at reports (Balance Sheet, Trial Balance)
+  const periodOk = ["balance-sheet", "trial-balance"].includes(key) && asOfFrom && asOfFrom <= asOf;
   const { branches } = useLocations();
   const [branch, setBranch] = useState("");
   const [data, setData] = useState(null);
@@ -366,17 +368,17 @@ export function ReportPage() {
     if (!meta) return;
     setData(null);
     setError("");
-    const params = meta.mode === "range" ? { from: range.from, to: range.to } : meta.mode === "asof" ? { to: asOf } : {};
+    const params = meta.mode === "range" ? { from: range.from, to: range.to } : meta.mode === "asof" ? { to: asOf, ...(periodOk ? { from: asOfFrom } : {}) } : {};
     if (branch) params.branch = branch;
     if (hasView && view === "tally") params.view = "tally";
     api
       .get(`/reports/${key}`, { params })
       .then((r) => setData(r.data))
       .catch((e) => setError(errMsg(e)));
-  }, [key, meta, range.from, range.to, asOf, branch, view, hasView]);
+  }, [key, meta, range.from, range.to, asOf, asOfFrom, branch, view, hasView]);
 
   if (!meta) return <p>Report not found.</p>;
-  const subtitle = meta.mode === "range" ? fmtRange(range.from, range.to) : meta.mode === "asof" ? `As of ${date(asOf)}` : `As of ${date(new Date())}`;
+  const subtitle = meta.mode === "range" ? fmtRange(range.from, range.to) : meta.mode === "asof" ? (periodOk ? `${fmtRange(asOfFrom, asOf)}${key === "balance-sheet" ? ` · as at ${date(asOf)}` : ""}` : `As of ${date(asOf)}`) : `As of ${date(new Date())}`;
   const Body = BODIES[key] || GenericReport;
 
   return (
@@ -395,7 +397,16 @@ export function ReportPage() {
           </div>
         )}
         {meta.mode === "range" && <PeriodPicker value={range} onChange={setRange} />}
-        {meta.mode === "asof" && <AsOfPicker value={asOf} onChange={setAsOf} />}
+        {meta.mode === "asof" && (
+          <AsOfPicker
+            value={asOf}
+            from={asOfFrom}
+            onChange={(to, from) => {
+              setAsOf(to);
+              setAsOfFrom(from === undefined ? "" : from);
+            }}
+          />
+        )}
         {branches.length > 0 && (
           <select className="select-inline" value={branch} onChange={(e) => setBranch(e.target.value)} title="Branch">
             <option value="">All Branches</option>
