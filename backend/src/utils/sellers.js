@@ -265,7 +265,7 @@ async function penaltyAccount(orgId) {
  * Purchase orders for one month: per seller and company, the lines of orders delivered that month and not yet on a
  * PO, at the seller's rate; pending penalties up to the month end are deducted. Safe to run again (skips what's done).
  */
-async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false } = {}) {
+async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, createdBefore } = {}) {
   const ShopifyOrder = require("../models/ShopifyOrder");
   const SellerPenalty = require("../models/SellerPenalty");
   const Organization = require("../models/Organization");
@@ -273,7 +273,7 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false } = 
   const { call } = require("./import/commit");
   const { computeTotals } = require("./gst");
   const { from, to, label } = monthRange(month);
-  const sellers = await Seller.find({ organization: storeOrg, ...(sellerId ? { _id: sellerId } : { active: true }) });
+  const sellers = (await Seller.find({ organization: storeOrg, ...(sellerId ? { _id: sellerId } : { active: true }) })).filter((x) => !createdBefore || x.createdAt < createdBefore);
   const results = [];
   for (const seller of sellers) {
     const orders = (await ShopifyOrder.find({ organization: storeOrg, sellers: seller._id, status: "delivered" }).lean()).filter((o) => {
@@ -380,7 +380,9 @@ async function monthlyTick() {
     try {
       const Membership = require("../models/Membership");
       const m = await Membership.findOne({ organization: org, role: "admin", status: "active" }).sort({ createdAt: 1 }).populate("user");
-      const results = await runMonthly(org, month, m?.user);
+      // Only sellers that were set up before this month's run day: one added later is run by hand (Store → Sellers).
+      const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 5) - IST);
+      const results = await runMonthly(org, month, m?.user, { createdBefore: cutoff });
       await runs.updateOne({ _id: id }, { $set: { at: new Date(), results } });
       console.log(`Seller purchase orders ${month} (org ${org}): ${results.filter((r) => r.purchaseOrder).length} created`);
     } catch (e) {
