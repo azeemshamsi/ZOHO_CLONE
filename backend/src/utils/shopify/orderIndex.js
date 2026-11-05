@@ -5,12 +5,12 @@
  */
 const ShopifyOrder = require("../../models/ShopifyOrder");
 
-const FIELDS = { name: 1, orderNumber: 1, status: 1, orderDate: 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, invoice: 1, invoiceNumber: 1, tags: 1, remarks: 1, updatedAt: 1, customer: 1, "shippingAddress.name": 1, "shippingAddress.phone": 1, "shippingAddress.zip": 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shipment.awb": 1, "shipment.courierName": 1, "shipment.account": 1, "shopifyFulfillments.number": 1, "lines.sku": 1, "lines.title": 1, "lines.variantTitle": 1 };
+const FIELDS = { name: 1, orderNumber: 1, status: 1, orderDate: 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, invoice: 1, invoiceNumber: 1, tags: 1, remarks: 1, updatedAt: 1, customer: 1, "shippingAddress.name": 1, "shippingAddress.phone": 1, "shippingAddress.zip": 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shipment.awb": 1, "shipment.courierName": 1, "shipment.account": 1, "shopifyFulfillments.number": 1, "lines.sku": 1, "lines.title": 1, "lines.variantTitle": 1, "lines.vendor": 1, sellers: 1 };
 const cache = new Map(); // org → { stamp, entries, building }
 
 function entryOf(o) {
   const phones = [o.customer?.phone, o.shippingAddress?.phone].map((p) => String(p || "").replace(/\D/g, ""));
-  const hay = [o.name, o.customer?.name, o.customer?.email, o.customer?.phone, o.shippingAddress?.name, o.shippingAddress?.zip, o.shippingAddress?.city, o.shipment?.awb, o.shipment?.courierName, o.invoiceNumber, o.remarks, ...phones, ...(o.shopifyFulfillments || []).map((x) => x.number), ...(o.lines || []).flatMap((l) => [l.sku, l.title, l.variantTitle]), ...(o.tags || [])]
+  const hay = [o.name, o.customer?.name, o.customer?.email, o.customer?.phone, o.shippingAddress?.name, o.shippingAddress?.zip, o.shippingAddress?.city, o.shipment?.awb, o.shipment?.courierName, o.invoiceNumber, o.remarks, ...phones, ...(o.shopifyFulfillments || []).map((x) => x.number), ...(o.lines || []).flatMap((l) => [l.sku, l.title, l.variantTitle, l.vendor]), ...(o.tags || [])]
     .filter(Boolean)
     .join(" | ")
     .toLowerCase();
@@ -25,6 +25,7 @@ function entryOf(o) {
     account: o.shipment?.account ? String(o.shipment.account) : "",
     invoiced: !!o.invoice,
     tags: o.tags || [],
+    sellers: (o.sellers || []).map(String),
     total: Number(o.total) || 0,
     hay,
   };
@@ -74,6 +75,7 @@ function filterEntries(entries, q) {
       (q.invoiced !== "yes" || e.invoiced) &&
       (q.invoiced !== "no" || !e.invoiced) &&
       (!q.tag || e.tags.includes(q.tag)) &&
+      (!q.seller || (q.seller === "own" ? !e.sellers.length : e.sellers.includes(String(q.seller)))) &&
       (!q.min || e.total >= Number(q.min)) &&
       (!q.max || e.total <= Number(q.max)) &&
       words.every((w) => e.hay.includes(w) || (/^\+?\d{10,}$/.test(w) && e.hay.includes(w.replace(/\D/g, "").slice(-10))))

@@ -11,6 +11,7 @@ const { ah, validate, HttpError } = require("../utils/http");
 
 // A role key is a built-in role or "custom:<id>" of a role in this company.
 async function checkRole(org, role) {
+  if (role === "seller") throw new HttpError(400, "Seller logins are added from Store → Sellers");
   if (ROLES[role]) return role;
   if (/^custom:[a-f0-9]{24}$/.test(role) && (await Role.exists({ _id: role.slice(7), organization: org }))) return role;
   throw new HttpError(400, "Choose a valid role");
@@ -46,7 +47,7 @@ router.get(
   "/roles",
   ah(async (req, res) => {
     const custom = await Role.find({ organization: req.org }).sort({ name: 1 }).lean();
-    res.send([...Object.entries(ROLES).map(([key, r]) => ({ key, ...r, builtIn: true })), ...custom.map((r) => ({ key: `custom:${r._id}`, _id: r._id, label: r.name, desc: r.desc, perms: r.perms, home: r.home, builtIn: false }))]);
+    res.send([...Object.entries(ROLES).filter(([, r]) => !r.hidden).map(([key, r]) => ({ key, ...r, builtIn: true })), ...custom.map((r) => ({ key: `custom:${r._id}`, _id: r._id, label: r.name, desc: r.desc, perms: r.perms, home: r.home, builtIn: false }))]);
   })
 );
 

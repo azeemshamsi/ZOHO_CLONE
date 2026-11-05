@@ -195,7 +195,7 @@ router.post(
 );
 
 /* ---------------- orders ---------------- */
-const LIST_FIELDS = { "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 };
+const LIST_FIELDS = { "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.vendor": 1, sellers: 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 };
 // The order list: filters, counts, sort and search from the in-memory index; only the page shown is read.
 router.get(
   "/orders",
@@ -317,7 +317,8 @@ const pkgJoi = Joi.object({ packageType: Joi.string().allow("", null), weight: J
 router.post(
   "/orders/quotes",
   ah(async (req, res) => {
-    const d = validate(Joi.object({ ids: Joi.array().items(Joi.string()).min(1).max(50).required(), pkg: pkgJoi }), req.body);
+    const d = validate(Joi.object({ ids: Joi.array().items(Joi.string()).min(1).max(50).required(), pkg: pkgJoi, pickupFrom: Joi.string().allow("").default("") }), req.body);
+    const sellers = require("../utils/sellers");
     const [orders, accs, org] = await Promise.all([ordersFor(req, d.ids), CourierAccount.find({ organization: req.storeOrg, active: true }).sort({ isDefault: -1, name: 1 }), Organization.findById(req.org)]);
     // Log in once up front, so parallel checks share the session.
     for (const a of accs) if (CARRIERS[a.carrier].token) await CARRIERS[a.carrier].token(a).catch(() => {});
@@ -334,8 +335,17 @@ router.post(
       }
       if (!p) return { ...base, pkg: null, needsPackage: true };
       const s = shipmentFrom(o, org, p, allItems);
-      const rows = sortQuotes(await Promise.all(accs.map((a) => quoteAccount(a, s))));
-      return { ...base, pkg: p, cod: s.cod, codAmount: s.codAmount, rows };
+      // Rates from the seller's pickup pincode for a marketplace seller's order.
+      let seller = null;
+      let pickupNote = "";
+      try {
+        seller = await sellers.pickupFor(req.storeOrg, o, d.ids.length === 1 ? d.pickupFrom : "");
+      } catch (e) {
+        pickupNote = e.message;
+      }
+      const rows = sortQuotes(await Promise.all(accs.map((a) => quoteAccount(sellers.withPickup(a, seller), s))));
+      const choices = [...new Map(o.lines.filter((l) => l.quantity > 0).map((l) => [l.vendor || "", l.vendor || ""])).keys()];
+      return { ...base, pkg: p, cod: s.cod, codAmount: s.codAmount, rows, pickup: seller ? { seller: String(seller._id), name: seller.name, city: seller.pickup?.city || "", pincode: seller.pickup?.pincode || "" } : { own: true }, pickupNote, vendors: choices };
     };
     for (let i = 0; i < orders.length; i += 5) out.push(...(await Promise.all(orders.slice(i, i + 5).map(one))));
     // Several orders: per courier, how many it serves and the total.
@@ -370,6 +380,7 @@ router.post(
         manual: Joi.object({ awb: Joi.string().allow(""), courierName: Joi.string().allow(""), courierId: Joi.string().allow("") }).default({}),
         invoiceFirst: Joi.boolean().default(false),
         skipCheck: Joi.boolean().default(false),
+        pickupFrom: Joi.string().allow("").default(""), // "" automatic | "own" | "seller:<id>"
       }),
       req.body
     );
@@ -378,7 +389,7 @@ router.post(
     for (const o of await ordersFor(req, d.ids)) {
       try {
         if (d.invoiceFirst && !o.invoice && store) await invoiceOrder(ctxOf(req), o, store).catch(() => {});
-        const r = await bookOrder(ctxOf(req), o, { accountId: d.account, pkg: d.pkg, manual: d.ids.length === 1 ? d.manual : {}, skipCheck: d.skipCheck });
+        const r = await bookOrder(ctxOf(req), o, { accountId: d.account, pkg: d.pkg, manual: d.ids.length === 1 ? d.manual : {}, skipCheck: d.skipCheck, pickupFrom: d.ids.length === 1 ? d.pickupFrom : "" });
         results.push({ id: o._id, name: o.name, ok: true, ...r });
       } catch (e) {
         await ShopifyOrder.updateOne({ _id: o._id }, { "shipment.error": e.message }).catch(() => {});
@@ -485,29 +496,7 @@ router.get(
     const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg }).select("+shipment.labelPdf");
     if (!o) throw new HttpError(404, "Order not found");
     if (!o.shipment?.awb) throw new HttpError(400, "Book a courier first");
-    if (req.query.own !== "1") {
-      if (o.shipment.labelPdf?.length) {
-        res.setHeader("Content-Type", "application/pdf");
-        return res.send(o.shipment.labelPdf);
-      }
-      const acc = o.shipment.account ? await CourierAccount.findById(o.shipment.account) : null;
-      if (acc) {
-        try {
-          const l = await CARRIERS[acc.carrier].label(acc, o.shipment);
-          if (l?.url) return res.send({ url: l.url });
-          if (l?.pdf) {
-            res.setHeader("Content-Type", "application/pdf");
-            return res.send(l.pdf);
-          }
-        } catch {}
-      }
-      if (o.shipment.labelUrl) return res.send({ url: o.shipment.labelUrl });
-    }
-    const org = await Organization.findById(req.org);
-    const accs = new Map((await CourierAccount.find({ organization: req.storeOrg })).map((a) => [String(a._id), a]));
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="label-${o.name.replace("#", "")}.pdf"`);
-    res.send(await labelsPdf([o], org, accs));
+    await require("../utils/shopify/labelOut").sendLabel(res, o, { org: req.org, storeOrg: req.storeOrg, own: req.query.own === "1" });
   })
 );
 

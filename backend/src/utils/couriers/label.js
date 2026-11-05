@@ -15,7 +15,7 @@ const barcode = (text, height = 12) => bwipjs.toBuffer({ bcid: "code128", text: 
 async function drawLabel(doc, o, org, acc) {
   const sh = o.shipment || {};
   const a = o.shippingAddress || {};
-  const p = acc?.pickup || {};
+  const p = sh.pickup?.address ? sh.pickup : acc?.pickup || {}; // a marketplace seller's pickup when booked from there
   const L = 12;
   const W = 264;
   const line = (y) => doc.moveTo(6, y).lineTo(282, y).stroke();

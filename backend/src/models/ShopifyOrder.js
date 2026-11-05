@@ -99,9 +99,15 @@ const shopifyOrderSchema = new mongoose.Schema(
       trackStatus: String,
       trackedAt: Date,
       events: [eventSchema],
+      pickup: { type: mongoose.Schema.Types.Mixed }, // where it was picked up from (a marketplace seller's address)
+      seller: { type: mongoose.Schema.Types.ObjectId, ref: "Seller" },
       shopifyFulfilled: Boolean,
       error: String,
     },
+    deliveredAt: Date, // when it was delivered (for sellers' monthly purchase orders)
+    // Marketplace sellers whose products are on this order (from each line's Shopify Vendor) and what was settled.
+    sellers: { type: [mongoose.Schema.Types.ObjectId], default: [] },
+    sellerSettled: [{ _id: false, seller: mongoose.Schema.Types.ObjectId, purchaseOrder: mongoose.Schema.Types.ObjectId, number: String, organization: mongoose.Schema.Types.ObjectId, amount: Number, at: Date }],
     invoice: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },
     invoiceNumber: String,
     invoiceOrg: { type: mongoose.Schema.Types.ObjectId, ref: "Organization" }, // the company the invoice is in
@@ -117,5 +123,17 @@ shopifyOrderSchema.index({ organization: 1, "shipment.awb": 1 });
 shopifyOrderSchema.index({ organization: 1, name: 1 });
 shopifyOrderSchema.index({ organization: 1, orderNumber: 1 });
 shopifyOrderSchema.index({ organization: 1, updatedAt: -1 });
+shopifyOrderSchema.index({ organization: 1, sellers: 1, orderDate: -1 });
+
+// Keep `sellers` in step with the lines' Shopify Vendor, and note when an order is delivered.
+shopifyOrderSchema.pre("save", async function () {
+  const { sellersOfLines } = require("../utils/sellers");
+  const ids = await sellersOfLines(this.organization, this.lines || []);
+  if (ids.map(String).sort().join() !== (this.sellers || []).map(String).sort().join()) this.sellers = ids;
+  if (this.status === "delivered" && !this.deliveredAt) {
+    const ev = (this.shipment?.events || []).filter((e) => /deliver/i.test(e.status || "") && !/undeliver|not deliver/i.test(e.status || "") && e.at && !isNaN(e.at)).sort((a, b) => b.at - a.at)[0];
+    this.deliveredAt = ev?.at || new Date();
+  }
+});
 
 module.exports = mongoose.model("ShopifyOrder", shopifyOrderSchema);

@@ -117,6 +117,8 @@ async function itemFor(orgId, line, store, cache = new Map()) {
   }
   let created = false;
   if (!item) {
+    // A marketplace seller's product: invoiced to the customer but never part of our stock.
+    const seller = store?.organization ? require("../sellers").sellerOfLine(await require("../sellers").brandMap(store.organization), line) : null;
     const g = checkGst(line, store);
     const incl = line.unitPrice || 0;
     item = await Item.create({
@@ -129,7 +131,8 @@ async function itemFor(orgId, line, store, cache = new Map()) {
       taxRate: g.taxRate,
       rate: Math.round((incl / (1 + g.taxRate / 100)) * 100) / 100,
       description: [line.productType, g.category && g.category !== line.productType ? g.category : ""].filter(Boolean).join(" · "),
-      trackInventory: store.invoice?.trackInventory !== false,
+      trackInventory: seller ? false : store.invoice?.trackInventory !== false,
+      ...(seller ? { seller: seller._id, shopifySync: false } : {}),
       category: g.category || line.productType || "",
       image: line.image || "",
       shopifyVariantId: line.variantId || "",

@@ -59,6 +59,7 @@ const NAV = [
       { to: "/returns-scan", label: "Scan Returns", mod: "store_returns" },
       { to: "/package-types", label: "Package Types", mod: ["store_shipping", "store_settings", "store_orders"] },
       { to: "/shipping-calculator", label: "Shipping Calculator", mod: ["store_shipping", "store_settings", "store_orders"] },
+      { to: "/sellers", label: "Sellers", mod: ["store_settings", "store_orders"] },
       { to: "/shopify-settings", label: "Settings", mod: "store_settings" },
     ],
   },
@@ -112,6 +113,7 @@ const PATH_MODULES = [
   ["/returns-scan", "store_returns"],
   ["/package-types", ["store_shipping", "store_settings", "store_orders"]],
   ["/shipping-calculator", ["store_shipping", "store_settings", "store_orders"]],
+  ["/sellers", ["store_settings", "store_orders", "store_shipping"]],
   ["/inventory", "inventory"],
   ["/gst", "gst"],
   ["/quotes", "sales"],
@@ -203,8 +205,11 @@ export default function Layout() {
   const location = useLocation();
   const mod = location.pathname === "/" ? HOME_MODS : moduleOf(location.pathname);
   const isSuper = SUPER_PATHS.some((p) => location.pathname.startsWith(p));
-  const level = isSuper ? (user?.superadmin ? "full" : "none") : mod ? levelOf(user, mod) : "full";
-  const nav = NAV.filter((n) => (n.to === "/" ? can(user, HOME_MODS) : !n.mod || can(user, n.mod)));
+  const isSeller = user?.role === "seller";
+  const sellerPage = location.pathname === "/seller" || location.pathname.startsWith("/seller/");
+  const level = sellerPage ? (isSeller ? "full" : "none") : isSuper ? (user?.superadmin ? "full" : "none") : mod ? levelOf(user, mod) : "full";
+  // A marketplace seller sees only their dashboard.
+  const nav = isSeller ? [{ to: "/seller", label: "My orders & stock", icon: "bag", end: true }] : NAV.filter((n) => (n.to === "/" ? can(user, HOME_MODS) : !n.mod || can(user, n.mod)));
   // Roles without the dashboard (e.g. Returns Desk) go straight to their page.
   if (location.pathname === "/" && level === "none" && homeFor(user) !== "/") return <Navigate to={homeFor(user)} replace />;
 

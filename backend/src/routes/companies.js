@@ -21,6 +21,7 @@ router.post(
   "/",
   ah(async (req, res) => {
     const d = validate(Joi.object({ name: Joi.string().trim().min(2).max(150).required().label("Company name"), state: Joi.string().required().label("State"), gstin: Joi.string().allow("").uppercase().pattern(/^$|^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/).message("GSTIN doesn't look right") }), req.body);
+    if (req.membership?.role === "seller") throw new HttpError(403, "Sellers can't create companies");
     // A new company belongs to the same subscription as the company the user is in, within its plan's limit.
     await require("../utils/subscription").checkLimit(req.org, "companies");
     const cur = await Organization.findById(req.org, { subscriber: 1 }).lean();

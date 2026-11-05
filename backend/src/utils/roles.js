@@ -27,6 +27,7 @@ const ROLES = {
   sales: { label: "Sales Staff", desc: "Customers, quotes, sales orders, invoices, payments and store orders.", perms: { ...all("none"), sales: "full", items: "view", store_orders: "full" } },
   warehouse: { label: "Warehouse", desc: "Store orders, shipping, returns and inventory. No accounts.", perms: { ...all("none"), items: "view", inventory: "full", store_orders: "full", store_shipping: "full", store_returns: "full" } },
   returns: { label: "Returns Desk", desc: "Only scans and closes returned parcels.", perms: { ...all("none"), store_returns: "full" }, home: "/returns-scan" },
+  seller: { label: "Seller", desc: "A marketplace seller: only their own orders, labels, stock and purchase orders (Store → Sellers).", perms: all("none"), home: "/seller", hidden: true },
   viewer: { label: "View Only", desc: "Can see everything except settings, can't change anything.", perms: { ...all("view"), settings: "none", store_settings: "none" } },
 };
 

@@ -24,11 +24,20 @@ async function fulfillInShopify(store, order, sh) {
   return true;
 }
 
-async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {}, skipCheck = false }) {
+async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {}, skipCheck = false, pickupFrom = "" }) {
   if (order.status === "cancelled") throw new Error("Order is cancelled");
   if (order.shipment?.awb && order.status !== "new" && order.status !== "packed") throw new Error(`Already booked: ${order.shipment.courierName} ${order.shipment.awb}`);
-  const acc = await CourierAccount.findOne({ _id: accountId, organization: ctx.storeOrg || ctx.org, active: true });
-  if (!acc) throw new Error("Choose a courier");
+  const realAcc = await CourierAccount.findOne({ _id: accountId, organization: ctx.storeOrg || ctx.org, active: true });
+  if (!realAcc) throw new Error("Choose a courier");
+  // Marketplace seller's products: picked up from the seller's address (registered with the courier if it keeps pickup locations).
+  const sellers = require("../sellers");
+  const seller = await sellers.pickupFor(ctx.storeOrg || ctx.org, order, pickupFrom);
+  if (seller) {
+    const miss = sellers.pickupProblems(seller);
+    if (miss.length) throw new Error(`${seller.name}'s pickup address is missing ${miss.join(", ")} (Store → Sellers)`);
+    if (["shiprocket", "delhivery"].includes(realAcc.carrier) && !(seller.couriers || {})[String(realAcc._id)]?.pickupLocation) await sellers.registerPickup(seller, realAcc);
+  }
+  const acc = sellers.withPickup(realAcc, seller);
   const store = await ShopifyStore.findOne({ organization: ctx.storeOrg || ctx.org });
   const org = await Organization.findById(ctx.org);
   // HSN and GST from the (checked) OrdexaGo items, not Shopify's.
@@ -68,6 +77,7 @@ async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {}, skipChe
     bookedAt: new Date(),
     trackStatus: "pending",
     events: [],
+    ...(seller ? { seller: seller._id, pickup: { ...acc.pickup, seller: String(seller._id), sellerName: seller.name } } : {}),
   };
   if (out.labelPdf) order.shipment.labelPdf = out.labelPdf;
   order.status = "ready_to_ship";

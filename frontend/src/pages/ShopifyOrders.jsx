@@ -33,7 +33,7 @@ const PaySplit = ({ o }) =>
       {money(o.prepaidAmount)} paid · {money(o.codAmount)} COD
     </div>
   ) : null;
-const EMPTY_FILTERS = { q: "", from: "", to: "", payment: "", financial: "", state: "", courier: "", invoiced: "", tag: "", sort: "newest" };
+const EMPTY_FILTERS = { q: "", from: "", to: "", payment: "", financial: "", state: "", courier: "", invoiced: "", tag: "", seller: "", sort: "newest" };
 
 const openPdf = async (url, body) => {
   const w = window.open("", "_blank");
@@ -272,13 +272,16 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [saved, setSaved] = useState(false);
+  const [pickupFrom, setPickupFrom] = useState(""); // "" automatic | "own" | "seller:<id>"
+  const [sellerList, setSellerList] = useState([]);
   const manualOk = ["weight", "length", "breadth", "height"].every((k) => Number(manualPkg[k]) > 0);
   const pkgBody = mode === "auto" ? {} : mode === "manual" ? (manualOk ? Object.fromEntries(Object.entries(manualPkg).map(([k, v]) => [k, Number(v)])) : null) : { packageType: mode };
-  const pkgKey = JSON.stringify(pkgBody) + refresh;
+  const pkgKey = JSON.stringify(pkgBody) + refresh + pickupFrom;
   const loadPackages = () => api.get("/shopify/package-types").then((r) => setPackages(r.data)).catch(() => {});
 
   useEffect(() => {
     loadPackages();
+    api.get("/sellers").then((r) => setSellerList(r.data.filter((x) => x.active !== false))).catch(() => {});
   }, []);
   useEffect(() => {
     if (!pkgBody || !active.length) return;
@@ -287,7 +290,7 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
     const t = setTimeout(
       () =>
         api
-          .post("/shopify/orders/quotes", { ids: ids.slice(0, 50), pkg: pkgBody })
+          .post("/shopify/orders/quotes", { ids: ids.slice(0, 50), pkg: pkgBody, pickupFrom })
           .then((r) => {
             if (!live) return;
             setQuotes(r.data);
@@ -323,7 +326,7 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
   const go = async () => {
     setBusy(true);
     try {
-      const { data } = await api.post("/shopify/orders/ship", { ids, account: pick.account, pkg: pkgBody || {}, manual: { ...manual, courierId: pick.courierId || "" }, invoiceFirst, skipCheck });
+      const { data } = await api.post("/shopify/orders/ship", { ids, account: pick.account, pkg: pkgBody || {}, manual: { ...manual, courierId: pick.courierId || "" }, invoiceFirst, skipCheck, pickupFrom });
       onDone(data.results);
     } catch (e) {
       toast(errMsg(e), "error");
@@ -407,6 +410,20 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
           )}
           {autoMissing > 0 && mode === "auto" && <p className="alert alert-warn">{autoMissing} of these orders have products without a package type — they won't be booked. Choose a package above to use it for all.</p>}
 
+          {single && order && (order.pickupNote || order.pickup?.seller || pickupFrom) && (
+            <Field label="Pickup from" hint={order.pickupNote && !pickupFrom ? order.pickupNote : order.pickup?.seller ? `Marketplace seller's address: ${[order.pickup.city, order.pickup.pincode].filter(Boolean).join(" ")}` : ""}>
+              <select value={pickupFrom} onChange={(e) => setPickupFrom(e.target.value)}>
+                <option value="">{order.pickup?.seller ? `${order.pickup.name} (seller)` : order.pickupNote ? "Choose…" : "Our address"}</option>
+                <option value="own">Our address</option>
+                {sellerList.map((x) => (
+                  <option key={x._id} value={`seller:${x._id}`}>
+                    {x.name} — {[x.pickup?.city, x.pickup?.pincode].filter(Boolean).join(" ")}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          {!single && sellerList.length > 0 && <p className="small muted" style={{ margin: 0 }}>Marketplace sellers' orders are picked up from each seller's address. Orders with products from several sellers must be booked one at a time.</p>}
           <div className="label-sm">
             Couriers {single && order ? `to ${order.pincode} ${order.city} · ${order.cod ? `COD ${money(order.codAmount)}` : "Prepaid"}` : ""} {checking && <span className="muted">· checking live…</span>}
           </div>
@@ -777,13 +794,14 @@ export function ShopifyOrders() {
   const companyName = (id) => (organizations || []).find((c) => String(c._id) === String(id))?.name || "other company";
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") || "new";
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [filters, setFilters] = useState(() => ({ ...EMPTY_FILTERS, seller: params.get("seller") || "" }));
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [store, setStore] = useState(null);
   const [couriers, setCouriers] = useState([]);
   const [facets, setFacets] = useState({ states: [], tags: [], financial: [] });
+  const [sellers, setSellers] = useState([]);
   const [sel, setSel] = useState(new Set());
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState(null);
@@ -823,6 +841,7 @@ export function ShopifyOrders() {
     loadStore();
     api.get("/shopify/couriers").then((r) => setCouriers(r.data));
     api.get("/shopify/orders/facets").then((r) => setFacets(r.data));
+    api.get("/sellers").then((r) => setSellers(r.data)).catch(() => {});
     loadReview();
     return () => clearTimeout(poll.current);
   }, []);
@@ -957,6 +976,17 @@ export function ShopifyOrders() {
             <option value="prepaid">Prepaid</option>
             <option value="partial">Partly paid</option>
           </select>
+          {sellers.length > 0 && (
+            <select value={filters.seller} onChange={setF("seller")}>
+              <option value="">All sellers</option>
+              <option value="own">Our own products</option>
+              {sellers.map((x) => (
+                <option key={x._id} value={x._id}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button className={`btn btn-sm ${showFilters || activeFilters ? "btn-active" : ""}`} onClick={() => setShowFilters(!showFilters)}>
             More filters{activeFilters ? ` (${activeFilters})` : ""}
           </button>

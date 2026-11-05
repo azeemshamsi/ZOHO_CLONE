@@ -27,6 +27,7 @@ const itemSchema = new mongoose.Schema(
     // Stock shown on Shopify but not held: made-to-order capacity. No effect on the books.
     virtualStock: { type: Number, default: 0 },
     bufferStock: { type: Number, default: 0 }, // kept back from Shopify
+    seller: { type: mongoose.Schema.Types.ObjectId, ref: "Seller" }, // a marketplace seller's product (not our stock)
     shopifySync: { type: Boolean, default: false }, // push this item's stock to Shopify (off until the user turns it on)
     shopifySyncByUser: { type: Boolean, default: false }, // the user set shopifySync themselves
     // Created from a Shopify order: the variant it came from and any GST/HSN corrections to check.

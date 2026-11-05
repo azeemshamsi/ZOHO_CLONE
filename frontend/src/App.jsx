@@ -47,6 +47,8 @@ import { BankRules } from "./pages/BankRules";
 import Settings from "./pages/Settings";
 import ComingSoon from "./pages/ComingSoon";
 import Superadmin from "./pages/Superadmin";
+import Sellers from "./pages/Sellers";
+import SellerPortal from "./pages/SellerPortal";
 
 function Private({ children }) {
   const { loading, user } = useAuth();
@@ -187,6 +189,8 @@ export default function App() {
           <Route path="settings" element={<Settings />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="superadmin" element={<Superadmin />} />
+          <Route path="sellers" element={<Sellers />} />
+          <Route path="seller" element={<SellerPortal />} />
           {SOON.map((p) => (
             <Route key={p} path={p.slice(1)} element={<ComingSoon />} />
           ))}

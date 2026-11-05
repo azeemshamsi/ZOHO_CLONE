@@ -8,6 +8,7 @@ const membershipSchema = new mongoose.Schema(
     role: { type: String, default: "admin" }, // built-in key, or "custom:<roleId>"
     status: { type: String, enum: ["active", "invited", "inactive"], default: "active" },
     invitedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    seller: { type: mongoose.Schema.Types.ObjectId, ref: "Seller" }, // role "seller": a marketplace seller's own login
   },
   { timestamps: true }
 );

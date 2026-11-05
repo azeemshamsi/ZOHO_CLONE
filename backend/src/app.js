@@ -58,6 +58,8 @@ app.use("/api/users", auth, permit("settings"), require("./routes/users"));
 app.use("/api/roles", auth, permit("settings"), require("./routes/roles"));
 app.use("/api/companies", auth, require("./routes/companies"));
 app.use("/api/superadmin", auth, require("./routes/superadmin"));
+app.use("/api/sellers", auth, permit((req) => (req.method === "GET" ? ["store_orders", "store_settings", "store_shipping"] : req.path.startsWith("/penalties") ? ["store_orders", "store_settings"] : "store_settings")), require("./routes/sellers"));
+app.use("/api/seller-portal", auth, require("./routes/sellerPortal"));
 app.use("/api/attachments", auth, require("./routes/attachments"));
 app.use("/api/bill-scan", auth, permit("purchases"), require("./routes/billScan"));
 app.use("/api/dashboard", auth, permit(["sales", "purchases", "reports", "accountant", "banking"]), require("./config/baseCurrency").inBase, require("./routes/dashboard"));
