@@ -459,7 +459,7 @@ function SellerDetail({ id, onClose, onEdit, onChanged }) {
 
           <h4 style={{ margin: "6px 0 0" }}>Purchase orders</h4>
           {!s.purchaseOrders.length ? (
-            <p className="muted small" style={{ margin: 0 }}>None yet. They're made on the 5th for the previous month's delivered orders.</p>
+            <p className="muted small" style={{ margin: 0 }}>None yet. They're made on the 8th for the previous month's delivered orders.</p>
           ) : (
             <table className="table">
               <tbody>
@@ -868,7 +868,7 @@ function MonthlyPos({ sellers }) {
     <>
       <div className="card" style={{ padding: 14, marginBottom: 12 }}>
         <p className="small" style={{ margin: "0 0 10px" }}>
-          On the <strong>5th of every month</strong> OrdexaGo creates a purchase order for each seller, for their orders <strong>delivered by the end of the previous month, at least 7 days ago, with no return or RTO since</strong>, not on an earlier PO: {`seller's rate × sale price incl. GST, before discounts`}, minus pending deductions. An order delivered in the last days of the month waits for the next PO. It's raised in the company that invoiced the orders. You can also run it here.
+          On the <strong>8th of every month</strong> OrdexaGo creates a purchase order for each seller, for their orders <strong>delivered by the end of the previous month, at least 7 days ago, with no return or RTO since</strong>, not on an earlier PO: {`seller's rate × sale price incl. GST, before discounts`}, minus pending deductions. By the 8th, even an order delivered on the 31st has had its 7 days. It's raised in the company that invoiced the orders. You can also run it here.
         </p>
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
           <Field label="Delivered up to the end of">

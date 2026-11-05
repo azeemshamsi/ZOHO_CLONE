@@ -349,7 +349,7 @@ function Pos() {
   return (
     <>
       <p className="small muted" style={{ marginTop: 0 }}>
-        On the 5th of each month a purchase order is raised for your orders delivered by the end of the previous month, at least 7 days ago and not returned. Deductions are already taken off it. Send your invoice for the PO amount; payment follows.
+        On the 8th of each month a purchase order is raised for your orders delivered by the end of the previous month, at least 7 days ago and not returned. Deductions are already taken off it. Send your invoice for the PO amount; payment follows.
       </p>
       {!list ? (
         <Spinner />

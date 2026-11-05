@@ -366,10 +366,12 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
   return results;
 }
 
-// Called hourly: on/after the 5th, make last month's purchase orders once per store.
+// Called hourly: on/after the 8th (so an order delivered on the 31st has had its 7 days), make last month's
+// purchase orders once per store.
+const RUN_DAY = 8;
 async function monthlyTick() {
   const now = new Date(Date.now() + IST);
-  if (now.getUTCDate() < 5) return;
+  if (now.getUTCDate() < RUN_DAY) return;
   const mongoose = require("mongoose");
   const runs = mongoose.connection.db.collection("seller_po_runs");
   const month = prevMonth();
@@ -382,7 +384,7 @@ async function monthlyTick() {
       const Membership = require("../models/Membership");
       const m = await Membership.findOne({ organization: org, role: "admin", status: "active" }).sort({ createdAt: 1 }).populate("user");
       // Only sellers that were set up before this month's run day: one added later is run by hand (Store → Sellers).
-      const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 5) - IST);
+      const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), RUN_DAY) - IST);
       const results = await runMonthly(org, month, m?.user, { createdBefore: cutoff });
       await runs.updateOne({ _id: id }, { $set: { at: new Date(), results } });
       console.log(`Seller purchase orders ${month} (org ${org}): ${results.filter((r) => r.purchaseOrder).length} created`);
