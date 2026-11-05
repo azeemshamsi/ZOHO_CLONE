@@ -5,15 +5,91 @@ import { useAuth } from "../lib/auth";
 import { money, date, isoDate } from "../lib/format";
 import { stateName } from "../lib/constants";
 import { PERIODS, periodRange, fmtRange, exportCsv } from "../lib/period";
-import { PageHeader, Spinner, Status } from "../components/ui";
+import { PageHeader, Spinner, Status, Modal } from "../components/ui";
 import { docLink } from "./Accounts";
 import { useLocations } from "../lib/locations";
 import Icon from "../components/Icon";
 
 /* ---------------- Period pickers ---------------- */
-export function PeriodPicker({ value, onChange }) {
+// Tally's Alt+F2 (change period): TallyKeys fires "tally:period"; the picker on the page opens this box.
+function usePeriodKey() {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const h = () => setOpen(true);
+    window.addEventListener("tally:period", h);
+    return () => window.removeEventListener("tally:period", h);
+  }, []);
+  return [open, setOpen];
+}
+function ChangePeriod({ from, to, single, onApply, onClose }) {
+  const [f, setF] = useState({ from: from || "", to: to || "" });
+  const toRef = useRef(null);
+  const apply = () => {
+    if (single ? !f.to : !f.from || !f.to || f.from > f.to) return;
+    onApply(f);
+  };
+  const keys = (next) => (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (next) next.current?.focus();
+      else apply();
+    }
+    if (e.ctrlKey && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      e.stopPropagation();
+      apply();
+    }
+  };
   return (
-    <div className="period">
+    <Modal
+      open
+      title={single ? "Change Date (Alt+F2)" : "Change Period (Alt+F2)"}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" onClick={apply}>
+            Apply
+          </button>
+        </>
+      }
+    >
+      <div className="row-2">
+        {!single && (
+          <label className="field">
+            <span className="field-label">From</span>
+            <input type="date" autoFocus value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} onKeyDown={keys(toRef)} />
+          </label>
+        )}
+        <label className="field">
+          <span className="field-label">{single ? "As of" : "To"}</span>
+          <input ref={toRef} type="date" autoFocus={single} value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} onKeyDown={keys(null)} />
+        </label>
+      </div>
+      {!single && f.from > f.to && f.to && <p className="text-red small">From must be on or before To</p>}
+    </Modal>
+  );
+}
+
+export function PeriodPicker({ value, onChange }) {
+  const [changing, setChanging] = usePeriodKey();
+  return (
+    <div className="period" data-period>
+      {changing && (
+        <ChangePeriod
+          from={value.from}
+          to={value.to}
+          onClose={() => setChanging(false)}
+          onApply={(r) => {
+            setChanging(false);
+            const preset = PERIODS.find(([k]) => k !== "custom" && periodRange(k).from === r.from && periodRange(k).to === r.to);
+            onChange(preset ? { key: preset[0], from: r.from, to: r.to } : { key: "custom", from: r.from, to: r.to });
+          }}
+        />
+      )}
       <select
         className="select-inline"
         value={value.key}
@@ -40,8 +116,20 @@ export function PeriodPicker({ value, onChange }) {
 }
 
 function AsOfPicker({ value, onChange }) {
+  const [changing, setChanging] = usePeriodKey();
   return (
-    <div className="period">
+    <div className="period" data-period>
+      {changing && (
+        <ChangePeriod
+          single
+          to={value}
+          onClose={() => setChanging(false)}
+          onApply={(r) => {
+            setChanging(false);
+            onChange(r.to);
+          }}
+        />
+      )}
       <span className="muted small">As of</span>
       <input type="date" value={value} onChange={(e) => onChange(e.target.value)} />
     </div>

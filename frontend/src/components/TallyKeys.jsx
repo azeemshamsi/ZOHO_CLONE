@@ -14,6 +14,7 @@ import api from "../lib/api";
  *  Gateway (when not typing): D Day Book · B Balance Sheet · P Profit & Loss · T Trial Balance · L Ledgers
  *  Page Up / Page Down   previous (earlier) / next (later) voucher of the same kind, on a voucher's page
  *  F2             change the date: jumps to the date field
+ *  Alt+F2         change period on reports / ledger statements (the picker opens a From–To box)
  *  Enter          next field on a form (as in Tally); Ctrl+A saves
  *  Ctrl+/         this list
  */
@@ -149,6 +150,14 @@ export default function TallyKeys({ nav = [] }) {
             .catch(() => {});
           return;
         }
+      }
+
+      // Alt+F2: change period (reports and account statements).
+      if (key === "F2" && e.altKey && !e.ctrlKey) {
+        e.preventDefault();
+        if (document.querySelector("[data-period]")) window.dispatchEvent(new Event("tally:period"));
+        else toast("Alt+F2 changes the period on reports and ledger statements");
+        return;
       }
 
       // F2: change the date.
@@ -306,6 +315,7 @@ function Help({ onClose }) {
     ...Object.entries(VOUCHERS).map(([k, [, l]]) => [k, l]),
     ["Page Up / Page Down", "Previous (earlier) / next (later) voucher, on a voucher's page"],
     ["F2", "Change the date (jumps to the date field)"],
+    ["Alt+F2", "Change period (reports, ledger statements)"],
     ["Enter", "Next field on a form; Ctrl+A saves"],
     ["Alt+C", "Create new (on a list)"],
     ["Alt+P", "Print / PDF"],
