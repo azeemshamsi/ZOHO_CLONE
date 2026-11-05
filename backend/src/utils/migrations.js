@@ -128,6 +128,24 @@ const MIGRATIONS = [
       console.log(`Subscribers: ${n} companies on the owner account; superadmin ${r.superadmins.join(", ")}`);
     },
   },
+  {
+    // Seller deductions have no ledger of their own (they lower the purchase on the bill): remove the
+    // "Penalties from Sellers" account if it was created and never used; otherwise rename it.
+    id: "2026-11-seller-deductions-no-ledger",
+    run: async () => {
+      const Account = require("../models/Account");
+      const db = mongoose.connection.db;
+      for (const a of await Account.find({ role: "seller_penalties" })) {
+        const code = String(a._id);
+        const used = (await db.collection("bills").countDocuments({ adjustmentAccount: code })) + (await db.collection("purchaseorders").countDocuments({ adjustmentAccount: code }));
+        if (!used) await a.deleteOne();
+        else {
+          await db.collection("purchaseorders").updateMany({ adjustmentAccount: code, status: { $ne: "billed" } }, { $set: { adjustmentAccount: "ledger" } });
+          await Account.updateOne({ _id: a._id }, { $set: { name: "Seller Deductions", role: "" } });
+        }
+      }
+    },
+  },
 ];
 
 async function runMigrations() {

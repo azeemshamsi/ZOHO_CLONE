@@ -30,11 +30,11 @@ export default function Sellers() {
   }, []);
   return (
     <>
-      <PageHeader title="Sellers" subtitle="Marketplace sellers on your Shopify store: their orders, pickups, penalties and monthly purchase orders" />
+      <PageHeader title="Sellers" subtitle="Marketplace sellers on your Shopify store: their orders, pickups, deductions and monthly purchase orders" />
       <div className="tabs">
         {[
           ["sellers", "Sellers"],
-          ["penalties", "Penalties"],
+          ["penalties", "Deductions"],
           ["pos", "Monthly purchase orders"],
         ].map(([k, l]) => (
           <button key={k} className={`tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
@@ -76,7 +76,7 @@ function SellerList({ sellers, reload }) {
                 <th>Pickup</th>
                 <th className="num">Open orders</th>
                 <th className="num">Delivered, not on a PO</th>
-                <th className="num">Penalties due</th>
+                <th className="num">Deductions due</th>
                 <th className="num">Logins</th>
               </tr>
             </thead>
@@ -480,7 +480,7 @@ function SellerDetail({ id, onClose, onEdit, onChanged }) {
             </table>
           )}
 
-          <h4 style={{ margin: "6px 0 0" }}>Penalties</h4>
+          <h4 style={{ margin: "6px 0 0" }}>Deductions</h4>
           {!s.penalties.length ? (
             <p className="muted small" style={{ margin: 0 }}>None.</p>
           ) : (
@@ -674,7 +674,7 @@ function Penalties({ sellers, onChanged }) {
   const remove = async () => {
     try {
       await api.delete(`/sellers/penalties/${del._id}`);
-      toast("Penalty removed");
+      toast("Deduction removed");
       load();
       onChanged();
     } catch (e) {
@@ -700,16 +700,16 @@ function Penalties({ sellers, onChanged }) {
         </select>
         <div style={{ flex: 1 }} />
         <button className="btn btn-primary" disabled={!sellers.length} onClick={() => setAdd(true)}>
-          <Icon name="plus" size={16} /> Add penalty
+          <Icon name="plus" size={16} /> Add deduction
         </button>
       </div>
       <p className="small muted" style={{ marginTop: 0 }}>
-        A pending penalty is deducted from the seller's next monthly purchase order (as a negative adjustment, booked to "Penalties from Sellers" when the PO is billed).
+        A pending deduction is taken off the seller's next monthly purchase order, so their invoice already comes net of it. It has no ledger of its own: on the bill it simply lowers the purchase.
       </p>
       {!list ? (
         <Spinner />
       ) : !list.length ? (
-        <Empty title="No penalties" />
+        <Empty title="No deductions" />
       ) : (
         <div className="card" style={{ padding: 0, overflowX: "auto" }}>
           <table className="table">
@@ -758,7 +758,7 @@ function Penalties({ sellers, onChanged }) {
           }}
         />
       )}
-      <Confirm open={!!del} title="Remove this penalty?" text={del ? `${del.reason} — ${money(del.amount)}` : ""} confirmLabel="Remove" onConfirm={remove} onCancel={() => setDel(null)} />
+      <Confirm open={!!del} title="Remove this deduction?" text={del ? `${del.reason} — ${money(del.amount)}` : ""} confirmLabel="Remove" onConfirm={remove} onCancel={() => setDel(null)} />
     </>
   );
 }
@@ -773,7 +773,7 @@ function AddPenalty({ sellers, initial, onClose, onSaved }) {
     setError("");
     try {
       await api.post("/sellers/penalties", { ...f, amount: Number(f.amount) });
-      toast("Penalty added");
+      toast("Deduction added");
       onSaved();
     } catch (e) {
       setError(errMsg(e));
@@ -783,7 +783,7 @@ function AddPenalty({ sellers, initial, onClose, onSaved }) {
   return (
     <Modal
       open
-      title="Add penalty"
+      title="Add deduction"
       onClose={onClose}
       footer={
         <>
@@ -868,10 +868,10 @@ function MonthlyPos({ sellers }) {
     <>
       <div className="card" style={{ padding: 14, marginBottom: 12 }}>
         <p className="small" style={{ margin: "0 0 10px" }}>
-          On the <strong>5th of every month</strong> OrdexaGo creates a purchase order for each seller, for their orders <strong>delivered</strong> in the previous month and not on an earlier PO: {`seller's rate × sale price incl. GST, before discounts`}, minus pending penalties. It's raised in the company that invoiced the orders. You can also run it here.
+          On the <strong>5th of every month</strong> OrdexaGo creates a purchase order for each seller, for their orders <strong>delivered by the end of the previous month, at least 7 days ago, with no return or RTO since</strong>, not on an earlier PO: {`seller's rate × sale price incl. GST, before discounts`}, minus pending deductions. An order delivered in the last days of the month waits for the next PO. It's raised in the company that invoiced the orders. You can also run it here.
         </p>
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <Field label="Month delivered">
+          <Field label="Delivered up to the end of">
             <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
           </Field>
           <Field label="Seller">
@@ -896,7 +896,7 @@ function MonthlyPos({ sellers }) {
         <Spinner />
       ) : preview ? (
         <>
-          <h4 style={{ margin: "4px 0 8px" }}>Still to go on a purchase order for {preview.label}</h4>
+          <h4 style={{ margin: "4px 0 8px" }}>Ready to go on a purchase order (delivered by the end of {preview.label}, 7+ days ago)</h4>
           {!rows.length ? (
             <Empty title="Nothing pending" />
           ) : (
@@ -907,8 +907,9 @@ function MonthlyPos({ sellers }) {
                     <th>Seller</th>
                     <th>Company</th>
                     <th className="num">Orders</th>
+                    <th className="num">Waiting 7 days</th>
                     <th className="num">Purchase value</th>
-                    <th className="num">Penalties</th>
+                    <th className="num">Deductions</th>
                     <th className="num">PO total</th>
                   </tr>
                 </thead>
@@ -916,12 +917,13 @@ function MonthlyPos({ sellers }) {
                   {rows.map((r, i) => (
                     <tr key={i}>
                       <td>{r.seller}</td>
-                      <td colSpan={r.skipped || r.error ? 5 : 1} className={r.skipped ? "muted small" : r.error ? "small" : ""} style={r.error ? { color: "var(--red)" } : undefined}>
+                      <td colSpan={r.skipped || r.error ? 6 : 1} className={r.skipped ? "muted small" : r.error ? "small" : ""} style={r.error ? { color: "var(--red)" } : undefined}>
                         {r.skipped || r.error || r.company}
                       </td>
                       {!r.skipped && !r.error && (
                         <>
                           <td className="num">{r.orders}</td>
+                          <td className="num muted">{r.waiting || "—"}</td>
                           <td className="num">{money(r.amount)}</td>
                           <td className="num">{r.penalties ? `− ${money(r.penalties)}` : "—"}</td>
                           <td className="num strong">{money(r.total)}</td>
@@ -930,7 +932,7 @@ function MonthlyPos({ sellers }) {
                     </tr>
                   ))}
                   <tr className="row-total">
-                    <td colSpan={5}>Total</td>
+                    <td colSpan={6}>Total</td>
                     <td className="num">{money(sum)}</td>
                   </tr>
                 </tbody>

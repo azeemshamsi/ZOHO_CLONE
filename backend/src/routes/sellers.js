@@ -278,7 +278,7 @@ router.delete(
   "/penalties/:pid",
   ah(async (req, res) => {
     const p = await SellerPenalty.findOne({ _id: req.params.pid, organization: req.storeOrg });
-    if (!p) throw new HttpError(404, "Penalty not found");
+    if (!p) throw new HttpError(404, "Deduction not found");
     if (p.purchaseOrder) throw new HttpError(400, `Already deducted on purchase order ${p.purchaseOrderNumber}`);
     await p.deleteOne();
     res.send({ ok: true });

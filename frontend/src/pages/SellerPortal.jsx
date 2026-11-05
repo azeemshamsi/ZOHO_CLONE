@@ -52,14 +52,14 @@ export default function SellerPortal() {
         <Stat label="Open orders" value={me.counts.open} onClick={() => setTab("orders")} />
         <Stat label="To ship (not booked)" value={(me.counts.new || 0) + (me.counts.packed || 0)} />
         <Stat label="Delivered, not on a PO yet" value={money(me.deliveredNotOnPo.amount)} sub={`${me.deliveredNotOnPo.orders} orders · at ${s.rate}%`} />
-        <Stat label="Penalties pending" value={money(me.penaltiesPending)} onClick={() => setTab("penalties")} />
+        <Stat label="Deductions pending" value={money(me.penaltiesPending)} onClick={() => setTab("penalties")} />
       </div>
       <div className="tabs">
         {[
           ["orders", "Orders"],
           ["stock", "Stock"],
           ["pos", "Purchase orders"],
-          ["penalties", "Penalties"],
+          ["penalties", "Deductions"],
           ["profile", "Pickup address"],
         ].map(([k, l]) => (
           <button key={k} className={`tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
@@ -349,7 +349,7 @@ function Pos() {
   return (
     <>
       <p className="small muted" style={{ marginTop: 0 }}>
-        On the 5th of each month a purchase order is raised for your orders delivered in the previous month. Send your invoice against it; payment follows.
+        On the 5th of each month a purchase order is raised for your orders delivered by the end of the previous month, at least 7 days ago and not returned. Deductions are already taken off it. Send your invoice for the PO amount; payment follows.
       </p>
       {!list ? (
         <Spinner />
@@ -467,7 +467,7 @@ function PoView({ po, onClose }) {
               )}
               {po.adjustment !== 0 && (
                 <tr>
-                  <td>Adjustment (penalties / rounding)</td>
+                  <td>Deductions / rounding</td>
                   <td className="num">{amount(po.adjustment)}</td>
                 </tr>
               )}
@@ -493,7 +493,7 @@ function Penalties() {
       .catch((e) => toast(errMsg(e), "error"));
   }, []);
   if (!list) return <Spinner />;
-  if (!list.length) return <Empty title="No penalties" />;
+  if (!list.length) return <Empty title="No deductions" />;
   return (
     <div className="card" style={{ padding: 0, overflowX: "auto" }}>
       <table className="table">

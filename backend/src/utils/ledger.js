@@ -243,7 +243,8 @@ async function buildEntries(org, { to } = {}) {
         dr("input_sgst", b.sgst);
         dr("input_igst", b.igst);
         const ro = roundOffPart(b);
-        dr(b.adjustmentAccount || "adjustments", (b.adjustment || 0) - ro);
+        // "ledger": the adjustment belongs with the purchase itself (e.g. a seller's deduction already netted in their invoice).
+        dr(b.adjustmentAccount === "ledger" ? b.ledger || "cogs" : b.adjustmentAccount || "adjustments", (b.adjustment || 0) - ro);
         dr("adjustments", ro);
         cr("ap", b.total);
       },

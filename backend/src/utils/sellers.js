@@ -253,18 +253,14 @@ async function vendorIn(seller, orgId) {
   return v;
 }
 
-// "Penalties from Sellers" (Other Income) in a company: where a penalty deducted on a PO goes when it's billed.
-async function penaltyAccount(orgId) {
-  const Account = require("../models/Account");
-  let a = await Account.findOne({ organization: orgId, role: "seller_penalties" });
-  if (!a) a = await Account.create({ organization: orgId, name: "Penalties from Sellers", group: "Other Income", role: "seller_penalties", description: "Penalties charged to marketplace sellers (deducted on their purchase orders)" });
-  return String(a._id);
-}
-
 /**
  * Purchase orders for one month: per seller and company, the lines of orders delivered that month and not yet on a
- * PO, at the seller's rate; pending penalties up to the month end are deducted. Safe to run again (skips what's done).
+ * PO, at the seller's rate; pending deductions up to the month end are taken off. Safe to run again (skips what's done).
+ * An order counts once it has been delivered at least HOLD_DAYS ago and is still delivered (no return / RTO since).
+ * Orders delivered earlier but not settled yet (e.g. delivered on the 30th, so not 7 days old at the last run) are
+ * included too, so nothing is left out.
  */
+const HOLD_DAYS = 7;
 async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, createdBefore } = {}) {
   const ShopifyOrder = require("../models/ShopifyOrder");
   const SellerPenalty = require("../models/SellerPenalty");
@@ -272,14 +268,17 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
   const Item = require("../models/Item");
   const { call } = require("./import/commit");
   const { computeTotals } = require("./gst");
-  const { from, to, label } = monthRange(month);
+  const { to, label } = monthRange(month);
+  const ripe = new Date(Date.now() - HOLD_DAYS * 86400000); // delivered on or before this
   const sellers = (await Seller.find({ organization: storeOrg, ...(sellerId ? { _id: sellerId } : { active: true }) })).filter((x) => !createdBefore || x.createdAt < createdBefore);
   const results = [];
   for (const seller of sellers) {
-    const orders = (await ShopifyOrder.find({ organization: storeOrg, sellers: seller._id, status: "delivered" }).lean()).filter((o) => {
+    const unsettled = (await ShopifyOrder.find({ organization: storeOrg, sellers: seller._id, status: "delivered" }).lean()).filter((o) => {
       const d = deliveredOn(o);
-      return d && d >= from && d <= to && !(o.sellerSettled || []).some((x) => String(x.seller) === String(seller._id));
+      return d && d <= to && !(o.sellerSettled || []).some((x) => String(x.seller) === String(seller._id));
     });
+    const orders = unsettled.filter((o) => deliveredOn(o) <= ripe);
+    const waiting = unsettled.length - orders.length; // delivered less than 7 days ago: next month's PO
     const brands = new Set(seller.brands.map(norm));
     // Group by the company that invoiced the order (that company bought from the seller).
     const byOrg = new Map();
@@ -292,7 +291,7 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
     }
     const penalties = (await SellerPenalty.find({ organization: storeOrg, seller: seller._id, date: { $lte: to } }).sort({ date: 1 }).lean()).filter((p) => !p.purchaseOrder);
     if (!byOrg.size) {
-      results.push({ seller: seller.name, sellerId: seller._id, skipped: `No delivered orders in ${label}${penalties.length ? `; ${penalties.length} penalt${penalties.length > 1 ? "ies" : "y"} carried forward` : ""}` });
+      results.push({ seller: seller.name, sellerId: seller._id, skipped: `No orders delivered by the end of ${label} and ${HOLD_DAYS}+ days ago${waiting ? ` (${waiting} delivered less than ${HOLD_DAYS} days ago wait for the next PO)` : ""}${penalties.length ? `; ${penalties.length} deduction${penalties.length > 1 ? "s" : ""} carried forward` : ""}`, waiting });
       continue;
     }
     let penaltiesLeft = penalties;
@@ -326,7 +325,7 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
           target = r2(target + amt);
           perOrder.push({ id: o._id, amount: amt });
         }
-        // Penalties: those for this company's orders, then any others, while the PO stays above zero.
+        // Deductions: those for this company's orders, then any others, while the PO stays above zero.
         const mine = penaltiesLeft.filter((p) => !p.order || rows.some((r) => String(r.o._id) === String(p.order)) || byOrg.size === 1);
         const applied = [];
         let pen = 0;
@@ -337,12 +336,14 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
         }
         penaltiesLeft = penaltiesLeft.filter((p) => !applied.includes(p));
         if (dryRun) {
-          results.push({ seller: seller.name, sellerId: seller._id, company: org.name, organization: orgId, orders: perOrder.length, lines: lineItems.length, amount: target, penalties: pen, total: r2(target - pen) });
+          results.push({ seller: seller.name, sellerId: seller._id, company: org.name, organization: orgId, orders: perOrder.length, lines: lineItems.length, amount: target, penalties: pen, total: r2(target - pen), waiting });
           continue;
         }
         const vendor = await vendorIn(seller, orgId);
         const t = computeTotals({ lineItems, orgState: org.state, placeOfSupply: vendor.placeOfSupply || org.state });
-        const adjustment = r2(target - pen - t.total); // −penalties (+ rounding paise, so the PO equals the rate exactly)
+        // −deductions (+ rounding paise, so the PO equals the rate exactly). No ledger of its own: on the bill it reduces the
+        // purchase ledger ("ledger"), since the seller's invoice is already net of it.
+        const adjustment = r2(target - pen - t.total);
         const iso = new Date(Date.now() + IST).toISOString().slice(0, 10);
         const po = await call(require("../routes/purchaseOrders"), "POST", "/", { org: orgId, user }, {
           vendor: String(vendor._id),
@@ -350,13 +351,13 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
           reference: `${seller.name} · ${label}`.slice(0, 100),
           lineItems,
           adjustment,
-          ...(pen ? { adjustmentAccount: await penaltyAccount(orgId) } : {}),
-          customerNotes: `Orders delivered in ${label}, at ${seller.rate}% of the sale price (GST included, before discounts).${applied.length ? `\nPenalties deducted: ${applied.map((p) => `${p.reason}${p.orderName ? ` (${p.orderName})` : ""} ₹${p.amount}`).join("; ")}.` : ""}\nPlease send your invoice against this purchase order.`,
+          ...(adjustment ? { adjustmentAccount: "ledger" } : {}),
+          customerNotes: `Orders delivered up to ${label} (at least ${HOLD_DAYS} days before this PO, not returned), at ${seller.rate}% of the sale price (GST included, before discounts).${applied.length ? `\nDeductions: ${applied.map((p) => `${p.reason}${p.orderName ? ` (${p.orderName})` : ""} ₹${p.amount}`).join("; ")}.` : ""}\nPlease send your invoice against this purchase order.`,
           status: "issued",
         });
         for (const r of perOrder) await ShopifyOrder.updateOne({ _id: r.id }, { $push: { sellerSettled: { seller: seller._id, purchaseOrder: po._id, number: po.number, organization: orgId, amount: r.amount, at: new Date() } } });
         for (const p of applied) await SellerPenalty.updateOne({ _id: p._id }, { $set: { purchaseOrder: po._id, purchaseOrderNumber: po.number, purchaseOrderOrg: orgId } });
-        results.push({ seller: seller.name, sellerId: seller._id, company: org.name, purchaseOrder: po.number, purchaseOrderId: po._id, organization: orgId, orders: perOrder.length, amount: target, penalties: pen, total: po.total });
+        results.push({ seller: seller.name, sellerId: seller._id, company: org.name, purchaseOrder: po.number, purchaseOrderId: po._id, organization: orgId, orders: perOrder.length, amount: target, penalties: pen, total: po.total, waiting });
       } catch (e) {
         results.push({ seller: seller.name, sellerId: seller._id, error: e.message });
       }
@@ -392,4 +393,4 @@ async function monthlyTick() {
   }
 }
 
-module.exports = { norm, brandMap, clearCache, sellerOfLine, sellersOfLines, assignAll, pickupFor, withPickup, pickupProblems, registerPickup, sellerProducts, setSellerStock, runMonthly, monthlyTick, monthRange, prevMonth, linePurchase, lineValue, deliveredOn };
+module.exports = { HOLD_DAYS, norm, brandMap, clearCache, sellerOfLine, sellersOfLines, assignAll, pickupFor, withPickup, pickupProblems, registerPickup, sellerProducts, setSellerStock, runMonthly, monthlyTick, monthRange, prevMonth, linePurchase, lineValue, deliveredOn };

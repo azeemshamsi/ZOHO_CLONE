@@ -282,6 +282,7 @@ export function DocForm({ kind, recurring = false }) {
           lineItems: data.lineItems.map(cleanLine),
           shippingCharge: data.shippingCharge,
           adjustment: data.adjustment,
+          adjustmentAccount: data.adjustmentAccount || "", // e.g. a marketplace seller's deduction: stays with the purchase
         })
       );
     } else setForm(base);
