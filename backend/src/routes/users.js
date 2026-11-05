@@ -72,6 +72,7 @@ router.post(
     const role = await checkRole(req.org, data.role);
     const email = data.email.toLowerCase();
     let user = await User.findOne({ email });
+    await require("../utils/subscription").checkLimit(req.org, "users", { userId: user?._id });
     if (user) {
       // Already has an OrdexaGo login (e.g. in your other company): just give access here.
       if (await Membership.exists({ user: user._id, organization: req.org })) throw new HttpError(409, "This person already has access to this company");
@@ -115,6 +116,7 @@ router.put(
     if (data.role) data.role = await checkRole(req.org, data.role);
     if (data.status && m.status === "invited") throw new HttpError(400, "This user hasn't accepted the invitation yet");
     await guardLastAdmin(req, m, { role: data.role || m.role, status: data.status || m.status });
+    if (data.status === "active" && m.status === "inactive") await require("../utils/subscription").checkLimit(req.org, "users", { userId: user._id });
     if (data.role) m.role = data.role;
     if (data.status) m.status = data.status;
     await m.save();

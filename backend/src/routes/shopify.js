@@ -101,7 +101,10 @@ router.put(
     );
     ownerOnly(req);
     let s = await storeOf(req, false);
-    if (!s) s = new ShopifyStore({ organization: req.org });
+    if (!s) {
+      await require("../utils/subscription").checkLimit(req.org, "shopifyStores");
+      s = new ShopifyStore({ organization: req.org });
+    }
     const credsChanged = (d.shop !== undefined && d.shop && shopHost(d.shop) !== s.shop) || (d.clientId !== undefined && d.clientId !== s.clientId) || d.clientSecret || d.accessToken || (d.authType && d.authType !== s.authType);
     if (d.shop !== undefined) s.shop = d.shop ? shopHost(d.shop) : "";
     if (d.authType) s.authType = d.authType;

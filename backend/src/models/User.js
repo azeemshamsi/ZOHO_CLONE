@@ -15,6 +15,7 @@ const userSchema = new mongoose.Schema(
     inviteToken: { type: String, default: "" },
     inviteExpires: { type: Date },
     verified: { type: Boolean, default: false },
+    superadmin: { type: Boolean, default: false }, // OrdexaGo's own operator: manages subscribers and plans
   },
   { timestamps: true }
 );
@@ -35,6 +36,7 @@ userSchema.methods.toPublic = function (r) {
     status: this.status,
     organization: this.organization,
     permissions: r?.perms || require("../utils/roles").permsOf(this.role),
+    superadmin: !!this.superadmin,
   };
 };
 

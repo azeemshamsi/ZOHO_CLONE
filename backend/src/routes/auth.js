@@ -38,10 +38,11 @@ async function sessionPayload(user, wanted) {
   const { membershipFor } = require("../middleware/auth");
   const m = await membershipFor(user, wanted);
   if (!m) throw new HttpError(403, "You don't have access to any company. Contact your admin.");
+  const subscription = await require("../utils/subscription").assertAccess(user, m.organization);
   const r = await require("../utils/roles").resolveRole(m.role, m.organization);
   user.role = m.role;
   const organization = await Organization.findById(m.organization);
-  return { token: user.generateAuthToken(), user: user.toPublic(r), organization, organizations: await companiesOf(user) };
+  return { token: user.generateAuthToken(), user: user.toPublic(r), organization, organizations: await companiesOf(user), subscription };
 }
 
 // Sign up: creates the organization and its first (admin) user.
@@ -59,6 +60,10 @@ router.post(
       req.body
     );
 
+    // Accounts are created by OrdexaGo (superadmin → Subscribers). Only a brand-new installation can sign up,
+    // and that first user becomes the superadmin.
+    const first = !(await User.exists({}));
+    if (!first) throw new HttpError(403, "OrdexaGo accounts are set up by OrdexaGo. To subscribe, write to help@ordexago.com.");
     const email = data.email.toLowerCase();
     if (await User.findOne({ email })) throw new HttpError(409, "An account with this email already exists");
 
@@ -75,6 +80,7 @@ router.post(
       password: await bcrypt.hash(data.password, 10),
       organization: organization._id,
       verified: !needsVerification,
+      superadmin: first,
     });
 
     if (needsVerification) {
@@ -190,7 +196,7 @@ router.get(
   auth,
   ah(async (req, res) => {
     const organization = await Organization.findById(req.org);
-    res.send({ user: req.user.toPublic(req.roleInfo), organization, organizations: await companiesOf(req.user) });
+    res.send({ user: req.user.toPublic(req.roleInfo), organization, organizations: await companiesOf(req.user), subscription: req.subscription });
   })
 );
 

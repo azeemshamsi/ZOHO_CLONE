@@ -141,6 +141,8 @@ const PATH_MODULES = [
   ["/settings", "settings"],
   ["/users", "settings"],
 ];
+// Pages outside the company role permissions (only for the OrdexaGo superadmin).
+const SUPER_PATHS = ["/superadmin"];
 export const moduleOf = (path) => (PATH_MODULES.find(([p]) => path === p || path.startsWith(p + "/")) || [])[1];
 const RANK = { none: 0, view: 1, full: 2 };
 // Best access across one module or several.
@@ -193,14 +195,15 @@ function Group({ group, onNavigate }) {
 }
 
 export default function Layout() {
-  const { user, organization, signOut } = useAuth();
+  const { user, organization, signOut, subscription } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const close = () => setMenuOpen(false);
   const location = useLocation();
   const mod = location.pathname === "/" ? HOME_MODS : moduleOf(location.pathname);
-  const level = mod ? levelOf(user, mod) : "full";
+  const isSuper = SUPER_PATHS.some((p) => location.pathname.startsWith(p));
+  const level = isSuper ? (user?.superadmin ? "full" : "none") : mod ? levelOf(user, mod) : "full";
   const nav = NAV.filter((n) => (n.to === "/" ? can(user, HOME_MODS) : !n.mod || can(user, n.mod)));
   // Roles without the dashboard (e.g. Returns Desk) go straight to their page.
   if (location.pathname === "/" && level === "none" && homeFor(user) !== "/") return <Navigate to={homeFor(user)} replace />;
@@ -224,6 +227,12 @@ export default function Layout() {
             )
           )}
         </nav>
+        {user?.superadmin && (
+          <NavLink to="/superadmin" className="nav-item nav-settings" onClick={close}>
+            <Icon name="users" />
+            <span>Superadmin</span>
+          </NavLink>
+        )}
         {can(user, "settings") && (
           <>
             <NavLink to="/users" className="nav-item nav-settings" onClick={close}>
@@ -303,6 +312,14 @@ export default function Layout() {
             </div>
           ) : (
             <>
+              {subscription?.state === "grace" && (
+                <div className="alert alert-error">
+                  <strong>Subscription expired.</strong> {subscription.message} Contact OrdexaGo at <a href="mailto:help@ordexago.com">help@ordexago.com</a>.
+                </div>
+              )}
+              {subscription?.state === "active" && subscription.daysLeft <= 7 && (
+                <div className="alert readonly-banner">Your OrdexaGo subscription ends in {subscription.daysLeft} day{subscription.daysLeft > 1 ? "s" : ""}. Contact OrdexaGo at help@ordexago.com to renew.</div>
+              )}
               {level === "view" && <div className="alert readonly-banner">View only — your role can see this but not change it.</div>}
               <Outlet />
             </>

@@ -14,6 +14,7 @@ const addressSchema = new mongoose.Schema(
 const organizationSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
+    subscriber: { type: mongoose.Schema.Types.ObjectId, ref: "Subscriber" }, // the OrdexaGo subscription this company belongs to
     gstin: { type: String, default: "", uppercase: true, trim: true },
     state: { type: String, required: true }, // GST state code of the business
     address: { type: addressSchema, default: () => ({}) },

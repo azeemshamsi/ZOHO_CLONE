@@ -40,7 +40,15 @@ export function Login() {
   const { signIn } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ email: "", password: "" });
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => {
+    try {
+      const m = sessionStorage.getItem("ordexago_blocked") || "";
+      sessionStorage.removeItem("ordexago_blocked");
+      return m;
+    } catch {
+      return "";
+    }
+  });
   const [busy, setBusy] = useState(false);
 
   const submit = async (e) => {
@@ -64,7 +72,7 @@ export function Login() {
       subtitle="Welcome back to OrdexaGo."
       footer={
         <>
-          New to OrdexaGo? <Link to="/signup">Create an account</Link>
+          Want OrdexaGo for your business? Write to <a href="mailto:help@ordexago.com">help@ordexago.com</a>
         </>
       }
     >

@@ -14,6 +14,14 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (r) => r,
   (err) => {
+    // Subscription expired / suspended: back to the login page with the reason.
+    if (err.response?.status === 402 && !err.config.url.startsWith("/auth/login")) {
+      try {
+        sessionStorage.setItem("ordexago_blocked", err.response.data?.message || "Your OrdexaGo subscription has expired.");
+      } catch {}
+      localStorage.removeItem("mgi_token");
+      if (!window.location.pathname.startsWith("/login")) window.location.href = "/login";
+    }
     if (err.response?.status === 401 && !err.config.url.startsWith("/auth/")) {
       localStorage.removeItem("mgi_token");
       window.location.href = "/login";

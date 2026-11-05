@@ -102,6 +102,32 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    // Subscriptions: everything that exists today is the owner's own account ("OrdexaGo (owner)": no expiry,
+    // no limits). The superadmin is the email(s) in SUPERADMIN_EMAILS, else the first user ever created.
+    id: "2026-11-subscribers-owner",
+    run: async () => {
+      const Subscriber = require("../models/Subscriber");
+      const Organization = require("../models/Organization");
+      const User = require("../models/User");
+      let owner = await Subscriber.findOne({ owner: true });
+      if (!owner) owner = await Subscriber.create({ name: "OrdexaGo (owner)", owner: true, status: "active" });
+      const orgs = await Organization.find({}, { subscriber: 1 }).lean();
+      let n = 0;
+      for (const o of orgs.filter((x) => !x.subscriber)) {
+        await Organization.updateOne({ _id: o._id }, { $set: { subscriber: owner._id } });
+        n++;
+      }
+      const emails = String(process.env.SUPERADMIN_EMAILS || "azeem@zikrziba.com").toLowerCase().split(/[,\s]+/).filter(Boolean);
+      const users = await User.find({}, { email: 1, createdAt: 1, superadmin: 1 }).lean();
+      let supers = users.filter((u) => emails.includes(u.email));
+      if (!supers.length) supers = users.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).slice(0, 1);
+      for (const u of supers) await User.updateOne({ _id: u._id }, { $set: { superadmin: true } });
+      const r = { companies: n, superadmins: supers.map((u) => u.email) };
+      await mongoose.connection.db.collection("migration_reports").updateOne({ _id: "subscribers-owner" }, { $set: { at: new Date(), ...r } }, { upsert: true });
+      console.log(`Subscribers: ${n} companies on the owner account; superadmin ${r.superadmins.join(", ")}`);
+    },
+  },
 ];
 
 async function runMigrations() {
