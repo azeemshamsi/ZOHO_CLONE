@@ -47,6 +47,7 @@ import { BankRules } from "./pages/BankRules";
 import Settings from "./pages/Settings";
 import ComingSoon from "./pages/ComingSoon";
 import Superadmin from "./pages/Superadmin";
+import Itc from "./pages/Itc";
 import Sellers from "./pages/Sellers";
 import SellerPortal from "./pages/SellerPortal";
 
@@ -109,6 +110,7 @@ export default function App() {
           <Route path="no-access" element={<div className="card center no-access"><h3>No pages to show</h3><p className="muted">Your role doesn't include any part of the app yet. Ask an admin.</p></div>} />
           <Route path="gst" element={<GstReturns />} />
           <Route path="gst/reconcile" element={<GstReconcile />} />
+          <Route path="itc" element={<Itc />} />
           <Route path="e-invoices" element={<GstCompliance tab="einvoice" />} />
           <Route path="e-way-bills" element={<GstCompliance tab="eway" />} />
           <Route path="transfer-orders" element={<TransferList />} />

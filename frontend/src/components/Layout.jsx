@@ -90,6 +90,7 @@ const NAV = [
     mod: "gst",
     children: [
       { to: "/gst", label: "GST Returns" },
+      { to: "/itc", label: "Input Tax Credit" },
       { to: "/gst/reconcile", label: "GSTR-2B Reconciliation" },
       { to: "/e-invoices", label: "e-Invoices" },
       { to: "/e-way-bills", label: "e-Way Bills" },
@@ -116,6 +117,7 @@ const PATH_MODULES = [
   ["/sellers", "store_sellers"],
   ["/inventory", "inventory"],
   ["/gst", "gst"],
+  ["/itc", ["gst", "purchases", "accountant", "reports"]],
   ["/quotes", "sales"],
   ["/sales-orders", "sales"],
   ["/invoices", "sales"],

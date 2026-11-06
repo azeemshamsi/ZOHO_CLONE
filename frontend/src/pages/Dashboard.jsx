@@ -56,8 +56,10 @@ export default function Dashboard() {
   const { user, organization } = useAuth();
   const [d, setD] = useState(null);
 
+  const [itc, setItc] = useState(null);
   useEffect(() => {
     api.get("/dashboard").then((r) => setD(r.data));
+    api.get("/dashboard/itc").then((r) => setItc(r.data)).catch(() => {});
   }, []);
 
   if (!d) return <Spinner />;
@@ -128,6 +130,39 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {itc && (
+        <Link to="/itc" className={`card card-link ${itc.lastWith2b?.diff > 0.99 ? "bills180 is-alert" : ""}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>
+          <div className="card-head">
+            <h3>Input Tax Credit (ITC)</h3>
+            <span className="link-btn">Month-wise →</span>
+          </div>
+          <div className="recv-grid">
+            <div>
+              <span className="label label-current">Available now</span>
+              <strong>{money(itc.balance.total)}</strong>
+            </div>
+            <div>
+              <span className="label">This month</span>
+              <strong>{money(itc.thisMonth?.taken.total || 0)}</strong>
+            </div>
+            <div>
+              <span className="label">FY {itc.fy} taken</span>
+              <strong>{money(itc.fyTaken.total)}</strong>
+            </div>
+            <div>
+              <span className="label">{itc.lastWith2b ? `${itc.lastWith2b.label}: books − 2B` : "GSTR-2B"}</span>
+              <strong className={itc.lastWith2b?.diff > 0.99 ? "text-overdue" : ""}>{itc.lastWith2b ? money(itc.lastWith2b.diff) : "Not uploaded"}</strong>
+            </div>
+            {itc.risk180?.itc > 0 && (
+              <div>
+                <span className="label label-overdue">At risk (180 days)</span>
+                <strong className="text-overdue">{money(itc.risk180.itc)}</strong>
+              </div>
+            )}
+          </div>
+        </Link>
+      )}
 
       {d.bills180 && (
         <Link to="/reports/bills-180-days" className={`card card-link bills180 ${d.bills180.over.count ? "is-alert" : ""}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>

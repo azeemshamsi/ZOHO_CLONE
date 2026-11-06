@@ -112,4 +112,13 @@ router.get(
   })
 );
 
+// Input tax credit: books month by month beside GSTR-2B, balance left to use, ITC at risk (180 days).
+router.get(
+  "/itc",
+  ah(async (req, res) => {
+    const fy = /^\d{4}$/.test(req.query.fy || "") ? Number(req.query.fy) : undefined;
+    res.send(await require("../utils/itc").itcSummary(req.org, { fy }));
+  })
+);
+
 module.exports = router;
