@@ -181,12 +181,13 @@ export function AccountDetail() {
   const [data, setData] = useState(null);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [view, setView] = useState("tally"); // tally: as Tally / the reports show it; live: with stock movements
 
-  const load = () => api.get(`/accounts/${encodeURIComponent(code)}/transactions`, { params: { from: range.from, to: range.to } }).then((r) => setData(r.data));
+  const load = () => api.get(`/accounts/${encodeURIComponent(code)}/transactions`, { params: { from: range.from, to: range.to, view } }).then((r) => setData(r.data));
   useEffect(() => {
     setData(null);
     load();
-  }, [code, range.from, range.to]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [code, range.from, range.to, view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) return <Spinner />;
   const a = data.account;
@@ -194,6 +195,16 @@ export function AccountDetail() {
   return (
     <>
       <PageHeader title={a.name} subtitle={`${a.group}${a.system ? " · Built-in account" : ""}`} back="/chart-of-accounts">
+        {a.code !== "inventory" && (
+          <div className="seg" title="Tally view: as Tally and the reports show it. Live: also the moves into stock and the cost of goods sold.">
+            <button className={view === "tally" ? "on" : ""} onClick={() => setView("tally")}>
+              Tally view
+            </button>
+            <button className={view === "live" ? "on" : ""} onClick={() => setView("live")}>
+              Live
+            </button>
+          </div>
+        )}
         <PeriodPicker value={range} onChange={setRange} />
         {!a.system && (
           <>

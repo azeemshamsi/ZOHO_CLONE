@@ -139,7 +139,11 @@ router.get(
     const acc = accounts.find((a) => a.code === req.params.code);
     if (!acc) throw new HttpError(404, "Account not found");
     const { from, to } = parseRange(req.query);
-    const entries = await buildEntries(req.org, { to });
+    // Tally view (default): purchases stay on their purchase ledger, without the moves into stock and the cost of
+    // sales, as Tally and the reports show them. "live" shows those stock movements too. Inventory Asset is live only.
+    const tally = req.query.view !== "live" && acc.code !== "inventory";
+    let entries = await buildEntries(req.org, { to });
+    if (tally) entries = require("../utils/tallyView").tallyEntries(entries, accounts);
     const sign = debitNormal(acc.type) ? 1 : -1;
     let opening = 0;
     const rows = [];
@@ -160,7 +164,7 @@ router.get(
       run = round2(run + sign * (r.debit - r.credit));
       r.balance = run;
     }
-    res.send({ account: acc, from, to, opening, closing: run, rows });
+    res.send({ account: acc, from, to, opening, closing: run, rows, view: tally ? "tally" : "live" });
   })
 );
 
