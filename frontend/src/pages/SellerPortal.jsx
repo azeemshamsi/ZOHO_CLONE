@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import api, { errMsg } from "../lib/api";
 import { stateName } from "../lib/constants";
 import { money, amount, date } from "../lib/format";
-import { PageHeader, Spinner, Empty, Modal, SearchBox, useDebounced, toast } from "../components/ui";
+import { PageHeader, Spinner, Empty, Modal, Field, SearchBox, useDebounced, toast } from "../components/ui";
 import Icon from "../components/Icon";
 
 // A marketplace seller's own dashboard: their orders and labels, their Shopify stock, purchase orders and penalties.
@@ -51,7 +51,6 @@ export default function SellerPortal() {
       <div className="seller-stats" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 16 }}>
         <Stat label="Open orders" value={me.counts.open} onClick={() => setTab("orders")} />
         <Stat label="To ship (not booked)" value={(me.counts.new || 0) + (me.counts.packed || 0)} />
-        <Stat label="Delivered, not on a PO yet" value={money(me.deliveredNotOnPo.amount)} sub={`${me.deliveredNotOnPo.orders} orders · at ${s.rate}%`} />
         <Stat label="Deductions pending" value={money(me.penaltiesPending)} onClick={() => setTab("penalties")} />
       </div>
       <div className="tabs">
@@ -332,14 +331,26 @@ function Stock() {
   );
 }
 
+const INVOICE_STATE = {
+  awaiting_invoice: ["Awaiting your invoice", "status-draft"],
+  under_review: ["Invoice received — under review", "status-sent"],
+  approved: ["Invoice approved — payment due", "status-open"],
+  part_paid: ["Part paid", "status-partially_paid"],
+  paid: ["Paid", "status-paid"],
+  cancelled: ["Cancelled", "status-cancelled"],
+};
+
 function Pos() {
   const [list, setList] = useState(null);
   const [open, setOpen] = useState(null);
-  useEffect(() => {
+  const [upload, setUpload] = useState(null);
+  const load = () =>
     api
       .get("/seller-portal/purchase-orders")
       .then((r) => setList(r.data))
       .catch((e) => toast(errMsg(e), "error"));
+  useEffect(() => {
+    load();
   }, []);
   const show = (id) =>
     api
@@ -349,7 +360,7 @@ function Pos() {
   return (
     <>
       <p className="small muted" style={{ marginTop: 0 }}>
-        On the 8th of each month a purchase order is raised for your orders delivered by the end of the previous month, at least 7 days ago and not returned. Deductions are already taken off it. Send your invoice for the PO amount; payment follows.
+        On the 8th of each month a purchase order is raised for your orders delivered by the end of the previous month, at least 7 days ago and not returned. Deductions are already taken off it. Make your invoice for the PO amount and upload it here; payment follows once it's approved.
       </p>
       {!list ? (
         <Spinner />
@@ -365,24 +376,122 @@ function Pos() {
                 <th>For</th>
                 <th>Status</th>
                 <th className="num">Amount</th>
+                <th />
               </tr>
             </thead>
             <tbody>
-              {list.map((p) => (
-                <tr key={p._id} onClick={() => show(p._id)}>
-                  <td className="link strong">{p.number}</td>
-                  <td>{date(p.date)}</td>
-                  <td className="small">{p.reference}</td>
-                  <td className="small">{p.status === "billed" ? "Invoice received" : p.status === "cancelled" ? "Cancelled" : "Awaiting your invoice"}</td>
-                  <td className="num">{money(p.total)}</td>
-                </tr>
-              ))}
+              {list.map((p) => {
+                const [label, cls] = INVOICE_STATE[p.invoiceState] || [p.invoiceState, ""];
+                return (
+                  <tr key={p._id} onClick={() => show(p._id)}>
+                    <td className="link strong">{p.number}</td>
+                    <td>{date(p.date)}</td>
+                    <td className="small">{p.reference}</td>
+                    <td className="small">
+                      <span className={`status ${cls}`}>{label}</span>
+                      {p.invoice && <div className="muted">Your invoice {p.invoice.number}{p.invoice.paid > 0 ? ` · paid ${money(p.invoice.paid)}` : ""}</div>}
+                    </td>
+                    <td className="num">{money(p.total)}</td>
+                    <td className="num" onClick={(e) => e.stopPropagation()}>
+                      {p.invoiceState === "awaiting_invoice" && (
+                        <button className="btn btn-sm btn-primary" onClick={() => setUpload(p)}>
+                          <Icon name="upload" size={14} /> Upload invoice
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
       {open && <PoView po={open} onClose={() => setOpen(null)} />}
+      {upload && (
+        <UploadInvoice
+          po={upload}
+          onClose={() => setUpload(null)}
+          onDone={() => {
+            setUpload(null);
+            load();
+          }}
+        />
+      )}
     </>
+  );
+}
+
+const readFile = (file) =>
+  new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error("Couldn't read the file"));
+    r.readAsDataURL(file);
+  });
+
+function UploadInvoice({ po, onClose, onDone }) {
+  const today = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+  const [f, setF] = useState({ invoiceNumber: "", invoiceDate: today, amount: String(po.total), note: "" });
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const diff = Math.round((Number(f.amount || 0) - po.total) * 100) / 100;
+  const save = async () => {
+    setError("");
+    if (!file) return setError("Choose your invoice file (PDF or photo)");
+    if (file.size > 10 * 1024 * 1024) return setError("The file can be up to 10 MB");
+    setBusy(true);
+    try {
+      const data = await readFile(file);
+      await api.post(`/seller-portal/purchase-orders/${po._id}/invoice`, { ...f, amount: Number(f.amount), name: file.name, type: file.type, data });
+      toast(`Invoice ${f.invoiceNumber} sent against ${po.number}`);
+      onDone();
+    } catch (e) {
+      setError(errMsg(e));
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      open
+      title={`Upload invoice for ${po.number}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" disabled={busy || !f.invoiceNumber.trim() || !file} onClick={save}>
+            {busy ? "Uploading…" : "Send invoice"}
+          </button>
+        </>
+      }
+    >
+      <div className="form-grid">
+        <p className="small" style={{ margin: 0 }}>
+          PO amount: <strong>{money(po.total)}</strong> — your invoice should be for this amount.
+        </p>
+        <div className="row-2">
+          <Field label="Your invoice number" required>
+            <input autoFocus value={f.invoiceNumber} onChange={set("invoiceNumber")} />
+          </Field>
+          <Field label="Invoice date" required>
+            <input type="date" max={today} value={f.invoiceDate} onChange={set("invoiceDate")} />
+          </Field>
+        </div>
+        <Field label="Invoice amount (₹)" required hint={diff ? `Differs from the PO by ${money(diff)} — the accounts team will check it` : "Matches the PO"}>
+          <input type="number" min="0" step="0.01" value={f.amount} onChange={set("amount")} />
+        </Field>
+        <Field label="Invoice file" required hint="PDF or photo (JPG / PNG), up to 10 MB">
+          <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        </Field>
+        <Field label="Note (optional)">
+          <input value={f.note} onChange={set("note")} />
+        </Field>
+        {error && <div className="alert alert-error">{error}</div>}
+      </div>
+    </Modal>
   );
 }
 

@@ -275,7 +275,7 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
   for (const seller of sellers) {
     const unsettled = (await ShopifyOrder.find({ organization: storeOrg, sellers: seller._id, status: "delivered" }).lean()).filter((o) => {
       const d = deliveredOn(o);
-      return d && d <= to && !(o.sellerSettled || []).some((x) => String(x.seller) === String(seller._id));
+      return d && d <= to && (!seller.poFrom || d >= seller.poFrom) && !(o.sellerSettled || []).some((x) => String(x.seller) === String(seller._id));
     });
     const orders = unsettled.filter((o) => deliveredOn(o) <= ripe);
     const waiting = unsettled.length - orders.length; // delivered less than 7 days ago: next month's PO

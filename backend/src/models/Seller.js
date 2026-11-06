@@ -13,6 +13,7 @@ const sellerSchema = new mongoose.Schema(
     gstin: { type: String, default: "", uppercase: true, trim: true },
     pan: { type: String, default: "", uppercase: true, trim: true },
     rate: { type: Number, required: true, min: 0, max: 100 }, // purchase price % of sale value
+    poFrom: { type: Date }, // only orders delivered on/after this date go on purchase orders (earlier ones were settled outside)
     pickup: {
       name: { type: String, default: "" },
       phone: { type: String, default: "" },

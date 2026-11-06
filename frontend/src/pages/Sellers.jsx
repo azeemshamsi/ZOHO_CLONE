@@ -134,6 +134,7 @@ function SellerForm({ seller, onClose, onSaved }) {
     name: seller.name || "",
     brands: seller.brands || [],
     rate: seller.rate ?? "",
+    poFrom: seller.poFrom ? isoDate(seller.poFrom) : "",
     contactName: seller.contactName || "",
     email: seller.email || "",
     phone: seller.phone || "",
@@ -162,7 +163,7 @@ function SellerForm({ seller, onClose, onSaved }) {
     setBusy(true);
     setError("");
     try {
-      const body = { ...f, brands: brand.trim() ? [...f.brands, brand.trim()] : f.brands, rate: Number(f.rate) };
+      const body = { ...f, poFrom: f.poFrom || null, brands: brand.trim() ? [...f.brands, brand.trim()] : f.brands, rate: Number(f.rate) };
       const { data } = isNew ? await api.post("/sellers", body) : await api.put(`/sellers/${seller._id}`, body);
       toast(`${body.name} saved${data.ordersTagged ? ` · ${data.ordersTagged} orders tagged` : ""}${data.addressChanged ? " · register the new pickup address with the couriers" : ""}`);
       onSaved(isNew ? data.seller._id : seller._id);
@@ -239,6 +240,9 @@ function SellerForm({ seller, onClose, onSaved }) {
             </select>
           </Field>
         </div>
+        <Field label="Purchase orders from" hint="Only orders delivered on or after this date go on purchase orders (earlier ones were settled outside OrdexaGo). Blank for a new seller = 1st of last month.">
+          <input type="date" value={f.poFrom} onChange={set("poFrom")} style={{ maxWidth: 220 }} />
+        </Field>
         <div className="row-3">
           <Field label="Contact person">
             <input value={f.contactName} onChange={set("contactName")} />

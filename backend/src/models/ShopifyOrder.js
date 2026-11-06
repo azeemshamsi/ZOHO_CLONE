@@ -105,6 +105,7 @@ const shopifyOrderSchema = new mongoose.Schema(
       error: String,
     },
     deliveredAt: Date, // when it was delivered (for sellers' monthly purchase orders)
+    deliveredChecked: Boolean, // deliveredAt confirmed from Shopify's fulfilment
     // Marketplace sellers whose products are on this order (from each line's Shopify Vendor) and what was settled.
     sellers: { type: [mongoose.Schema.Types.ObjectId], default: [] },
     sellerSettled: [{ _id: false, seller: mongoose.Schema.Types.ObjectId, purchaseOrder: mongoose.Schema.Types.ObjectId, number: String, organization: mongoose.Schema.Types.ObjectId, amount: Number, at: Date }],
@@ -132,7 +133,8 @@ shopifyOrderSchema.pre("save", async function () {
   if (ids.map(String).sort().join() !== (this.sellers || []).map(String).sort().join()) this.sellers = ids;
   if (this.status === "delivered" && !this.deliveredAt) {
     const ev = (this.shipment?.events || []).filter((e) => /deliver/i.test(e.status || "") && !/undeliver|not deliver/i.test(e.status || "") && e.at && !isNaN(e.at)).sort((a, b) => b.at - a.at)[0];
-    this.deliveredAt = ev?.at || new Date();
+    // Best guess until Shopify's own delivery time is read (refreshDeliveries sets it and deliveredChecked).
+    this.deliveredAt = ev?.at || (this.isModified("status") ? new Date() : this.statusChangedAt || new Date());
   }
 });
 

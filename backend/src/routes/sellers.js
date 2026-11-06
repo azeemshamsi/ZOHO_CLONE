@@ -32,6 +32,7 @@ const sellerJoi = Joi.object({
   name: Joi.string().trim().min(2).max(150).required().label("Seller name"),
   brands: Joi.array().items(Joi.string().trim().min(1).max(150)).min(1).required().label("Brands (Shopify vendor)"),
   rate: Joi.number().min(0).max(100).required().label("Purchase rate %"),
+  poFrom: Joi.date().allow(null, "").label("Purchase orders from"),
   contactName: Joi.string().allow("").max(100),
   email: Joi.string().email().allow("").label("Email"),
   phone: Joi.string().allow("").max(20),
@@ -57,7 +58,7 @@ router.get(
     const sellers = await Seller.find({ organization: req.storeOrg }).sort({ active: -1, name: 1 }).lean();
     const ids = sellers.map((s) => s._id);
     const [orders, penalties, logins] = await Promise.all([
-      ids.length ? ShopifyOrder.find({ organization: req.storeOrg, sellers: { $in: ids } }, { sellers: 1, status: 1, sellerSettled: 1 }).lean() : [],
+      ids.length ? ShopifyOrder.find({ organization: req.storeOrg, sellers: { $in: ids } }, { sellers: 1, status: 1, sellerSettled: 1, deliveredAt: 1, statusChangedAt: 1 }).lean() : [],
       ids.length ? SellerPenalty.find({ organization: req.storeOrg, seller: { $in: ids } }, { seller: 1, amount: 1, purchaseOrder: 1 }).lean() : [],
       ids.length ? Membership.find({ organization: req.storeOrg, seller: { $in: ids } }, { seller: 1 }).lean() : [],
     ]);
@@ -70,7 +71,7 @@ router.get(
           stats: {
             orders: mine.length,
             open: mine.filter((o) => ["new", "packed", "ready_to_ship", "shipped"].includes(o.status)).length,
-            deliveredUnsettled: mine.filter((o) => o.status === "delivered" && !(o.sellerSettled || []).some((x) => String(x.seller) === id)).length,
+            deliveredUnsettled: mine.filter((o) => o.status === "delivered" && (!s.poFrom || S.deliveredOn(o) >= s.poFrom) && !(o.sellerSettled || []).some((x) => String(x.seller) === id)).length,
             penaltiesPending: penalties.filter((p) => String(p.seller) === id && !p.purchaseOrder).reduce((t, p) => t + p.amount, 0),
             logins: logins.filter((m) => String(m.seller) === id).length,
           },
@@ -108,6 +109,11 @@ router.post(
     const d = validate(sellerJoi, req.body);
     d.brands = cleanBrands(d.brands);
     await checkBrands(req.storeOrg, d.brands);
+    // Purchase orders start from the 1st of last month unless set (older deliveries were settled outside OrdexaGo).
+    if (!d.poFrom) {
+      const t = new Date(Date.now() + 5.5 * 3600000);
+      d.poFrom = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - 1, 1) - 5.5 * 3600000);
+    }
     const s = await Seller.create({ ...d, organization: req.storeOrg });
     const tagged = await S.assignAll(req.storeOrg);
     res.status(201).send({ seller: s, ordersTagged: tagged });
@@ -146,6 +152,7 @@ router.put(
     const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
     if (!s) throw new HttpError(404, "Seller not found");
     await checkBrands(req.storeOrg, d.brands, s._id);
+    if (d.poFrom === "") d.poFrom = null;
     const addrChanged = ["address", "city", "state", "pincode", "phone"].some((k) => (d.pickup?.[k] || "") !== (s.pickup?.[k] || ""));
     s.set(d);
     // A new pickup address must be registered with the couriers again.

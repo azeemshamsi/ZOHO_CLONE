@@ -146,6 +146,14 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    // Sellers made before "Purchase orders from" existed: start from 1 Oct 2026 (not every delivery ever).
+    id: "2026-11-seller-po-from",
+    run: async () => {
+      const Seller = require("../models/Seller");
+      for (const s of await Seller.find({}, { poFrom: 1 }).lean()) if (!s.poFrom) await Seller.updateOne({ _id: s._id }, { $set: { poFrom: new Date("2026-09-30T18:30:00Z") } });
+    },
+  },
 ];
 
 async function runMigrations() {

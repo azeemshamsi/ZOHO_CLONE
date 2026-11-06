@@ -59,14 +59,10 @@ router.get(
     const orders = await ShopifyOrder.find({ organization: s.organization, sellers: s._id }, { status: 1, orderDate: 1, deliveredAt: 1, statusChangedAt: 1, sellerSettled: 1, lines: 1 }).lean();
     const counts = Object.fromEntries(STATUSES.map((k) => [k, 0]));
     for (const o of orders) counts[o.status] = (counts[o.status] || 0) + 1;
-    const toSettle = orders.filter((o) => o.status === "delivered" && !(o.sellerSettled || []).some((x) => String(x.seller) === String(s._id)));
-    const brands = new Set(s.brands.map(S.norm));
-    const due = toSettle.reduce((t, o) => t + o.lines.filter((l) => brands.has(S.norm(l.vendor))).reduce((u, l) => u + S.linePurchase(s, l), 0), 0);
     const penalties = await SellerPenalty.find({ seller: s._id, purchaseOrder: { $exists: false } }, { amount: 1 }).lean();
     res.send({
       seller: { _id: s._id, name: s.name, brands: s.brands, rate: s.rate, contactName: s.contactName, email: s.email, phone: s.phone, gstin: s.gstin, pickup: s.pickup },
       counts: { ...counts, open: OPEN.reduce((t, k) => t + counts[k], 0), all: orders.length },
-      deliveredNotOnPo: { orders: toSettle.length, amount: Math.round(due * 100) / 100 },
       penaltiesPending: Math.round(penalties.reduce((t, p) => t + p.amount, 0) * 100) / 100,
     });
   })
@@ -133,10 +129,79 @@ async function myPos(s) {
   return PurchaseOrder.find({ vendor: { $in: vendorIds }, status: { $ne: "draft" } }).sort({ date: -1 }).lean();
 }
 
+// Where the seller's invoice stands: under review (draft bill), approved, paid.
+async function billStates(pos) {
+  const Bill = require("../models/Bill");
+  const ids = pos.map((p) => p.bill).filter(Boolean);
+  const bills = ids.length ? await Bill.find({ _id: { $in: ids } }, { status: 1, billNumber: 1, total: 1, balance: 1, date: 1 }) : [];
+  return new Map(bills.map((b) => [String(b._id), b]));
+}
+const invoiceState = (p, b) => {
+  if (p.status === "cancelled") return "cancelled";
+  if (!b) return "awaiting_invoice";
+  if (b.status === "draft") return "under_review";
+  if (b.balance <= 0 || b.status === "paid") return "paid";
+  if (b.balance < b.total) return "part_paid";
+  return "approved";
+};
+
 router.get(
   "/purchase-orders",
   ah(async (req, res) => {
-    res.send((await myPos(req.seller)).map((p) => ({ _id: p._id, number: p.number, date: p.date, reference: p.reference, status: p.status, total: p.total, billNumber: p.billNumber, lines: p.lineItems.length })));
+    const pos = await myPos(req.seller);
+    const bills = await billStates(pos);
+    res.send(
+      pos.map((p) => {
+        const b = p.bill ? bills.get(String(p.bill)) : null;
+        return { _id: p._id, number: p.number, date: p.date, reference: p.reference, status: p.status, total: p.total, lines: p.lineItems.length, invoice: b ? { number: b.billNumber, date: b.date, total: b.total, paid: Math.round((b.total - b.balance) * 100) / 100 } : null, invoiceState: invoiceState(p, b) };
+      })
+    );
+  })
+);
+
+// The seller's invoice against a purchase order: becomes a draft bill (with the file attached) in the buying
+// company, for the accounts team to check and approve.
+router.post(
+  "/purchase-orders/:id/invoice",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        invoiceNumber: Joi.string().trim().min(1).max(50).required().label("Invoice number"),
+        invoiceDate: Joi.date().max("now").required().label("Invoice date"),
+        amount: Joi.number().min(0).required().label("Invoice amount"),
+        name: Joi.string().max(200).required().label("File"),
+        type: Joi.string().valid("application/pdf", "image/jpeg", "image/png", "image/webp").required().messages({ "any.only": "Upload a PDF or a photo (JPG / PNG)" }),
+        data: Joi.string().required().label("File"),
+        note: Joi.string().allow("").max(500),
+      }),
+      req.body
+    );
+    const p = (await myPos(req.seller)).find((x) => String(x._id) === req.params.id);
+    if (!p) throw new HttpError(404, "Purchase order not found");
+    if (p.status === "cancelled") throw new HttpError(400, "This purchase order is cancelled");
+    if (p.bill) throw new HttpError(400, "An invoice has already been received against this purchase order");
+    const buf = Buffer.from(d.data.replace(/^data:.*?;base64,/, ""), "base64");
+    if (!buf.length) throw new HttpError(400, "The file is empty");
+    if (buf.length > 10 * 1024 * 1024) throw new HttpError(400, "The file can be up to 10 MB");
+    const iso = new Date(new Date(d.invoiceDate).getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
+    const diff = Math.round((d.amount - p.total) * 100) / 100;
+    const ctx = { org: p.organization, user: req.user };
+    const { call } = require("../utils/import/commit");
+    const bill = await call(require("./bills"), "POST", "/", ctx, {
+      vendor: String(p.vendor),
+      billNumber: d.invoiceNumber,
+      date: iso,
+      dueDate: iso,
+      placeOfSupply: p.placeOfSupply || "",
+      lineItems: p.lineItems.map((l) => ({ item: l.item ? String(l.item) : "", name: l.name, description: l.description || "", hsnSac: l.hsnSac || "", unit: l.unit || "", quantity: l.quantity, rate: l.rate, discount: l.discount || 0, taxRate: l.taxRate || 0, account: l.account || "" })),
+      adjustment: p.adjustment || 0,
+      ...(p.adjustmentAccount ? { adjustmentAccount: p.adjustmentAccount } : {}),
+      customerNotes: [`Invoice uploaded by ${req.seller.name} (${req.user.name}) on the seller dashboard against PO ${p.number}.`, `Seller's invoice amount ₹${d.amount}${diff ? ` — differs from the PO total ₹${p.total} by ₹${diff}` : " (matches the PO)"}.`, d.note ? `Seller's note: ${d.note}` : ""].filter(Boolean).join("\n"),
+      status: "draft",
+      purchaseOrder: String(p._id),
+    });
+    await require("./attachments").store({ org: p.organization, user: req.user }, { docType: "bill", docId: bill._id, name: d.name, type: d.type, buf });
+    res.status(201).send({ ok: true, differs: diff || 0, purchaseOrder: p.number });
   })
 );
 

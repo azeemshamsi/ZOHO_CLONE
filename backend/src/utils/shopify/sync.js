@@ -176,6 +176,7 @@ function applyDelivery(o, d) {
   if (d.status === "delivered") {
     o.status = "delivered";
     o.deliveredAt = d.at || new Date();
+    o.deliveredChecked = !!d.at;
     o.statusChangedAt = new Date();
     if (o.shipment) {
       o.shipment.trackStatus = "delivered";
@@ -234,6 +235,7 @@ async function upsert(orgId, n) {
     if (status === "shipped" && n.shopifyDelivery?.status === "delivered") {
       doc.status = "delivered";
       doc.deliveredAt = n.shopifyDelivery.at || new Date();
+      doc.deliveredChecked = !!n.shopifyDelivery.at;
       if (doc.shipment) doc.shipment.trackStatus = "delivered";
     }
     await ShopifyOrder.create(doc);
@@ -306,9 +308,11 @@ async function syncStore(store, { full = false } = {}) {
 
 // Shopify doesn't always mark an order as updated when its fulfilment gets delivered, so orders out with the
 // courier are checked directly (in batches) after every sync and every couple of hours.
-async function refreshDeliveries(store) {
+// withDelivered: also confirm the delivery time of delivered orders not yet checked against Shopify.
+async function refreshDeliveries(store, { withDelivered = false } = {}) {
   const since = new Date(Date.now() - 120 * 86400000);
-  const open = (await ShopifyOrder.find({ organization: store.organization, status: "shipped" })).filter((o) => o.shopifyId && (!o.orderDate || o.orderDate >= since));
+  const statuses = withDelivered ? ["shipped", "delivered"] : ["shipped"];
+  const open = (await ShopifyOrder.find({ organization: store.organization, status: { $in: statuses } })).filter((o) => o.shopifyId && (o.status === "shipped" || !o.deliveredChecked) && (!o.orderDate || o.orderDate >= since));
   let changed = 0;
   for (let i = 0; i < open.length; i += 50) {
     const batch = open.slice(i, i + 50);
@@ -316,7 +320,15 @@ async function refreshDeliveries(store) {
     const byId = new Map((data.nodes || []).filter(Boolean).map((n) => [n.id, n]));
     for (const o of batch) {
       const n = byId.get(o.shopifyId);
-      if (n && applyDelivery(o, deliveryOf(n))) {
+      if (!n) continue;
+      const d = deliveryOf(n);
+      if (o.status === "delivered") {
+        // Already delivered here: take Shopify's delivery time when it has one.
+        if (d?.status === "delivered" && d.at && String(d.at) !== String(o.deliveredAt)) o.deliveredAt = d.at;
+        o.deliveredChecked = true;
+        await o.save();
+        changed++;
+      } else if (applyDelivery(o, d)) {
         await o.save();
         changed++;
       }
@@ -327,7 +339,7 @@ async function refreshDeliveries(store) {
 }
 
 async function refreshAllDeliveries() {
-  for (const s of await ShopifyStore.find({ connected: true })) await refreshDeliveries(s).catch((e) => console.error(`Shopify delivery check (${s.shop}) failed: ${e.message}`));
+  for (const s of await ShopifyStore.find({ connected: true })) await refreshDeliveries(s, { withDelivered: true }).catch((e) => console.error(`Shopify delivery check (${s.shop}) failed: ${e.message}`));
 }
 
 // Every 15 minutes: stores with auto-sync on.
