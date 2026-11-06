@@ -152,6 +152,39 @@ router.get(
       if (prior) rows.push({ code: "_pl_opening", name: "Profit & Loss A/c", group: "Equity", type: "equity", debit: prior < 0 ? -prior : 0, credit: prior > 0 ? prior : 0 });
     }
     const closingStock = isTally(req) ? TV.stockValue(entries0, to) : undefined;
+    // Detailed (Alt+F5): each ledger's transactions in the period (From, else the start of To's financial year),
+    // after an opening balance, so opening + transactions = the closing balance shown.
+    if (req.query.detail === "1") {
+      const fyStart = (() => {
+        const t = new Date(to.getTime() + 5.5 * 3600000);
+        const y = t.getUTCMonth() >= 3 ? t.getUTCFullYear() : t.getUTCFullYear() - 1;
+        return new Date(Date.UTC(y, 3, 1) - 5.5 * 3600000);
+      })();
+      const dFrom = period ? pFrom : fyStart;
+      const byCode = new Map(rows.map((r) => [r.code, r]));
+      for (const r of rows) {
+        r.opening = 0;
+        r.txns = [];
+      }
+      for (const e of entries) {
+        const at = new Date(e.date);
+        for (const l of e.lines) {
+          const r = byCode.get(l.account);
+          if (!r || r.code === "_pl_opening" || (period && r.code === TV.OPENING_STOCK.code)) continue;
+          const pl = r.type === "income" || r.type === "expense";
+          if (at < dFrom) {
+            if (!(period && pl)) r.opening = round2(r.opening + l.debit - l.credit);
+            continue;
+          }
+          r.txns.push({ date: e.date, type: e.type, id: e.id, number: e.number, party: e.party || "", debit: round2(l.debit), credit: round2(l.credit) });
+        }
+      }
+      for (const r of rows) {
+        if (r.code === "_pl_opening" || (period && r.code === TV.OPENING_STOCK.code)) r.opening = round2(r.debit - r.credit);
+        r.txns.sort((a, b) => new Date(a.date) - new Date(b.date));
+      }
+      return res.send({ from: period ? pFrom : undefined, detailFrom: dFrom, to, view: isTally(req) ? "tally" : "live", closingStock, rows, totalDebit: sum(rows, (r) => r.debit), totalCredit: sum(rows, (r) => r.credit), detail: true });
+    }
     res.send({ from: period ? pFrom : undefined, to, view: isTally(req) ? "tally" : "live", closingStock, rows, totalDebit: sum(rows, (r) => r.debit), totalCredit: sum(rows, (r) => r.credit) });
   })
 );

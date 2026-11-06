@@ -407,6 +407,7 @@ address { font-style: normal; line-height: 1.6; }
 .report-table .row-head td { font-weight: 700; font-size: 15px; padding-top: 18px; color: var(--brand-600); }
 .report-table .row-section td { font-weight: 600; padding-top: 14px; }
 .report-table .row-subtotal td { font-weight: 600; border-top: 1px solid var(--line); }
+.report-table .row-sub td { font-weight: 600; border-top: 1px solid var(--line); }
 .report-table .row-total td { font-weight: 700; background: #f5f6fa; }
 .report-table .row-grand td { font-weight: 700; font-size: 15px; background: var(--brand-50); border-top: 2px solid var(--brand-100); }
 

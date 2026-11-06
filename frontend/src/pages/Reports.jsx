@@ -355,6 +355,14 @@ export function ReportPage() {
       localStorage.setItem("reportView", v);
     } catch {}
   };
+  // Trial Balance: condensed (ledger-wise) or detailed (each ledger's transactions), Alt+F5 as in Tally.
+  const [detail, setDetail] = useState(false);
+  useEffect(() => {
+    if (key !== "trial-balance") return;
+    const t = () => setDetail((x) => !x);
+    window.addEventListener("tally:detail", t);
+    return () => window.removeEventListener("tally:detail", t);
+  }, [key]);
 
   useEffect(() => {
     setRange({ key: meta?.period || "this_fy", ...periodRange(meta?.period || "this_fy") });
@@ -371,11 +379,12 @@ export function ReportPage() {
     const params = meta.mode === "range" ? { from: range.from, to: range.to } : meta.mode === "asof" ? { to: asOf, ...(periodOk ? { from: asOfFrom } : {}) } : {};
     if (branch) params.branch = branch;
     if (hasView && view === "tally") params.view = "tally";
+    if (key === "trial-balance" && detail) params.detail = "1";
     api
       .get(`/reports/${key}`, { params })
       .then((r) => setData(r.data))
       .catch((e) => setError(errMsg(e)));
-  }, [key, meta, range.from, range.to, asOf, asOfFrom, branch, view, hasView]);
+  }, [key, meta, range.from, range.to, asOf, asOfFrom, branch, view, hasView, detail]);
 
   if (!meta) return <p>Report not found.</p>;
   const subtitle = meta.mode === "range" ? fmtRange(range.from, range.to) : meta.mode === "asof" ? (periodOk ? `${fmtRange(asOfFrom, asOf)}${key === "balance-sheet" ? ` · as at ${date(asOf)}` : ""}` : `As of ${date(asOf)}`) : `As of ${date(new Date())}`;
@@ -394,6 +403,16 @@ export function ReportPage() {
                 {l}
               </button>
             ))}
+          </div>
+        )}
+        {key === "trial-balance" && (
+          <div className="seg" role="group" aria-label="Trial balance detail" data-views title="Condensed: one line per ledger. Detailed: each ledger's transactions (Alt+F5).">
+            <button type="button" className={!detail ? "on" : ""} aria-pressed={!detail} onClick={() => setDetail(false)}>
+              Condensed
+            </button>
+            <button type="button" className={detail ? "on" : ""} aria-pressed={detail} onClick={() => setDetail(true)}>
+              Detailed
+            </button>
           </div>
         )}
         {meta.mode === "range" && <PeriodPicker value={range} onChange={setRange} />}
@@ -550,35 +569,97 @@ function BalanceSheet({ d, range }) {
 }
 
 function TrialBalance({ d, range }) {
+  // Ledgers grouped as in Tally (by account group), with group totals; detailed adds each ledger's transactions.
+  const groups = [];
+  for (const r of d.rows) {
+    let g = groups.find((x) => x.name === r.group);
+    if (!g) groups.push((g = { name: r.group, rows: [], debit: 0, credit: 0 }));
+    g.rows.push(r);
+    g.debit += r.debit;
+    g.credit += r.credit;
+  }
+  const net = (g) => {
+    const n = Math.round((g.debit - g.credit) * 100) / 100;
+    return { debit: n > 0 ? n : 0, credit: n < 0 ? -n : 0 };
+  };
+  const amt = (n) => (n ? money(n) : "");
   return (
     <table className="report-table">
       <thead>
         <tr>
-          <th>Account</th>
-          <th>Type</th>
+          <th>Particulars</th>
+          {d.detail && <th>Number</th>}
           <th className="num">Debit</th>
           <th className="num">Credit</th>
         </tr>
       </thead>
       <tbody>
-        {d.rows.map((r) => (
-          <tr key={r.code}>
-            <td>
-              <Link to={acctLink(r.code, range)}>{r.name}</Link>
+        {d.detail && (
+          <tr>
+            <td colSpan={4} className="muted small">
+              Transactions from {date(d.detailFrom)} to {date(d.to)}, after each ledger's opening balance.
             </td>
-            <td className="muted">{r.group}</td>
-            <td className="num">{r.debit ? money(r.debit) : ""}</td>
-            <td className="num">{r.credit ? money(r.credit) : ""}</td>
           </tr>
-        ))}
+        )}
+        {groups.map((g) => {
+          const gn = net(g);
+          return [
+            <tr key={`g-${g.name}`} className="row-section">
+              <td colSpan={d.detail ? 2 : 1}>
+                <strong>{g.name}</strong>
+              </td>
+              <td className="num">
+                <strong>{amt(gn.debit)}</strong>
+              </td>
+              <td className="num">
+                <strong>{amt(gn.credit)}</strong>
+              </td>
+            </tr>,
+            ...g.rows.flatMap((r) => [
+              <tr key={r.code} className={d.detail ? "row-sub" : ""}>
+                <td style={{ paddingLeft: 24 }}>
+                  {r.code.startsWith("_") ? r.name : <Link to={acctLink(r.code, range)}>{r.name}</Link>}
+                </td>
+                {d.detail && <td />}
+                <td className="num">{amt(r.debit)}</td>
+                <td className="num">{amt(r.credit)}</td>
+              </tr>,
+              ...(d.detail
+                ? [
+                    ...(r.opening
+                      ? [
+                          <tr key={`${r.code}-ob`} className="row-muted small">
+                            <td style={{ paddingLeft: 48 }}>Opening balance</td>
+                            <td />
+                            <td className="num">{r.opening > 0 ? money(r.opening) : ""}</td>
+                            <td className="num">{r.opening < 0 ? money(-r.opening) : ""}</td>
+                          </tr>,
+                        ]
+                      : []),
+                    ...(r.txns || []).map((t, i) => (
+                      <tr key={`${r.code}-${i}`} className="small">
+                        <td style={{ paddingLeft: 48 }}>
+                          <span className="muted">{date(t.date)}</span> · {t.type}
+                          {t.party ? ` · ${t.party}` : ""}
+                        </td>
+                        <td>{t.id ? <Link to={docLink(t.type, t.id)}>{t.number}</Link> : t.number}</td>
+                        <td className="num">{amt(t.debit)}</td>
+                        <td className="num">{amt(t.credit)}</td>
+                      </tr>
+                    )),
+                  ]
+                : []),
+            ]),
+          ];
+        })}
         <tr className="row-grand">
-          <td colSpan={2}>Total</td>
+          <td colSpan={d.detail ? 2 : 1}>Grand Total</td>
           <td className="num">{money(d.totalDebit)}</td>
           <td className="num">{money(d.totalCredit)}</td>
         </tr>
         {d.view === "tally" && d.closingStock ? (
           <tr>
-            <td colSpan={2} className="muted">
+            <td colSpan={d.detail ? 2 : 1} className="muted">
               Closing Stock (shown in the P&amp;L, not part of the totals, as in Tally)
             </td>
             <td className="num muted">{money(d.closingStock)}</td>
