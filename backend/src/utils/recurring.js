@@ -94,6 +94,9 @@ function startScheduler() {
   setInterval(shopify, 15 * 60 * 1000).unref();
   setInterval(() => require("./shopify/inventory").pushAll().catch((e) => console.error("Inventory sync failed:", e.message)), 30 * 60 * 1000).unref();
   setInterval(() => require("./shopify/ship").trackAll().catch((e) => console.error("Courier tracking failed:", e.message)), 2 * 60 * 60 * 1000).unref();
+  setInterval(() => require("./shopify/sync").refreshAllDeliveries().catch((e) => console.error("Shopify delivery check failed:", e.message)), 2 * 60 * 60 * 1000).unref();
+  // Once shortly after start: orders delivered in Shopify but still "shipped" here catch up.
+  setTimeout(() => require("./shopify/sync").refreshAllDeliveries().catch(() => {}), 60 * 1000).unref();
 }
 
 module.exports = { occurrence, refreshNext, runProfile, runDue, startScheduler, round2 };

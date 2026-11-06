@@ -9,6 +9,8 @@ const { stateCode } = require("../import/common");
 
 const MONEY = "shopMoney { amount }";
 const ADDR = "name company address1 address2 city province provinceCode zip country countryCodeV2 phone";
+// A fulfilment as Shopify reports it, including the delivery progress the courier feeds back to Shopify.
+const FULFILMENT = "status displayStatus deliveredAt inTransitAt trackingInfo(first: 1) { company number url }";
 const ORDERS_QUERY = `query Orders($first: Int!, $after: String, $query: String) {
   orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT) {
     pageInfo { hasNextPage endCursor }
@@ -25,7 +27,7 @@ const ORDERS_QUERY = `query Orders($first: Int!, $after: String, $query: String)
       totalTaxSet { ${MONEY} }
       currentTotalPriceSet { ${MONEY} }
       totalOutstandingSet { ${MONEY} }
-      fulfillments(first: 10) { status trackingInfo(first: 1) { company number url } }
+      fulfillments(first: 10) { ${FULFILMENT} }
       transactions(first: 30) { kind status gateway amountSet { ${MONEY} } }
       lineItems(first: 50) {
         nodes {
@@ -145,8 +147,48 @@ function normalise(o) {
     outstanding: amt(o.totalOutstandingSet),
     lines,
     // Cancelled fulfilments don't count.
-    shopifyFulfillments: (o.fulfillments || []).filter((f) => !["CANCELLED", "ERROR", "FAILURE"].includes(f.status)).flatMap((f) => f.trackingInfo || []).map((t) => ({ company: t.company || "", number: t.number || "", url: t.url || "" })),
+    shopifyFulfillments: activeFulfilments(o).flatMap((f) => f.trackingInfo || []).map((t) => ({ company: t.company || "", number: t.number || "", url: t.url || "" })),
+    shopifyDelivery: deliveryOf(o),
   };
+}
+
+const activeFulfilments = (o) => (o.fulfillments || []).filter((f) => !["CANCELLED", "ERROR", "FAILURE"].includes(f.status));
+
+// Delivery progress from Shopify's (non-cancelled) fulfilments: delivered only when every one of them is delivered.
+const TRACK_OF = { DELIVERED: "delivered", OUT_FOR_DELIVERY: "out_for_delivery", IN_TRANSIT: "in_transit", ATTEMPTED_DELIVERY: "in_transit", PICKED_UP: "in_transit", CONFIRMED: "pending", FULFILLED: "pending", MARKED_AS_FULFILLED: "pending" };
+function deliveryOf(o) {
+  const fs = activeFulfilments(o);
+  if (!fs.length) return null;
+  const tracks = fs.map((f) => TRACK_OF[f.displayStatus] || "");
+  if (tracks.every((t) => t === "delivered")) {
+    const at = fs.map((f) => f.deliveredAt && new Date(f.deliveredAt)).filter(Boolean).sort((a, b) => b - a)[0];
+    return { status: "delivered", at: at || null };
+  }
+  const order = ["out_for_delivery", "in_transit", "pending"];
+  return { status: order.find((t) => tracks.includes(t)) || "", at: null };
+}
+
+// Apply Shopify's delivery progress to an order that is out with the courier. Courier tracking in OrdexaGo
+// (orders booked here) still runs; Shopify saying "delivered" is also enough, since Shopify gets it from the courier.
+function applyDelivery(o, d) {
+  if (!d || !d.status || o.status !== "shipped") return false;
+  const sh = o.shipment || {};
+  if (d.status === "delivered") {
+    o.status = "delivered";
+    o.deliveredAt = d.at || new Date();
+    o.statusChangedAt = new Date();
+    if (o.shipment) {
+      o.shipment.trackStatus = "delivered";
+      o.markModified("shipment");
+    }
+    return true;
+  }
+  if (!sh.account && o.shipment && sh.trackStatus !== d.status && d.status !== "pending") {
+    o.shipment.trackStatus = d.status;
+    o.markModified("shipment");
+    return true;
+  }
+  return false;
 }
 
 // Fulfilment statuses that mean nothing has been sent (e.g. the fulfilment was cancelled in Shopify).
@@ -189,6 +231,11 @@ async function upsert(orgId, n) {
       const f = n.shopifyFulfillments[0];
       doc.shipment = { carrier: "shopify", courierName: f.company, awb: f.number, trackingUrl: f.url };
     }
+    if (status === "shipped" && n.shopifyDelivery?.status === "delivered") {
+      doc.status = "delivered";
+      doc.deliveredAt = n.shopifyDelivery.at || new Date();
+      if (doc.shipment) doc.shipment.trackStatus = "delivered";
+    }
     await ShopifyOrder.create(doc);
     return "created";
   }
@@ -213,6 +260,7 @@ async function upsert(orgId, n) {
     const f = n.shopifyFulfillments[0];
     existing.shipment = { ...existing.shipment.toObject?.() || existing.shipment, courierName: f.company, awb: f.number, trackingUrl: f.url };
   }
+  applyDelivery(existing, n.shopifyDelivery);
   await existing.save();
   return "updated";
 }
@@ -247,12 +295,39 @@ async function syncStore(store, { full = false } = {}) {
       await ensureItems(store.organization, o, store, cache);
       await o.save();
     }
+    counts.delivered = await refreshDeliveries(store).catch((e) => (console.error(`Shopify delivery check failed: ${e.message}`), 0));
     await ShopifyStore.updateOne({ _id: store._id }, { lastSyncAt: startedAt, connected: true, sync: { running: false, startedAt, finishedAt: new Date(), ...counts, error: "" } });
   } catch (e) {
     await ShopifyStore.updateOne({ _id: store._id }, { sync: { running: false, startedAt, finishedAt: new Date(), ...counts, error: e.message } });
     throw e;
   }
   return counts;
+}
+
+// Shopify doesn't always mark an order as updated when its fulfilment gets delivered, so orders out with the
+// courier are checked directly (in batches) after every sync and every couple of hours.
+async function refreshDeliveries(store) {
+  const since = new Date(Date.now() - 120 * 86400000);
+  const open = (await ShopifyOrder.find({ organization: store.organization, status: "shipped" })).filter((o) => o.shopifyId && (!o.orderDate || o.orderDate >= since));
+  let changed = 0;
+  for (let i = 0; i < open.length; i += 50) {
+    const batch = open.slice(i, i + 50);
+    const data = await gql(store, `query($ids: [ID!]!) { nodes(ids: $ids) { ... on Order { id fulfillments(first: 10) { ${FULFILMENT} } } } }`, { ids: batch.map((o) => o.shopifyId) });
+    const byId = new Map((data.nodes || []).filter(Boolean).map((n) => [n.id, n]));
+    for (const o of batch) {
+      const n = byId.get(o.shopifyId);
+      if (n && applyDelivery(o, deliveryOf(n))) {
+        await o.save();
+        changed++;
+      }
+    }
+  }
+  if (changed) require("./orderIndex").forget(store.organization);
+  return changed;
+}
+
+async function refreshAllDeliveries() {
+  for (const s of await ShopifyStore.find({ connected: true })) await refreshDeliveries(s).catch((e) => console.error(`Shopify delivery check (${s.shop}) failed: ${e.message}`));
 }
 
 // Every 15 minutes: stores with auto-sync on.
@@ -262,7 +337,7 @@ async function autoSyncAll() {
   }
 }
 
-module.exports = { syncStore, autoSyncAll, normalise, upsert, ORDERS_QUERY, undoCancelledFulfilment };
+module.exports = { syncStore, autoSyncAll, normalise, upsert, ORDERS_QUERY, undoCancelledFulfilment, refreshDeliveries, refreshAllDeliveries, deliveryOf, applyDelivery };
 
 // Real-time: Shopify calls OrdexaGo when orders are created or updated (Dev Dashboard apps; signed with the client secret).
 async function registerWebhooks(store, baseUrl) {
