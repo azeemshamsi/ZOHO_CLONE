@@ -802,6 +802,7 @@ export function ShopifyOrders() {
   const [couriers, setCouriers] = useState([]);
   const [facets, setFacets] = useState({ states: [], tags: [], financial: [] });
   const [sellers, setSellers] = useState([]);
+  const brandSeller = useMemo(() => new Map(sellers.flatMap((x) => (x.brands || []).map((b) => [b.trim().toLowerCase().replace(/\s+/g, " "), x]))), [sellers]);
   const [sel, setSel] = useState(new Set());
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState(null);
@@ -1126,7 +1127,11 @@ export function ShopifyOrders() {
             </thead>
             <tbody>
               {rows.map((o) => {
-                const items = (o.lines || []).filter((l) => l.quantity > 0);
+                let items = (o.lines || []).filter((l) => l.quantity > 0);
+                // Marketplace sellers on this order: their products first when filtering by that seller, and a tag.
+                const sellerOf = (l) => brandSeller.get(String(l.vendor || "").trim().toLowerCase().replace(/\s+/g, " "));
+                if (filters.seller && filters.seller !== "own") items = [...items].sort((a, b) => (sellerOf(b)?._id === filters.seller) - (sellerOf(a)?._id === filters.seller));
+                const tags = [...new Map(items.map((l) => sellerOf(l)).filter(Boolean).map((x) => [x._id, x])).values()].map((x) => ({ name: x.name, n: items.filter((l) => sellerOf(l)?._id === x._id).length }));
                 const sh = o.shipment || {};
                 return (
                   <tr key={o._id} onClick={() => setView(o._id)} className={sel.has(o._id) ? "selected" : ""}>
@@ -1155,6 +1160,13 @@ export function ShopifyOrders() {
                         </div>
                       </div>
                       {items.length > 2 && <div className="muted">+{items.length - 2} more</div>}
+                      {tags.map((t) => (
+                        <div key={t.name} className="small" style={{ marginTop: 2 }}>
+                          <span className="status status-sent">
+                            {t.name}: {t.n} of {items.length} item{items.length > 1 ? "s" : ""}
+                          </span>
+                        </div>
+                      ))}
                     </td>
                     <td>
                       <strong>{money(o.total)}</strong>
