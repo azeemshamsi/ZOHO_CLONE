@@ -395,4 +395,23 @@ async function monthlyTick() {
   }
 }
 
-module.exports = { HOLD_DAYS, norm, brandMap, clearCache, sellerOfLine, sellersOfLines, assignAll, pickupFor, withPickup, pickupProblems, registerPickup, sellerProducts, setSellerStock, runMonthly, monthlyTick, monthRange, prevMonth, linePurchase, lineValue, deliveredOn };
+// Orders that will go on this seller's next purchase orders (delivered on/after poFrom, by the end of `month`, not on
+// a PO or excluded). ready: delivered at least HOLD_DAYS ago (else it waits for the next run).
+async function pendingOrders(seller, month) {
+  const ShopifyOrder = require("../models/ShopifyOrder");
+  const { to } = monthRange(month);
+  const ripe = new Date(Date.now() - HOLD_DAYS * 86400000);
+  const brands = new Set(seller.brands.map(norm));
+  return (await ShopifyOrder.find({ organization: seller.organization, sellers: seller._id, status: "delivered" }).lean())
+    .filter((o) => {
+      const d = deliveredOn(o);
+      return d && d <= to && (!seller.poFrom || d >= seller.poFrom) && !(o.sellerSettled || []).some((x) => String(x.seller) === String(seller._id));
+    })
+    .map((o) => {
+      const lines = o.lines.filter((l) => l.quantity > 0 && brands.has(norm(l.vendor)));
+      return { _id: o._id, name: o.name, orderDate: o.orderDate, deliveredAt: deliveredOn(o), ready: deliveredOn(o) <= ripe, items: lines.map((l) => `${l.quantity} × ${l.title}${l.sku ? ` (${l.sku})` : ""}`), value: r2(lines.reduce((t, l) => t + lineValue(l), 0)), amount: r2(lines.reduce((t, l) => t + linePurchase(seller, l), 0)) };
+    })
+    .sort((a, b) => new Date(a.deliveredAt) - new Date(b.deliveredAt));
+}
+
+module.exports = { pendingOrders, HOLD_DAYS, norm, brandMap, clearCache, sellerOfLine, sellersOfLines, assignAll, pickupFor, withPickup, pickupProblems, registerPickup, sellerProducts, setSellerStock, runMonthly, monthlyTick, monthRange, prevMonth, linePurchase, lineValue, deliveredOn };

@@ -308,6 +308,7 @@ function SellerDetail({ id, onClose, onEdit, onChanged }) {
   const [confirm, setConfirm] = useState(null);
   const [busyAcc, setBusyAcc] = useState("");
   const [codes, setCodes] = useState(null); // courier row being edited
+  const [pending, setPending] = useState(false);
   const load = () =>
     api
       .get(`/sellers/${id}`)
@@ -364,6 +365,9 @@ function SellerDetail({ id, onClose, onEdit, onChanged }) {
               Brands: <strong>{s.brands.join(", ")}</strong> · Rate <strong>{s.rate}%</strong>
             </span>
             <div style={{ flex: 1 }} />
+            <button className="btn btn-sm" onClick={() => setPending(true)}>
+              Next PO / exclude orders
+            </button>
             <Link className="btn btn-sm" to={`/shopify-orders?seller=${s._id}`} onClick={onClose}>
               Orders
             </Link>
@@ -538,6 +542,7 @@ function SellerDetail({ id, onClose, onEdit, onChanged }) {
           </div>
         </Modal>
       )}
+      {pending && s && <PendingOrders seller={s} onClose={() => setPending(false)} onChanged={onChanged} />}
       {codes && (
         <CourierCodes
           seller={s}
@@ -551,6 +556,176 @@ function SellerDetail({ id, onClose, onEdit, onChanged }) {
       )}
       <Confirm open={confirm?.kind === "login"} title={`Remove ${confirm?.name}'s login?`} text="They won't be able to log in to this seller dashboard any more." confirmLabel="Remove" onConfirm={() => removeLogin(confirm.id)} onCancel={() => setConfirm(null)} />
       <Confirm open={confirm?.kind === "delete"} title={`Delete ${s?.name}?`} text="Their orders become your own products again. Not possible once they have purchase orders — mark them inactive instead." onConfirm={remove} onCancel={() => setConfirm(null)} />
+    </Modal>
+  );
+}
+
+// What goes on this seller's next purchase order, and orders excluded for good (paid outside OrdexaGo).
+function PendingOrders({ seller, onClose, onChanged }) {
+  const [month, setMonth] = useState(prevMonth());
+  const [data, setData] = useState(null);
+  const [sel, setSel] = useState(new Set());
+  const [names, setNames] = useState("");
+  const [reason, setReason] = useState("Paid in the old software");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const load = () =>
+    api
+      .get(`/sellers/${seller._id}/pending`, { params: { month } })
+      .then((r) => {
+        setData(r.data);
+        setSel(new Set());
+      })
+      .catch((e) => toast(errMsg(e), "error"));
+  useEffect(() => {
+    load();
+  }, [month]);
+  const exclude = async (body) => {
+    setBusy(true);
+    try {
+      const { data: r } = await api.post(`/sellers/${seller._id}/exclude`, { ...body, reason });
+      setResult(r);
+      if (r.excluded.length) toast(`${r.excluded.length} order${r.excluded.length > 1 ? "s" : ""} excluded`);
+      setNames("");
+      load();
+      onChanged();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  const undo = async (o) => {
+    try {
+      await api.delete(`/sellers/${seller._id}/exclude/${o._id}`);
+      toast(`${o.name} can go on a purchase order again`);
+      load();
+      onChanged();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  const rows = data?.rows || [];
+  const total = rows.reduce((t, r) => t + r.amount, 0);
+  const allOn = rows.length > 0 && rows.every((r) => sel.has(r._id));
+  return (
+    <Modal open wide title={`${seller.name}: next purchase order`} onClose={onClose}>
+      {!data ? (
+        <Spinner />
+      ) : (
+        <div className="form-grid">
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <Field label="Delivered up to the end of">
+              <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+            </Field>
+            <p className="small muted" style={{ margin: 0, flex: 1, minWidth: 240 }}>
+              Delivered {data.poFrom ? `from ${date(data.poFrom)} ` : ""}to the end of {data.label}, not returned, not on a PO yet. "Waiting" ones aren't 7 days past delivery yet. Exclude orders already paid outside OrdexaGo — they never go on a purchase order.
+            </p>
+          </div>
+          {!rows.length ? (
+            <Empty title="Nothing due" />
+          ) : (
+            <div style={{ maxHeight: 340, overflow: "auto", border: "1px solid var(--line)", borderRadius: 8 }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 32 }}>
+                      <input type="checkbox" checked={allOn} onChange={() => setSel(allOn ? new Set() : new Set(rows.map((r) => r._id)))} aria-label="Select all" />
+                    </th>
+                    <th>Order</th>
+                    <th>Delivered</th>
+                    <th>Items</th>
+                    <th className="num">Sale value</th>
+                    <th className="num">PO amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r._id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={sel.has(r._id)}
+                          onChange={() => {
+                            const n = new Set(sel);
+                            n.has(r._id) ? n.delete(r._id) : n.add(r._id);
+                            setSel(n);
+                          }}
+                        />
+                      </td>
+                      <td className="strong">{r.name}</td>
+                      <td>
+                        {date(r.deliveredAt)}
+                        {!r.ready && <div className="small muted">Waiting (7 days)</div>}
+                      </td>
+                      <td className="small">{r.items.join(", ")}</td>
+                      <td className="num">{money(r.value)}</td>
+                      <td className="num">{money(r.amount)}</td>
+                    </tr>
+                  ))}
+                  <tr className="row-total">
+                    <td colSpan={5}>
+                      {rows.length} orders{sel.size ? ` · ${sel.size} selected` : ""}
+                    </td>
+                    <td className="num">{money(total)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="card" style={{ padding: 12 }}>
+            <div className="row-2">
+              <Field label="Reason">
+                <input value={reason} onChange={(e) => setReason(e.target.value)} />
+              </Field>
+              <Field label="Or paste order numbers" hint="From the old software, separated by spaces, commas or new lines">
+                <textarea rows={2} value={names} onChange={(e) => setNames(e.target.value)} placeholder="#199536 #199540 …" />
+              </Field>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="btn btn-primary" disabled={busy || !sel.size} onClick={() => exclude({ ids: [...sel] })}>
+                Exclude {sel.size || ""} selected
+              </button>
+              <button className="btn" disabled={busy || !names.trim()} onClick={() => exclude({ names })}>
+                Exclude pasted orders
+              </button>
+            </div>
+            {result && (
+              <div className="small" style={{ marginTop: 8 }}>
+                {result.excluded.length > 0 && <div>Excluded: {result.excluded.join(", ")}</div>}
+                {result.alreadyExcluded.length > 0 && <div className="muted">Already excluded: {result.alreadyExcluded.join(", ")}</div>}
+                {result.alreadyOnPo.length > 0 && <div style={{ color: "var(--red)" }}>Already on a PO: {result.alreadyOnPo.join(", ")}</div>}
+                {result.notThisSeller.length > 0 && <div style={{ color: "var(--red)" }}>No {seller.name} products: {result.notThisSeller.join(", ")}</div>}
+                {result.notFound.length > 0 && <div style={{ color: "var(--red)" }}>Not found: {result.notFound.join(", ")}</div>}
+              </div>
+            )}
+          </div>
+          <h4 style={{ margin: "6px 0 0" }}>Excluded orders ({data.excluded.length})</h4>
+          {!data.excluded.length ? (
+            <p className="small muted" style={{ margin: 0 }}>None.</p>
+          ) : (
+            <div style={{ maxHeight: 220, overflow: "auto" }}>
+              <table className="table">
+                <tbody>
+                  {data.excluded.map((o) => (
+                    <tr key={o._id}>
+                      <td className="strong">{o.name}</td>
+                      <td className="small">{o.deliveredAt ? `Delivered ${date(o.deliveredAt)}` : ""}</td>
+                      <td className="small muted">
+                        {o.reason} · {date(o.at)}
+                      </td>
+                      <td className="num">
+                        <button className="btn btn-sm" onClick={() => undo(o)}>
+                          Undo
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </Modal>
   );
 }

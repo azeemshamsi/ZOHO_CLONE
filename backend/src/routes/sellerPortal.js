@@ -48,7 +48,7 @@ function view(o, s) {
     payout: Math.round(lines.reduce((t, l) => t + S.linePurchase(s, l), 0) * 100) / 100,
     shipment: sh.awb ? { courierName: sh.courierName, awb: sh.awb, trackStatus: sh.trackStatus, trackingUrl: sh.trackingUrl, bookedAt: sh.bookedAt, fromYou: !!mine, events: (sh.events || []).slice(0, 10) } : null,
     deliveredAt: o.deliveredAt || null,
-    settled: settled ? { number: settled.number, amount: settled.amount, at: settled.at } : null,
+    settled: settled ? (settled.excluded ? { excluded: true } : { number: settled.number, amount: settled.amount, at: settled.at }) : null,
   };
 }
 

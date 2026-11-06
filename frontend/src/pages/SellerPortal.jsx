@@ -188,7 +188,7 @@ function Orders({ counts }) {
                         {o.shipment.trackStatus && <div className="muted">{TRACK[o.shipment.trackStatus] || o.shipment.trackStatus}</div>}
                       </div>
                     )}
-                    {o.settled && <div className="muted">On PO {o.settled.number}</div>}
+                    {o.settled && <div className="muted">{o.settled.excluded ? "Settled earlier" : `On PO ${o.settled.number}`}</div>}
                   </td>
                   <td className="num">{money(o.payout)}</td>
                   <td className="num">

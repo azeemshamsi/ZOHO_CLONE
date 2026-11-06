@@ -108,7 +108,8 @@ const shopifyOrderSchema = new mongoose.Schema(
     deliveredChecked: Boolean, // deliveredAt confirmed from Shopify's fulfilment
     // Marketplace sellers whose products are on this order (from each line's Shopify Vendor) and what was settled.
     sellers: { type: [mongoose.Schema.Types.ObjectId], default: [] },
-    sellerSettled: [{ _id: false, seller: mongoose.Schema.Types.ObjectId, purchaseOrder: mongoose.Schema.Types.ObjectId, number: String, organization: mongoose.Schema.Types.ObjectId, amount: Number, at: Date }],
+    // excluded: settled outside OrdexaGo (e.g. paid in the old software) — never goes on a purchase order.
+    sellerSettled: [{ _id: false, seller: mongoose.Schema.Types.ObjectId, purchaseOrder: mongoose.Schema.Types.ObjectId, number: String, organization: mongoose.Schema.Types.ObjectId, amount: Number, at: Date, excluded: Boolean, reason: String, by: mongoose.Schema.Types.ObjectId }],
     invoice: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },
     invoiceNumber: String,
     invoiceOrg: { type: mongoose.Schema.Types.ObjectId, ref: "Organization" }, // the company the invoice is in

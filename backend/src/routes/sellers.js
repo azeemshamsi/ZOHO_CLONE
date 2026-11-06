@@ -169,11 +169,75 @@ router.delete(
   ah(async (req, res) => {
     const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
     if (!s) throw new HttpError(404, "Seller not found");
-    if (await ShopifyOrder.exists({ organization: req.storeOrg, "sellerSettled.seller": s._id })) throw new HttpError(400, "This seller has purchase orders. Mark them inactive instead.");
+    const withPo = (await ShopifyOrder.find({ organization: req.storeOrg, "sellerSettled.seller": s._id }, { sellerSettled: 1 }).lean()).some((o) => o.sellerSettled.some((x) => String(x.seller) === String(s._id) && x.purchaseOrder));
+    if (withPo) throw new HttpError(400, "This seller has purchase orders. Mark them inactive instead.");
     await Membership.deleteMany({ organization: req.storeOrg, seller: s._id, role: "seller" });
     await SellerPenalty.deleteMany({ seller: s._id, purchaseOrder: { $exists: false } });
     await s.deleteOne();
     await S.assignAll(req.storeOrg);
+    res.send({ ok: true });
+  })
+);
+
+/* ---------- orders due on the next PO, and orders excluded (settled outside OrdexaGo) ---------- */
+router.get(
+  "/:id/pending",
+  ah(async (req, res) => {
+    const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
+    if (!s) throw new HttpError(404, "Seller not found");
+    const month = /^\d{4}-\d{2}$/.test(req.query.month || "") ? req.query.month : S.prevMonth();
+    const rows = await S.pendingOrders(s, month);
+    const excluded = (await ShopifyOrder.find({ organization: req.storeOrg, "sellerSettled.seller": s._id }, { name: 1, orderDate: 1, deliveredAt: 1, sellerSettled: 1 }).lean())
+      .map((o) => ({ o, x: o.sellerSettled.find((y) => String(y.seller) === String(s._id) && y.excluded) }))
+      .filter((r) => r.x)
+      .map(({ o, x }) => ({ _id: o._id, name: o.name, orderDate: o.orderDate, deliveredAt: o.deliveredAt, reason: x.reason, at: x.at }))
+      .sort((a, b) => new Date(b.at) - new Date(a.at));
+    res.send({ month, label: S.monthRange(month).label, poFrom: s.poFrom, rows, excluded });
+  })
+);
+
+// Exclude orders from this seller's purchase orders for good (already paid outside OrdexaGo): by id or order number.
+router.post(
+  "/:id/exclude",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ ids: Joi.array().items(Joi.string()).default([]), names: Joi.string().allow("").default(""), reason: Joi.string().trim().max(200).allow("").default("") }), req.body);
+    const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
+    if (!s) throw new HttpError(404, "Seller not found");
+    const wanted = d.names.split(/[\s,;]+/).map((x) => x.trim().replace(/^#?/, "#")).filter((x) => x.length > 1);
+    const found = [];
+    if (d.ids.length) found.push(...(await ShopifyOrder.find({ _id: { $in: d.ids }, organization: req.storeOrg })));
+    if (wanted.length) found.push(...(await ShopifyOrder.find({ organization: req.storeOrg, name: { $in: [...new Set(wanted)] } })));
+    const out = { excluded: [], alreadyOnPo: [], alreadyExcluded: [], notThisSeller: [], notFound: wanted.filter((n) => !found.some((o) => o.name === n)) };
+    const seen = new Set();
+    for (const o of found) {
+      if (seen.has(String(o._id))) continue;
+      seen.add(String(o._id));
+      if (!o.sellers.map(String).includes(String(s._id))) {
+        out.notThisSeller.push(o.name);
+        continue;
+      }
+      const x = (o.sellerSettled || []).find((y) => String(y.seller) === String(s._id));
+      if (x) {
+        (x.excluded ? out.alreadyExcluded : out.alreadyOnPo).push(x.excluded ? o.name : `${o.name} (${x.number})`);
+        continue;
+      }
+      await ShopifyOrder.updateOne({ _id: o._id }, { $push: { sellerSettled: { seller: s._id, excluded: true, number: "Excluded", reason: d.reason || "Settled outside OrdexaGo", at: new Date(), by: req.user._id } } });
+      out.excluded.push(o.name);
+    }
+    res.send(out);
+  })
+);
+
+// Undo an exclusion: the order can go on a purchase order again.
+router.delete(
+  "/:id/exclude/:orderId",
+  ah(async (req, res) => {
+    const o = await ShopifyOrder.findOne({ _id: req.params.orderId, organization: req.storeOrg });
+    if (!o) throw new HttpError(404, "Order not found");
+    const before = (o.sellerSettled || []).length;
+    o.sellerSettled = (o.sellerSettled || []).filter((y) => !(String(y.seller) === req.params.id && y.excluded));
+    if (o.sellerSettled.length === before) throw new HttpError(400, "This order isn't excluded");
+    await o.save();
     res.send({ ok: true });
   })
 );
