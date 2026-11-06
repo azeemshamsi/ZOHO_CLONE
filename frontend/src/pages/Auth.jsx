@@ -19,7 +19,9 @@ export function AuthShell({ title, subtitle, children, footer }) {
             <li>Record payments by UPI, bank, cash or cheque</li>
           </ul>
         </div>
-        <p className="auth-foot">© {new Date().getFullYear()} OrdexaGo</p>
+        <p className="auth-foot">
+          © {new Date().getFullYear()} OrdexaGo · <Link to="/privacy" style={{ color: "inherit" }}>Privacy</Link>
+        </p>
       </div>
       <div className="auth-main">
         <div className="auth-card">

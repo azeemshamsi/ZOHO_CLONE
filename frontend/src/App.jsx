@@ -50,6 +50,7 @@ import Superadmin from "./pages/Superadmin";
 import Itc from "./pages/Itc";
 import AmazonSales from "./pages/AmazonSales";
 import AmazonSettings from "./pages/AmazonSettings";
+import Privacy from "./pages/Privacy";
 import Sellers from "./pages/Sellers";
 import SellerPortal from "./pages/SellerPortal";
 
@@ -73,6 +74,7 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
         <Route path="/signup" element={<PublicOnly><Signup /></PublicOnly>} />
+        <Route path="/privacy" element={<Privacy />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password/:id/:token" element={<ResetPassword />} />
         <Route path="/verify/:id/:token" element={<VerifyEmail />} />

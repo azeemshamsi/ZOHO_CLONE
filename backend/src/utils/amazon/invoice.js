@@ -80,11 +80,14 @@ async function invoiceAmazonOrder(order, acc, { user } = {}) {
   const t = computeTotals({ lineItems, orgState: org.state, placeOfSupply: pos });
   const adjustment = r2((order.total || t.total) - t.total);
   const iso = isoIst(new Date());
+  const needsAddress = !!customer.gstin || (order.total || t.total) >= 50000;
   const ctx = { org: orgId, user: user || null };
   const body = {
     customer: String(customer._id),
-    billingAddress: customer.gstin ? undefined : { street: [sa.address1, sa.address2].filter(Boolean).join(", "), city: sa.city || "", state: sa.state || "", pincode: sa.zip || "", country: sa.country || "India" },
-    shipTo: { name: sa.name || order.customer?.name || "", phone: sa.phone || "", street: [sa.address1, sa.address2].filter(Boolean).join(", "), city: sa.city || "", state: sa.state || "", pincode: sa.zip || "", country: sa.country || "India" },
+    billingAddress: customer.gstin ? undefined : { street: needsAddress ? [sa.address1, sa.address2].filter(Boolean).join(", ") : "", city: sa.city || "", state: sa.state || "", pincode: sa.zip || "", country: sa.country || "India" },
+    // Buyer's name, phone and street only where GST needs them (business buyer, or ₹50,000 or more — Rule 46):
+    // Amazon buyer data isn't kept beyond what the law requires.
+    shipTo: needsAddress ? { name: sa.name || order.customer?.name || "", phone: "", street: [sa.address1, sa.address2].filter(Boolean).join(", "), city: sa.city || "", state: sa.state || "", pincode: sa.zip || "", country: sa.country || "India" } : { name: "", phone: "", street: "", city: sa.city || "", state: sa.state || "", pincode: sa.zip || "", country: sa.country || "India" },
     date: iso,
     dueDate: iso,
     placeOfSupply: pos,
@@ -92,7 +95,7 @@ async function invoiceAmazonOrder(order, acc, { user } = {}) {
     adjustment,
     ledger: await salesLedger(orgId, acc.ledger),
     orderNumber: order.name,
-    customerNotes: `Amazon ${order.amazon?.easyShip ? "Easy Ship" : "self-ship"} order ${order.name}${order.paymentMode === "cod" ? " · Cash on delivery" : ""}${order.customer?.name && !customer.gstin ? ` · ${order.customer.name}` : ""}`,
+    customerNotes: `Amazon ${order.amazon?.easyShip ? "Easy Ship" : "self-ship"} order ${order.name}${order.paymentMode === "cod" ? " · Cash on delivery" : ""}`,
     terms: org.defaultTerms || "",
     status: acc.invoiceStatus || "sent",
   };

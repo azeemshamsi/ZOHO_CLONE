@@ -168,11 +168,11 @@ async function upsert(acc, storeOrg, o, cache = {}) {
   doc.markModified("amazon");
   for (const k of ["shopifyUpdatedAt", "fulfillmentStatus", "financialStatus", "tags", "gateways"]) doc[k] = n[k];
   // The address can arrive later (e.g. once the restricted role is granted); never blank out what's there.
-  if (n.shippingAddress.address1 || !doc.shippingAddress?.address1) {
+  if (!doc.amazon?.piiErasedAt && (n.shippingAddress.address1 || !doc.shippingAddress?.address1)) {
     doc.shippingAddress = n.shippingAddress;
     doc.billingAddress = n.billingAddress;
   }
-  if (n.customer.name !== "Amazon customer" || !doc.customer?.name) doc.customer = n.customer;
+  if (!doc.amazon?.piiErasedAt && (n.customer.name !== "Amazon customer" || !doc.customer?.name)) doc.customer = n.customer;
   if (!doc.invoice) {
     const linked = new Map(doc.lines.map((l) => [l.lineId, l.item]));
     for (const k of ["lines", "subtotal", "discount", "shippingTotal", "total", "prepaidAmount", "codAmount", "outstanding", "paymentMode"]) doc[k] = n[k];
@@ -276,4 +276,35 @@ async function autoSyncAll() {
   }
 }
 
-module.exports = { normalise, upsert, syncAccount, autoSyncAll, storeOrgFor, autoInvoice, shouldInvoice, lineOf, SEARCH };
+/**
+ * Amazon's Data Protection Policy: buyer PII is kept no longer than 30 days after delivery. Orders delivered,
+ * cancelled, returned or RTO more than 30 days ago lose the buyer's name, phone, email and street address (city,
+ * state and pincode stay for GST), and Amazon's label PDF is deleted. Runs every hour; marks amazon.piiErasedAt.
+ */
+const PII_DAYS = 30;
+async function erasePii({ now = new Date() } = {}) {
+  const cut = new Date(now.getTime() - PII_DAYS * 86400000);
+  const done = ["delivered", "cancelled", "returned", "rto"];
+  const orders = (await ShopifyOrder.find({ channel: "amazon", status: { $in: done } }).select("+shipment.labelPdf")).filter((o) => {
+    if (o.amazon?.piiErasedAt) return false;
+    const at = o.status === "delivered" ? o.deliveredAt : o.status === "cancelled" ? o.cancelledAt : o.returnedAt || o.statusChangedAt;
+    return (at || o.statusChangedAt || o.updatedAt) < cut;
+  });
+  const keep = (a = {}) => ({ name: "", company: "", address1: "", address2: "", city: a.city || "", province: a.province || "", state: a.state || "", zip: a.zip || "", country: a.country || "India", phone: "" });
+  for (const o of orders) {
+    o.customer = { name: "Amazon buyer", email: "", phone: "" };
+    o.shippingAddress = keep(o.shippingAddress);
+    o.billingAddress = keep(o.billingAddress);
+    if (o.shipment) {
+      o.shipment.labelPdf = undefined;
+      o.markModified("shipment");
+    }
+    o.amazon = { ...o.amazon, piiErasedAt: now };
+    o.markModified("amazon");
+    await o.save();
+  }
+  if (orders.length) for (const org of new Set(orders.map((o) => String(o.organization)))) require("../shopify/orderIndex").forget(org);
+  return orders.length;
+}
+
+module.exports = { erasePii, PII_DAYS, normalise, upsert, syncAccount, autoSyncAll, storeOrgFor, autoInvoice, shouldInvoice, lineOf, SEARCH };

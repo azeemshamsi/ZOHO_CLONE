@@ -235,3 +235,29 @@ test("wrong keys give Amazon's reason", async () => {
   const { tokenFor } = require(B + "utils/amazon/client");
   await assert.rejects(() => tokenFor({ clientId: "c", clientSecret: "s", refreshToken: "bad" }), /invalid grant/);
 });
+
+test("buyer details are erased 30 days after delivery and not brought back by a sync", async () => {
+  const D = saved.get("amazon:408-4444444-4444444");
+  D.deliveredAt = new Date(now - 31 * 86400e3);
+  D.shipment.labelPdf = Buffer.from("x");
+  const A = saved.get("amazon:408-1111111-1111111");
+  A.status = "delivered";
+  A.deliveredAt = new Date(now - 5 * 86400e3);
+  const all = () => [...saved.values()];
+  ShopifyOrder.find = () => ({ select: async () => all().filter((o) => o.channel === "amazon") });
+  const n = await AO.erasePii();
+  assert.equal(n, 1);
+  assert.deepEqual([D.customer.name, D.customer.phone, D.shippingAddress.address1, D.shippingAddress.name, D.shippingAddress.zip, D.shippingAddress.state], ["Amazon buyer", "", "", "", "226001", "09"]);
+  assert.equal(D.shipment.labelPdf, undefined);
+  assert.ok(D.amazon.piiErasedAt);
+  assert.equal(A.shippingAddress.address1, "12 MG Road", "delivered 5 days ago: kept");
+  await AO.upsert(acc, D.organization, ORDERS[3]);
+  assert.equal(D.shippingAddress.address1, "", "a later sync doesn't restore it");
+  assert.equal(await AO.erasePii(), 0);
+});
+
+test("consumer invoices under ₹50,000 carry no buyer name, phone or street", () => {
+  const inv = invoices.find((i) => customers.find((c) => String(c._id) === i.body.customer)?.displayName === "Amazon B2C" && i.total === 950);
+  assert.deepEqual([inv.body.shipTo.name, inv.body.shipTo.phone, inv.body.shipTo.street, inv.body.shipTo.pincode], ["", "", "", "411001"]);
+  assert.ok(!/Ravi/.test(inv.body.customerNotes));
+});
