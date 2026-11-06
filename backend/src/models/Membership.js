@@ -5,7 +5,8 @@ const membershipSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true },
-    role: { type: String, default: "admin" }, // built-in key, or "custom:<roleId>"
+    role: { type: String, default: "admin" }, // main role: built-in key, or "custom:<roleId>" (decides the home page)
+    extraRoles: { type: [String], default: [] }, // more roles: permissions combine, the highest level per module wins
     status: { type: String, enum: ["active", "invited", "inactive"], default: "active" },
     invitedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     seller: { type: mongoose.Schema.Types.ObjectId, ref: "Seller" }, // role "seller": a marketplace seller's own login

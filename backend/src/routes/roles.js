@@ -35,7 +35,8 @@ router.put(
 router.delete(
   "/:id",
   ah(async (req, res) => {
-    const n = await Membership.countDocuments({ organization: req.org, role: `custom:${req.params.id}` });
+    const key = `custom:${req.params.id}`;
+    const n = (await Membership.find({ organization: req.org }, { role: 1, extraRoles: 1 }).lean()).filter((m) => m.role === key || (m.extraRoles || []).includes(key)).length;
     if (n) throw new HttpError(400, `${n} user${n === 1 ? " has" : "s have"} this role. Give them another role first.`);
     await Role.deleteOne({ _id: req.params.id, organization: req.org });
     res.send({ ok: true });

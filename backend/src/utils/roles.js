@@ -36,8 +36,24 @@ const ROLES = {
 const permsOf = (role) => (ROLES[role] || ROLES.viewer).perms;
 const CORE = ["sales", "purchases", "items", "inventory", "banking", "accountant", "reports", "gst"];
 
-// Permissions for a role key in an organization (built-in or custom).
-async function resolveRole(role, org) {
+// Permissions for a user's roles in an organization: the main role plus any extra roles, combined (the highest
+// level per module wins). The label joins the names; the home page is the main role's.
+async function resolveRole(role, org, extra = []) {
+  const main = await resolveOne(role, org);
+  const more = [...new Set((extra || []).filter((x) => x && x !== role))];
+  if (!more.length) return main;
+  const rank = { none: 0, view: 1, full: 2 };
+  const perms = { ...main.perms };
+  const labels = [main.label];
+  for (const k of more) {
+    const r = await resolveOne(k, org);
+    labels.push(r.label);
+    for (const key of KEYS) if (rank[r.perms[key] || "none"] > rank[perms[key] || "none"]) perms[key] = r.perms[key];
+  }
+  return { label: labels.join(" + "), perms, home: main.home };
+}
+
+async function resolveOne(role, org) {
   if (String(role || "").startsWith("custom:")) {
     const Role = require("../models/Role");
     const r = await Role.findOne({ _id: role.slice(7), organization: org }).lean().catch(() => null);

@@ -16,7 +16,7 @@ async function checkRole(org, role) {
   if (/^custom:[a-f0-9]{24}$/.test(role) && (await Role.exists({ _id: role.slice(7), organization: org }))) return role;
   throw new HttpError(400, "Choose a valid role");
 }
-const pub = (u, m) => ({ _id: u._id, name: u.name, email: u.email, role: m.role, status: m.status === "invited" || u.status === "invited" ? "invited" : m.status, lastLogin: u.lastLogin, createdAt: m.createdAt });
+const pub = (u, m) => ({ _id: u._id, name: u.name, email: u.email, role: m.role, roles: [m.role, ...(m.extraRoles || [])], status: m.status === "invited" || u.status === "invited" ? "invited" : m.status, lastLogin: u.lastLogin, createdAt: m.createdAt });
 
 async function invite(req, user, role) {
   user.inviteToken = crypto.randomBytes(24).toString("hex");
@@ -59,6 +59,15 @@ router.get(
   })
 );
 
+// One or more roles → [main, ...extra]. Admin already has everything, so it stands alone; a seller login is separate.
+async function checkRoles(org, data) {
+  const list = [...new Set([...(data.roles || []), ...(data.role ? [data.role] : [])].filter(Boolean))];
+  if (!list.length) throw new HttpError(400, "Choose at least one role");
+  for (const r of list) await checkRole(org, r);
+  if (list.includes("admin")) return ["admin"];
+  return list;
+}
+
 router.post(
   "/",
   ah(async (req, res) => {
@@ -66,24 +75,25 @@ router.post(
       Joi.object({
         name: Joi.string().trim().min(2).max(100).required().label("Name"),
         email: Joi.string().email().required().label("Email"),
-        role: Joi.string().required().label("Role"),
+        role: Joi.string().allow(""),
+        roles: Joi.array().items(Joi.string()).max(10),
       }),
       req.body
     );
-    const role = await checkRole(req.org, data.role);
+    const [role, ...extraRoles] = await checkRoles(req.org, data);
     const email = data.email.toLowerCase();
     let user = await User.findOne({ email });
     await require("../utils/subscription").checkLimit(req.org, "users", { userId: user?._id });
     if (user) {
       // Already has an OrdexaGo login (e.g. in your other company): just give access here.
       if (await Membership.exists({ user: user._id, organization: req.org })) throw new HttpError(409, "This person already has access to this company");
-      const m = await Membership.create({ user: user._id, organization: req.org, role, status: user.status === "invited" ? "invited" : "active", invitedBy: req.user._id });
+      const m = await Membership.create({ user: user._id, organization: req.org, role, extraRoles, status: user.status === "invited" ? "invited" : "active", invitedBy: req.user._id });
       if (user.status === "invited") return res.status(201).send({ user: pub(user, m), ...(await invite(req, user, role)) });
       return res.status(201).send({ user: pub(user, m), added: true, message: `${user.name} already has an OrdexaGo login and can now open this company from the company switcher.` });
     }
     user = new User({ name: data.name, email, role, organization: req.org, status: "invited", invitedBy: req.user._id, verified: true });
     const r = await invite(req, user, role);
-    const m = await Membership.create({ user: user._id, organization: req.org, role, status: "invited", invitedBy: req.user._id });
+    const m = await Membership.create({ user: user._id, organization: req.org, role, extraRoles, status: "invited", invitedBy: req.user._id });
     res.status(201).send({ user: pub(user, m), ...r });
   })
 );
@@ -110,15 +120,22 @@ async function guardLastAdmin(req, m, next) {
 router.put(
   "/:id",
   ah(async (req, res) => {
-    const data = validate(Joi.object({ name: Joi.string().trim().min(2).max(100), role: Joi.string(), status: Joi.string().valid("active", "inactive") }), req.body);
+    const data = validate(Joi.object({ name: Joi.string().trim().min(2).max(100), role: Joi.string(), roles: Joi.array().items(Joi.string()).max(10), status: Joi.string().valid("active", "inactive") }), req.body);
     const m = await Membership.findOne({ user: req.params.id, organization: req.org });
     const user = m && (await User.findById(req.params.id));
     if (!user) throw new HttpError(404, "User not found");
-    if (data.role) data.role = await checkRole(req.org, data.role);
+    let extra;
+    if (data.roles || data.role) {
+      if (m.role === "seller") throw new HttpError(400, "A seller login's access is managed under Store → Sellers");
+      [data.role, ...extra] = await checkRoles(req.org, { roles: data.roles || [data.role] });
+    }
     if (data.status && m.status === "invited") throw new HttpError(400, "This user hasn't accepted the invitation yet");
     await guardLastAdmin(req, m, { role: data.role || m.role, status: data.status || m.status });
     if (data.status === "active" && m.status === "inactive") await require("../utils/subscription").checkLimit(req.org, "users", { userId: user._id });
-    if (data.role) m.role = data.role;
+    if (data.role) {
+      m.role = data.role;
+      m.extraRoles = extra;
+    }
     if (data.status) m.status = data.status;
     await m.save();
     if (data.name) {

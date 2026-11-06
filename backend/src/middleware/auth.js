@@ -31,7 +31,7 @@ module.exports = async function auth(req, res, next) {
     // Subscription: an expired / suspended subscriber can't use OrdexaGo (the superadmin always can).
     const sub = user.superadmin ? { state: "unlimited", blocked: false } : stateOf(await subscriberOfOrg(m.organization));
     if (sub.blocked) return res.status(402).send({ message: sub.message, subscription: sub.state });
-    const r = await resolveRole(m.role, m.organization);
+    const r = await resolveRole(m.role, m.organization, m.extraRoles);
     user.role = m.role; // in memory only: the role in this company
     req.user = user;
     req.org = m.organization;

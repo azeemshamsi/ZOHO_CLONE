@@ -69,7 +69,7 @@ export function UsersPage() {
                   {u.name} {u.you && <span className="muted small">(you)</span>}
                 </td>
                 <td>{u.email}</td>
-                <td>{roleLabel(u.role)}</td>
+                <td>{(u.roles || [u.role]).map(roleLabel).join(" + ")}</td>
                 <td>
                   <span className={`status status-${statusCls[u.status]}`}>{u.status === "invited" ? "Invited" : u.status === "active" ? "Active" : "Inactive"}</span>
                 </td>
@@ -194,7 +194,15 @@ export function UsersPage() {
 }
 
 function UserModal({ roles, user, onClose, onSaved }) {
-  const [form, setForm] = useState({ name: user?.name || "", email: user?.email || "", role: user?.role || "staff" });
+  const [form, setForm] = useState({ name: user?.name || "", email: user?.email || "", roles: user?.roles || (user?.role ? [user.role] : ["staff"]) });
+  // Admin already has everything, so it's on its own; other roles can be combined.
+  const toggle = (k) => {
+    const on = form.roles.includes(k);
+    if (k === "admin") return setForm({ ...form, roles: on ? [] : ["admin"] });
+    const rest = form.roles.filter((x) => x !== "admin");
+    setForm({ ...form, roles: on ? rest.filter((x) => x !== k) : [...rest, k] });
+  };
+  const setMain = (k) => setForm({ ...form, roles: [k, ...form.roles.filter((x) => x !== k)] });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const save = async () => {
@@ -202,11 +210,11 @@ function UserModal({ roles, user, onClose, onSaved }) {
     setError("");
     try {
       if (user) {
-        await api.put(`/users/${user._id}`, { name: form.name, role: form.role });
+        await api.put(`/users/${user._id}`, { name: form.name, roles: form.roles });
         toast("User updated");
         onSaved();
       } else {
-        const { data } = await api.post("/users", form);
+        const { data } = await api.post("/users", { name: form.name, email: form.email, roles: form.roles });
         if (data.added) {
           toast(data.message);
           onSaved();
@@ -227,7 +235,7 @@ function UserModal({ roles, user, onClose, onSaved }) {
       onClose={onClose}
       footer={
         <>
-          <button className="btn btn-primary" disabled={busy} onClick={save}>
+          <button className="btn btn-primary" disabled={busy || !form.roles.length} onClick={save}>
             {user ? "Save" : "Send Invite"}
           </button>
           <button className="btn" onClick={onClose}>
@@ -243,11 +251,11 @@ function UserModal({ roles, user, onClose, onSaved }) {
         <Field label="Email" required>
           <input type="email" value={form.email} disabled={!!user} onChange={(e) => setForm({ ...form, email: e.target.value })} />
         </Field>
-        <Field label="Role" required>
+        <Field label="Roles" required hint="Tick one or more. With several roles they get everything each role allows.">
           <div className="role-grid">
             {roles.map((r) => (
-              <label key={r.key} className={`role-card ${form.role === r.key ? "on" : ""}`}>
-                <input type="radio" checked={form.role === r.key} onChange={() => setForm({ ...form, role: r.key })} />
+              <label key={r.key} className={`role-card ${form.roles.includes(r.key) ? "on" : ""}`}>
+                <input type="checkbox" checked={form.roles.includes(r.key)} onChange={() => toggle(r.key)} />
                 <span>
                   <strong>{r.label}</strong>
                   <div className="muted small">{r.desc}</div>
@@ -256,6 +264,17 @@ function UserModal({ roles, user, onClose, onSaved }) {
             ))}
           </div>
         </Field>
+        {form.roles.length > 1 && (
+          <Field label="Main role" hint="Decides the page they open on after logging in">
+            <select value={form.roles[0]} onChange={(e) => setMain(e.target.value)}>
+              {form.roles.map((k) => (
+                <option key={k} value={k}>
+                  {roles.find((r) => r.key === k)?.label || k}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         {error && <div className="alert alert-error">{error}</div>}
       </div>
     </Modal>

@@ -30,7 +30,7 @@ async function companiesOf(user) {
   const ms = await Membership.find({ user: user._id, status: "active" }).populate("organization", "name gstin state").lean();
   const { resolveRole } = require("../utils/roles");
   const out = [];
-  for (const m of ms) if (m.organization) out.push({ _id: m.organization._id, name: m.organization.name, gstin: m.organization.gstin, role: (await resolveRole(m.role, m.organization._id)).label });
+  for (const m of ms) if (m.organization) out.push({ _id: m.organization._id, name: m.organization.name, gstin: m.organization.gstin, role: (await resolveRole(m.role, m.organization._id, m.extraRoles)).label });
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -39,7 +39,7 @@ async function sessionPayload(user, wanted) {
   const m = await membershipFor(user, wanted);
   if (!m) throw new HttpError(403, "You don't have access to any company. Contact your admin.");
   const subscription = await require("../utils/subscription").assertAccess(user, m.organization);
-  const r = await require("../utils/roles").resolveRole(m.role, m.organization);
+  const r = await require("../utils/roles").resolveRole(m.role, m.organization, m.extraRoles);
   user.role = m.role;
   const organization = await Organization.findById(m.organization);
   return { token: user.generateAuthToken(), user: user.toPublic(r), organization, organizations: await companiesOf(user), subscription };

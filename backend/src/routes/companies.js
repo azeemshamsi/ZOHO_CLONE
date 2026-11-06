@@ -12,7 +12,7 @@ router.get(
     const ms = await Membership.find({ user: req.user._id, status: "active" }).populate("organization", "name gstin state").lean();
     const { resolveRole } = require("../utils/roles");
     const out = [];
-    for (const m of ms.filter((x) => x.organization)) out.push({ _id: m.organization._id, name: m.organization.name, gstin: m.organization.gstin, state: m.organization.state, role: (await resolveRole(m.role, m.organization._id)).label, current: String(m.organization._id) === String(req.org) });
+    for (const m of ms.filter((x) => x.organization)) out.push({ _id: m.organization._id, name: m.organization.name, gstin: m.organization.gstin, state: m.organization.state, role: (await resolveRole(m.role, m.organization._id, m.extraRoles)).label, current: String(m.organization._id) === String(req.org) });
     res.send(out);
   })
 );
