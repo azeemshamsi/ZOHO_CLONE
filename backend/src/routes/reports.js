@@ -183,7 +183,7 @@ router.get(
           }
         }
         r.parties = [...map.values()]
-          .filter((p) => p.net || (detail && p.txns.length))
+          .filter((p) => p.net || req.query.zero === "1") // as Tally: parties with a nil balance are hidden
           .map((p) => ({ id: p.id, kind: p.kind, name: p.name, debit: p.net > 0 ? p.net : 0, credit: p.net < 0 ? -p.net : 0, ...(detail ? { opening: p.opening, txns: p.txns } : {}) }))
           .sort((a, b) => (a.id ? 0 : 1) - (b.id ? 0 : 1) || a.name.localeCompare(b.name));
       }

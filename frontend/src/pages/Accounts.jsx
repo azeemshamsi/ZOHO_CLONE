@@ -176,6 +176,7 @@ export function AccountDetail() {
   const [params, setParams] = useSearchParams();
   // Accounts Receivable / Payable: party-wise (default), one party's transactions (?party=), or all (?by=txn).
   const party = params.get("party") || "";
+  const [showZero, setShowZero] = useState(false); // as Tally: parties with a nil closing balance hidden
   const by = params.get("by") || "";
   const go = (next) => {
     const p = new URLSearchParams(params);
@@ -261,7 +262,7 @@ export function AccountDetail() {
               </tr>
             </thead>
             <tbody>
-              {data.parties.map((p) => (
+              {data.parties.filter((p) => showZero || p.closing).map((p) => (
                 <tr key={p.id} onClick={() => go({ party: p.id, by: "" })}>
                   <td className={p.id === "other" ? "muted" : "link"}>{p.name}</td>
                   <td className="num">{p.opening ? money(p.opening) : ""}</td>
@@ -278,7 +279,14 @@ export function AccountDetail() {
                 </tr>
               )}
               <tr className="row-total">
-                <td>{data.parties.length} {a.code === "ar" ? "customers" : "vendors"}</td>
+                <td>
+                  {data.parties.filter((p) => showZero || p.closing).length} {a.code === "ar" ? "customers" : "vendors"}
+                  {data.parties.some((p) => !p.closing) && (
+                    <button type="button" className="link-btn small" style={{ marginLeft: 10, fontWeight: 400 }} onClick={() => setShowZero(!showZero)}>
+                      {showZero ? "Hide nil balances" : `Show ${data.parties.filter((p) => !p.closing).length} with nil balance`}
+                    </button>
+                  )}
+                </td>
                 <td className="num">{money(data.opening)}</td>
                 <td className="num">{money(data.totals.debit)}</td>
                 <td className="num">{money(data.totals.credit)}</td>
