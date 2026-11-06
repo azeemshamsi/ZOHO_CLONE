@@ -32,6 +32,7 @@ const NAV = [
       { to: "/payments", label: "Payments Received" },
       { to: "/credit-notes", label: "Credit Notes" },
       { to: "/sales-ledgers", label: "Sales Ledgers" },
+      { to: "/amazon", label: "Amazon Sales" },
     ],
   },
   {
@@ -118,6 +119,7 @@ const PATH_MODULES = [
   ["/inventory", "inventory"],
   ["/gst", "gst"],
   ["/itc", ["gst", "purchases", "accountant", "reports"]],
+  ["/amazon", "sales"],
   ["/quotes", "sales"],
   ["/sales-orders", "sales"],
   ["/invoices", "sales"],
