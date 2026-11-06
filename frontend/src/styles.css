@@ -857,3 +857,7 @@ tr.clickable:hover td { background: var(--brand-50); }
 /* Removable tag (seller brands) */
 .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 10px; border: 1px solid var(--brand-100); background: var(--brand-50); border-radius: 99px; font-size: 13px; }
 .chip .link-btn { font-size: 15px; line-height: 1; padding: 0 4px; }
+
+/* Dashboard: purchase bills unpaid over 180 days (GST Rule 37) */
+.card-link:hover { border-color: var(--brand-100); box-shadow: 0 2px 10px rgba(0,0,0,.05); }
+.bills180.is-alert { border-left: 4px solid var(--red); }

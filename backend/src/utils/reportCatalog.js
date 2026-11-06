@@ -558,6 +558,25 @@ const REPORTS = {
     columns: [col("name", "Item"), col("hsn", "HSN/SAC"), col("quantity", "Quantity", "number", { sum: true }), col("amount", "Amount", "money", { sum: true }), col("avg", "Average Cost", "money")],
     rows: await byItem(Bill, req, q),
   }),
+  "bills-180-days": async (req) => {
+    const { rows, summary } = await require("./bills180").bills180(req.org);
+    return {
+      kind: "table",
+      groupBy: "group",
+      columns: [
+        col("date", "Bill Date", "date"),
+        col("number", "Bill#", "text", { link: "href" }),
+        col("vendor", "Vendor"),
+        col("age", "Days since bill", "number"),
+        col("left", "Status"),
+        col("total", "Bill Amount", "money", { sum: true }),
+        col("balance", "Unpaid", "money", { sum: true }),
+        col("itc", "ITC on unpaid", "money", { sum: true }),
+      ],
+      rows: rows.map((r) => ({ ...r, href: `/bills/${r.id}`, group: r.state === "over" ? "Unpaid more than 180 days — ITC to reverse (Rule 37)" : "Reaching 180 days — pay to keep the ITC", left: r.state === "over" ? `${r.age - 180} days past 180` : `${r.daysLeft} day${r.daysLeft === 1 ? "" : "s"} left` })),
+      note: `GST Rule 37: input tax credit must be reversed (with interest) if the supplier isn't paid within 180 days of the invoice date; it can be claimed again once paid. ${summary.over.count} bill(s) past 180 days (ITC ₹${summary.over.itc}), ${summary.soon.count} reaching it within 30 days. ITC is the bill's GST in proportion to the unpaid amount.`,
+    };
+  },
   "ap-aging-details": async (req) => {
     const docs = await Bill.find({ organization: req.org, status: { $in: ["open", "partially_paid"] } }, { lineItems: 0 }).lean();
     return { kind: "table", groupBy: "party", columns: agingColumns("Vendor", "Bill#"), rows: agingRows(docs, { party: "vendor", number: "billNumber", href: (d) => `/bills/${d._id}` }) };

@@ -174,6 +174,7 @@ export const REPORTS = [
   R("vendor-balances", "Vendor Balances", "Payables", "none", "Billed, paid, credits and balance due per vendor."),
   R("ap-aging", "AP Aging Summary", "Payables", "none", "What you owe vendors, by how overdue it is."),
   R("ap-aging-details", "AP Aging Details", "Payables", "none", "Every unpaid bill with its age."),
+  R("bills-180-days", "Bills Unpaid over 180 Days (GST)", "Payables", "none", "Purchase bills not paid within 180 days of the bill date (ITC reversal, Rule 37), and those reaching it."),
   R("bill-details", "Bill Details", "Payables", "range", "All bills in the period with status and balance."),
   R("purchase-order-details", "Purchase Order Details", "Payables", "range", "All purchase orders in the period."),
   R("vendor-credit-details", "Vendor Credit Details", "Payables", "range", "All vendor credits and their remaining credit."),

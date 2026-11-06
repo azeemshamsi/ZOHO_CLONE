@@ -129,6 +129,39 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {d.bills180 && (
+        <Link to="/reports/bills-180-days" className={`card card-link bills180 ${d.bills180.over.count ? "is-alert" : ""}`} style={{ display: "block", textDecoration: "none", color: "inherit" }}>
+          <div className="card-head">
+            <h3>Purchase bills unpaid over 180 days (GST)</h3>
+            <span className="link-btn">View bills →</span>
+          </div>
+          {d.bills180.over.count || d.bills180.soon.count ? (
+            <div className="recv-grid">
+              <div>
+                <span className="label label-overdue">Over 180 days</span>
+                <strong className={d.bills180.over.count ? "text-overdue" : ""}>
+                  {d.bills180.over.count} bill{d.bills180.over.count === 1 ? "" : "s"} · {money(d.bills180.over.balance)}
+                </strong>
+              </div>
+              <div>
+                <span className="label">ITC to reverse</span>
+                <strong className={d.bills180.over.itc ? "text-overdue" : ""}>{money(d.bills180.over.itc)}</strong>
+              </div>
+              <div>
+                <span className="label">Reaching 180 days (next 30)</span>
+                <strong>
+                  {d.bills180.soon.count} bill{d.bills180.soon.count === 1 ? "" : "s"} · {money(d.bills180.soon.balance)}
+                </strong>
+              </div>
+            </div>
+          ) : (
+            <p className="muted small" style={{ margin: 0 }}>
+              No unpaid purchase bill is near 180 days. Under GST Rule 37, ITC must be reversed if a supplier isn't paid within 180 days of the bill date.
+            </p>
+          )}
+        </Link>
+      )}
+
       <div className="grid-2">
         <div className="card">
           <div className="card-head">

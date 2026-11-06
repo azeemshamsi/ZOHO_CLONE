@@ -91,12 +91,14 @@ router.get(
       buckets: aging.buckets,
     });
 
+    const bills180 = (await require("../utils/bills180").bills180(org).catch(() => null))?.summary || null;
     const recentInvoices = await Invoice.find({ organization: org }, { lineItems: 0, billingAddress: 0 }).sort({ createdAt: -1 }).limit(6);
 
     res.send({
       source: "books",
       receivables: side(recvAging, ar),
       payables: side(payAging, ap),
+      bills180,
       expensesThisFy: round2(exps.reduce((s, x) => s + x.total, 0)),
       topExpenses: exps.slice(0, 5),
       salesThisFy: round2(salesThisFy),
