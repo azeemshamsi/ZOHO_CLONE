@@ -567,6 +567,7 @@ const REPORTS = {
         col("date", "Bill Date", "date"),
         col("number", "Bill#", "text", { link: "href" }),
         col("vendor", "Vendor"),
+        col("gstin", "GSTIN"),
         col("age", "Days since bill", "number"),
         col("left", "Status"),
         col("total", "Bill Amount", "money", { sum: true }),

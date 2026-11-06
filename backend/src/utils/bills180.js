@@ -15,6 +15,10 @@ const r2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 async function bills180(org) {
   const today = istToday();
   const docs = await Bill.find({ organization: org, status: { $in: ["open", "partially_paid"] } }, { lineItems: 0 }).lean();
+  // B2B: the supplier is GST-registered (GSTIN on the bill, else on the vendor); B2C: unregistered supplier.
+  const Vendor = require("../models/Vendor");
+  const ids = [...new Set(docs.filter((b) => !b.vendorGstin && b.vendor).map((b) => String(b.vendor)))];
+  const vGstin = new Map(ids.length ? (await Vendor.find({ _id: { $in: ids } }, { gstin: 1 }).lean()).map((v) => [String(v._id), v.gstin || ""]) : []);
   const rows = [];
   for (const b of docs) {
     if (!(b.balance > 0)) continue;
@@ -27,6 +31,7 @@ async function bills180(org) {
       id: String(b._id),
       vendor: b.vendorName,
       vendorId: String(b.vendor || ""),
+      gstin: b.vendorGstin || vGstin.get(String(b.vendor)) || "",
       number: b.billNumber,
       date: b.date,
       age,
@@ -38,6 +43,7 @@ async function bills180(org) {
       itc,
     });
   }
+  for (const r of rows) r.kind = r.gstin ? "b2b" : "b2c";
   rows.sort((a, b) => b.age - a.age);
   const over = rows.filter((r) => r.state === "over");
   const soon = rows.filter((r) => r.state === "soon");

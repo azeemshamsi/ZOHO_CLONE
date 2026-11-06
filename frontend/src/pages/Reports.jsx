@@ -1170,7 +1170,30 @@ function GenericReport(p) {
   );
 }
 
+// Bills unpaid over 180 days: B2B (registered suppliers, with GSTIN) and B2C (unregistered) on separate tabs.
+function Bills180({ d, range }) {
+  const [tab, setTab] = useState("b2b");
+  const n = (k) => d.rows.filter((r) => r.kind === k).length;
+  return (
+    <>
+      <div className="tabs" style={{ marginBottom: 12 }}>
+        {[
+          ["b2b", "B2B invoices", "registered suppliers"],
+          ["b2c", "B2C invoices", "unregistered suppliers"],
+        ].map(([k, l, hint]) => (
+          <button key={k} type="button" className={`tab ${tab === k ? "active" : ""}`} title={hint} onClick={() => setTab(k)}>
+            {l} <span className="tab-count">{n(k)}</span>
+          </button>
+        ))}
+      </div>
+      <TableReport d={{ ...d, rows: d.rows.filter((r) => r.kind === tab) }} range={range} />
+      {d.note && <p className="muted small report-note">{d.note}{tab === "b2c" ? " Bills from unregistered suppliers usually carry no GST, so there's no ITC to reverse on them." : ""}</p>}
+    </>
+  );
+}
+
 const BODIES = {
+  "bills-180-days": Bills180,
   "profit-and-loss": ProfitLoss,
   "balance-sheet": BalanceSheet,
   "trial-balance": TrialBalance,
