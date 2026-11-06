@@ -33,7 +33,7 @@ const PaySplit = ({ o }) =>
       {money(o.prepaidAmount)} paid · {money(o.codAmount)} COD
     </div>
   ) : null;
-const EMPTY_FILTERS = { q: "", from: "", to: "", payment: "", financial: "", state: "", courier: "", invoiced: "", tag: "", seller: "", sort: "newest" };
+const EMPTY_FILTERS = { channel: "", q: "", from: "", to: "", payment: "", financial: "", state: "", courier: "", invoiced: "", tag: "", seller: "", sort: "newest" };
 
 const openPdf = async (url, body) => {
   const w = window.open("", "_blank");
@@ -524,10 +524,116 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
   );
 }
 
+const AmazonBadge = ({ o }) => (o.channel === "amazon" ? <span className="status status-sent" title="Amazon order">{o.amazon?.easyShip ? "Amazon · Easy Ship" : "Amazon"}</span> : null);
+const slotText = (s) => (s?.start ? `${new Date(s.start).toLocaleString("en-IN", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}${s.end ? ` – ${new Date(s.end).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}` : ""}` : "");
+
+// Amazon Easy Ship: Amazon picks the parcel up. Package → pickup slots → schedule → Amazon's label.
+function EasyShipModal({ order, onClose, onDone }) {
+  const [packages, setPackages] = useState([]);
+  const [mode, setMode] = useState("auto");
+  const [manualPkg, setManualPkg] = useState({ weight: "", length: "", breadth: "", height: "" });
+  const [slots, setSlots] = useState(null);
+  const [pkg, setPkg] = useState(null);
+  const [slotId, setSlotId] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.get("/shopify/package-types").then((r) => setPackages(r.data)).catch(() => {});
+  }, []);
+  const pkgBody = mode === "auto" ? {} : mode === "manual" ? manualPkg : { packageType: mode };
+  const getSlots = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/amazon-orders/orders/${order._id}/easyship/slots`, { pkg: pkgBody });
+      setSlots(data.slots);
+      setPkg(data.pkg);
+      setSlotId(data.slots[0]?.slotId || "");
+      if (!data.slots.length) toast("Amazon has no pickup slots for this order right now", "error");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  const schedule = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/amazon-orders/orders/${order._id}/easyship/schedule`, { slotId, pkg: pkgBody });
+      toast(`Pickup scheduled${data.slot ? ` for ${slotText(data.slot)}` : ""}`);
+      if (data.warning) toast(data.warning, "error");
+      onDone();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <Modal
+      open
+      title={`Easy Ship pickup — ${order.name}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          {slots ? (
+            <button className="btn btn-primary" disabled={busy || !slotId} onClick={schedule}>
+              Schedule pickup
+            </button>
+          ) : (
+            <button className="btn btn-primary" disabled={busy} onClick={getSlots}>
+              Get pickup slots
+            </button>
+          )}
+        </>
+      }
+    >
+      <p className="muted small" style={{ marginTop: 0 }}>
+        Amazon's courier collects the parcel from your pickup address in the slot you choose. Amazon makes the shipping label; print it from the order once scheduled.
+      </p>
+      <Field label="Package">
+        <select value={mode} onChange={(e) => (setMode(e.target.value), setSlots(null))}>
+          <option value="auto">From the products' package types</option>
+          {packages.map((p) => (
+            <option key={p._id} value={p._id}>
+              {p.name} — {p.weight} kg · {p.length}×{p.breadth}×{p.height} cm
+            </option>
+          ))}
+          <option value="manual">Enter weight and size</option>
+        </select>
+      </Field>
+      {mode === "manual" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: 10 }}>
+          {[["weight", "Weight (kg)"], ["length", "Length (cm)"], ["breadth", "Breadth (cm)"], ["height", "Height (cm)"]].map(([k, l]) => (
+            <Field key={k} label={l}>
+              <input type="number" min="0" step="0.01" value={manualPkg[k]} onChange={(e) => (setManualPkg({ ...manualPkg, [k]: e.target.value }), setSlots(null))} />
+            </Field>
+          ))}
+        </div>
+      )}
+      {pkg && slots && (
+        <>
+          <div className="muted small" style={{ marginBottom: 8 }}>
+            {pkg.packageName ? `${pkg.packageName} · ` : ""}
+            {pkg.weight} kg · {pkg.length}×{pkg.breadth}×{pkg.height} cm
+          </div>
+          <div className="label-sm">Pickup slot</div>
+          {slots.map((x) => (
+            <label key={x.slotId} className="check-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 0" }}>
+              <input type="radio" name="slot" checked={slotId === x.slotId} onChange={() => setSlotId(x.slotId)} />
+              {slotText(x)} <span className="muted small">{x.method === "DROPOFF" ? "drop off" : "pickup"}</span>
+            </label>
+          ))}
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
   const [o, setO] = useState(null);
   const [busy, setBusy] = useState(false);
   const [remarks, setRemarks] = useState("");
+  const [easyShip, setEasyShip] = useState(false);
   const load = () =>
     api.get(`/shopify/orders/${id}`).then((r) => {
       setO(r.data);
@@ -554,7 +660,12 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
   const a = o.shippingAddress || {};
   const sh = o.shipment || {};
   const accName = couriers.find((c) => c._id === sh.account)?.name;
+  const amz = o.channel === "amazon" ? o.amazon || {} : null;
+  const isEasy = !!amz?.easyShip;
+  const isEasyShipped = sh.carrier === "amazon_easyship";
   return (
+    <>
+    {easyShip && <EasyShipModal order={o} onClose={() => setEasyShip(false)} onDone={() => (setEasyShip(false), load(), onChanged())} />}
     <Modal
       open
       wide
@@ -567,9 +678,19 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
               Create Invoice
             </button>
           )}
-          {["new", "packed"].includes(o.status) && (
+          {["new", "packed"].includes(o.status) && !isEasy && (
             <button className="btn" disabled={busy} onClick={() => onShip([o._id])}>
               Book Shipment
+            </button>
+          )}
+          {["new", "packed"].includes(o.status) && isEasy && !isEasyShipped && (
+            <button className="btn" disabled={busy} onClick={() => setEasyShip(true)}>
+              Schedule Easy Ship pickup
+            </button>
+          )}
+          {amz && !isEasy && sh.awb && !amz.confirmedAt && (
+            <button className="btn" disabled={busy} onClick={() => act(() => api.post(`/amazon-orders/orders/${o._id}/confirm`), "Tracking sent to Amazon")}>
+              Confirm on Amazon
             </button>
           )}
           {o.status === "new" && (
@@ -577,12 +698,12 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
               Mark Packed
             </button>
           )}
-          {sh.awb && (
-            <button className="btn" onClick={() => openPdf(`/shopify/orders/${o._id}/label`)}>
-              Label
+          {(sh.awb || isEasyShipped) && (
+            <button className="btn" onClick={() => openPdf(`/shopify/orders/${o._id}/label`).then(load)}>
+              {isEasyShipped ? "Amazon label" : "Label"}
             </button>
           )}
-          {sh.awb && sh.account && !["delivered", "rto", "cancelled"].includes(o.status) && (
+          {sh.awb && (sh.account || isEasyShipped) && !["delivered", "rto", "cancelled"].includes(o.status) && (
             <button className="btn" disabled={busy} onClick={() => act(() => api.post("/shopify/orders/track", { ids: [o._id] }), "Tracking updated")}>
               Refresh Tracking
             </button>
@@ -597,7 +718,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
               Mark Return Closed
             </button>
           )}
-          {sh.awb && o.status === "ready_to_ship" && (
+          {sh.awb && o.status === "ready_to_ship" && !isEasyShipped && (
             <button className="btn btn-ghost" disabled={busy} onClick={() => window.confirm(`Cancel shipment ${sh.awb}?`) && act(() => api.post(`/shopify/orders/${o._id}/cancel-shipment`), "Shipment cancelled")}>
               Cancel Shipment
             </button>
@@ -612,7 +733,19 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
         <div className="muted small">{new Date(o.orderDate).toLocaleString("en-IN")}</div>
       </div>
       {o.status === "returned" && <div className="alert alert-info">Returned{o.returnedAt ? ` on ${date(o.returnedAt)}` : ""}{o.returnNote ? ` · ${o.returnNote}` : ""}</div>}
-      {o.cancelledAt && <div className="alert alert-error">Cancelled in Shopify on {date(o.cancelledAt)}{o.cancelReason ? ` (${o.cancelReason.toLowerCase()})` : ""}</div>}
+      {amz && (
+        <div className="alert alert-info" style={{ marginTop: 10 }}>
+          <strong>Amazon {isEasy ? "Easy Ship" : "self-ship"} order</strong>
+          {amz.shipBy && <> · ship by {new Date(amz.shipBy).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</>}
+          {amz.gstin && <> · Amazon Business, GSTIN {amz.gstin}{amz.buyerCompany ? ` (${amz.buyerCompany})` : ""}</>}
+          {amz.slot && <div className="small">Pickup {slotText(amz.slot)}{amz.packageStatus ? ` · ${amz.packageStatus.replace(/([a-z])([A-Z])/g, "$1 $2")}` : ""}</div>}
+          {amz.label?.state === "error" && <div className="text-red small">{amz.label.error}</div>}
+          {!isEasy && amz.confirmedAt && <div className="small">Tracking sent to Amazon {new Date(amz.confirmedAt).toLocaleString("en-IN")}</div>}
+          {!isEasy && amz.confirmError && !amz.confirmedAt && <div className="text-red small">Amazon wasn't told the tracking number: {amz.confirmError}</div>}
+          {!o.shippingAddress?.address1 && <div className="text-red small">No address from Amazon — give the app the Direct-to-Consumer Shipping role (Store → Amazon).</div>}
+        </div>
+      )}
+      {o.cancelledAt && <div className="alert alert-error">Cancelled in {amz ? "Amazon" : "Shopify"} on {date(o.cancelledAt)}{o.cancelReason ? ` (${o.cancelReason.toLowerCase()})` : ""}</div>}
       <div className="grid-2" style={{ marginTop: 12 }}>
         <div>
           <div className="label-sm">Ship to</div>
@@ -656,7 +789,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
           {sh.awb && sh.charge != null && <div className="muted small">Expected charge {money(sh.charge)} ({sh.chargeSource === "api" ? "API" : "rate card"}){sh.packageName ? ` · ${sh.packageName}` : ""}</div>}
         </div>
       </div>
-      {!sh.awb && ["new", "packed"].includes(o.status) && (
+      {!sh.awb && !isEasy && ["new", "packed"].includes(o.status) && (
         <>
           <div className="label-sm" style={{ marginTop: 14 }}>
             Courier charges (live)
@@ -749,6 +882,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
         <textarea rows={2} value={remarks} onChange={(e) => setRemarks(e.target.value)} onBlur={() => remarks !== (o.remarks || "") && api.put(`/shopify/orders/${o._id}/remarks`, { remarks }).then(() => toast("Remarks saved"))} />
       </Field>
     </Modal>
+    </>
   );
 }
 
@@ -799,6 +933,8 @@ export function ShopifyOrders() {
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [store, setStore] = useState(null);
+  const [amazon, setAmazon] = useState(null);
+  const [easyShipFor, setEasyShipFor] = useState(null);
   const [couriers, setCouriers] = useState([]);
   const [facets, setFacets] = useState({ states: [], tags: [], financial: [] });
   const [sellers, setSellers] = useState([]);
@@ -838,8 +974,17 @@ export function ShopifyOrders() {
       return r.data;
     });
 
+  const loadAmazon = () =>
+    api
+      .get("/amazon-orders/account")
+      .then((r) => {
+        setAmazon(r.data);
+        return r.data;
+      })
+      .catch(() => null);
   useEffect(() => {
     loadStore();
+    loadAmazon();
     api.get("/shopify/couriers").then((r) => setCouriers(r.data));
     api.get("/shopify/orders/facets").then((r) => setFacets(r.data));
     api.get("/sellers").then((r) => setSellers(r.data)).catch(() => {});
@@ -882,6 +1027,27 @@ export function ShopifyOrders() {
     }
   };
 
+  const watchAmazon = () => {
+    poll.current = setTimeout(async () => {
+      const a = await loadAmazon();
+      if (a?.sync?.running) watchAmazon();
+      else {
+        if (a?.sync?.error) toast(`Amazon sync failed: ${a.sync.error}`, "error");
+        else if (a) toast(`Amazon: ${a.sync.created} new, ${a.sync.updated} updated${a.sync.invoiced ? `, ${a.sync.invoiced} invoiced` : ""}`);
+        load();
+      }
+    }, 1500);
+  };
+  const syncAmazon = async () => {
+    try {
+      await api.post("/amazon-orders/sync");
+      setAmazon({ ...amazon, sync: { ...(amazon.sync || {}), running: true } });
+      watchAmazon();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+
   const setTab = (t) => {
     setParams(t === "new" ? {} : { tab: t });
     setPage(1);
@@ -913,7 +1079,7 @@ export function ShopifyOrders() {
     setBusy(false);
   };
 
-  if (store && !store.connected && !store.shop)
+  if (store && !store.connected && !store.shop && !amazon?.connected)
     return (
       <>
         <PageHeader title="Store" />
@@ -942,12 +1108,20 @@ export function ShopifyOrders() {
         <Link className="btn" to="/shopify-settings">
           <Icon name="settings" size={16} /> Settings
         </Link>
-        <button className="btn btn-primary" disabled={sync_.running || !store?.connected} onClick={sync}>
-          {sync_.running ? `Syncing… ${sync_.fetched || 0}` : "Sync Orders"}
-        </button>
+        {amazon?.connected && (
+          <button className="btn" disabled={amazon.sync?.running} onClick={syncAmazon} title={amazon.lastSyncAt ? `Amazon last synced ${new Date(amazon.lastSyncAt).toLocaleString("en-IN")}` : ""}>
+            {amazon.sync?.running ? `Amazon… ${amazon.sync.fetched || 0}` : "Sync Amazon"}
+          </button>
+        )}
+        {(store?.connected || store?.shop) && (
+          <button className="btn btn-primary" disabled={sync_.running || !store?.connected} onClick={sync}>
+            {sync_.running ? `Syncing… ${sync_.fetched || 0}` : "Sync Orders"}
+          </button>
+        )}
       </PageHeader>
 
-      {store && !store.connected && <div className="alert alert-error" style={{ marginBottom: 12 }}>Shopify isn't connected. {sync_.error && <>Last error: {sync_.error}. </>}<Link to="/shopify-settings">Check the connection</Link></div>}
+      {amazon && amazon.clientId && !amazon.connected && <div className="alert alert-error" style={{ marginBottom: 12 }}>Amazon isn't connected. {amazon.sync?.error && <>Last error: {amazon.sync.error}. </>}<Link to="/amazon-settings">Check the connection</Link></div>}
+      {store && store.shop && !store.connected && <div className="alert alert-error" style={{ marginBottom: 12 }}>Shopify isn't connected. {sync_.error && <>Last error: {sync_.error}. </>}<Link to="/shopify-settings">Check the connection</Link></div>}
       {review.length > 0 && (
         <div className="alert alert-warn" style={{ marginBottom: 12, marginTop: 0 }}>
           {review.length} item{review.length === 1 ? "" : "s"} created from Shopify had the HSN or GST rate corrected, or need a check.{" "}
@@ -971,6 +1145,15 @@ export function ShopifyOrders() {
           <input type="date" value={filters.from} onChange={setF("from")} title="From" />
           <span className="muted">to</span>
           <input type="date" value={filters.to} onChange={setF("to")} title="To" />
+          {amazon?.connected && (
+            <select value={filters.channel} onChange={setF("channel")}>
+              <option value="">Shopify + Amazon</option>
+              <option value="shopify">Shopify</option>
+              <option value="amazon">Amazon (all)</option>
+              <option value="amazon_self">Amazon self-ship</option>
+              <option value="amazon_easyship">Amazon Easy Ship</option>
+            </select>
+          )}
           <select value={filters.payment} onChange={setF("payment")}>
             <option value="">All payment types</option>
             <option value="cod">COD</option>
@@ -1140,6 +1323,11 @@ export function ShopifyOrders() {
                     </td>
                     <td>
                       <strong>{o.name}</strong>
+                      {o.channel === "amazon" && (
+                        <div>
+                          <AmazonBadge o={o} />
+                        </div>
+                      )}
                       <div className="muted small">{new Date(o.orderDate).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
                     </td>
                     <td>
@@ -1219,12 +1407,17 @@ export function ShopifyOrders() {
                       </td>
                     )}
                     <td onClick={(e) => e.stopPropagation()} className="row-btns">
-                      {["new", "packed"].includes(o.status) && (
+                      {["new", "packed"].includes(o.status) && !(o.channel === "amazon" && o.amazon?.easyShip) && (
                         <button className="btn btn-sm" onClick={() => setShip([o._id])}>
                           Ship
                         </button>
                       )}
-                      {sh.awb && (
+                      {["new", "packed"].includes(o.status) && o.channel === "amazon" && o.amazon?.easyShip && sh.carrier !== "amazon_easyship" && (
+                        <button className="btn btn-sm" onClick={() => setEasyShipFor(o)} title="Schedule Amazon's pickup">
+                          Easy Ship
+                        </button>
+                      )}
+                      {(sh.awb || sh.carrier === "amazon_easyship") && (
                         <button className="btn btn-sm" onClick={() => openPdf(`/shopify/orders/${o._id}/label`)}>
                           Label
                         </button>
@@ -1265,6 +1458,7 @@ export function ShopifyOrders() {
         />
       )}
       {results && <ResultsModal {...results} onClose={() => setResults(null)} />}
+      {easyShipFor && <EasyShipModal order={easyShipFor} onClose={() => setEasyShipFor(null)} onDone={() => (setEasyShipFor(null), load())} />}
       {view && <OrderModal id={view} couriers={couriers} onClose={() => setView(null)} onChanged={load} onShip={(i) => setShip(i)} />}
       {showReview && <ReviewItems items={review} onClose={() => setShowReview(false)} onChanged={loadReview} />}
       {void nav}

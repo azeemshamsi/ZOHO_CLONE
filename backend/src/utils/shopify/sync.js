@@ -312,7 +312,7 @@ async function syncStore(store, { full = false } = {}) {
 async function refreshDeliveries(store, { withDelivered = false } = {}) {
   const since = new Date(Date.now() - 120 * 86400000);
   const statuses = withDelivered ? ["shipped", "delivered"] : ["shipped"];
-  const open = (await ShopifyOrder.find({ organization: store.organization, status: { $in: statuses } })).filter((o) => o.shopifyId && (o.status === "shipped" || !o.deliveredChecked) && (!o.orderDate || o.orderDate >= since));
+  const open = (await ShopifyOrder.find({ organization: store.organization, status: { $in: statuses } })).filter((o) => String(o.shopifyId || "").startsWith("gid://") && (o.status === "shipped" || !o.deliveredChecked) && (!o.orderDate || o.orderDate >= since));
   let changed = 0;
   for (let i = 0; i < open.length; i += 50) {
     const batch = open.slice(i, i + 50);

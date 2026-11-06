@@ -230,7 +230,7 @@ function ImportBox({ onImported }) {
           </table>
           <ul className="small" style={{ margin: "10px 0", paddingLeft: 18 }}>
             <li>
-              <strong>{pv.toCreate}</strong> to create{pv.alreadyImported ? ` · ${pv.alreadyImported} already imported (left as they are)` : ""}
+              <strong>{pv.toCreate}</strong> to create{pv.fromOrders ? ` · ${pv.fromOrders} already invoiced from Amazon orders (tagged with Amazon's number, not created again)` : ""}{pv.alreadyImported ? ` · ${pv.alreadyImported} already imported (left as they are)` : ""}
               {pv.conflicts.length > 0 && <span style={{ color: "var(--red)" }}> · {pv.conflicts.length} numbers already used by other documents, skipped: {pv.conflicts.slice(0, 8).join(", ")}{pv.conflicts.length > 8 ? "…" : ""}</span>}
             </li>
             <li>
@@ -256,8 +256,8 @@ function ImportBox({ onImported }) {
                 ))}
               </select>
             </Field>
-            <button className="btn btn-primary" disabled={busy || !pv.toCreate} onClick={start}>
-              <Icon name="upload" size={16} /> Import {pv.toCreate} documents
+            <button className="btn btn-primary" disabled={busy || !(pv.toCreate || pv.fromOrders)} onClick={start}>
+              <Icon name="upload" size={16} /> Import {pv.toCreate} documents{pv.fromOrders ? ` + tag ${pv.fromOrders}` : ""}
             </button>
           </div>
           {job && (
@@ -266,7 +266,7 @@ function ImportBox({ onImported }) {
                 <div className="meter-current" style={{ width: `${job.total ? (job.done / job.total) * 100 : 100}%` }} />
               </div>
               <p className="small" style={{ margin: "6px 0" }}>
-                {job.status === "running" ? `Importing… ${job.done} of ${job.total}` : `Done: ${job.created.invoices} invoices, ${job.created.creditNotes} credit notes created`}
+                {job.status === "running" ? `Importing… ${job.done} of ${job.total}` : `Done: ${job.created.invoices} invoices, ${job.created.creditNotes} credit notes created${job.created.linked ? `, ${job.created.linked} order invoices tagged` : ""}`}
                 {job.errors.length > 0 && <span style={{ color: "var(--red)" }}> · {job.errors.length} not imported</span>}
               </p>
               {job.errors.length > 0 && (

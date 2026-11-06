@@ -92,6 +92,10 @@ function startScheduler() {
   const shopify = () => require("./shopify/sync").autoSyncAll().catch((e) => console.error("Shopify sync failed:", e.message));
   setTimeout(shopify, 20000);
   setInterval(shopify, 15 * 60 * 1000).unref();
+  const amazon = () => require("./amazon/orders").autoSyncAll().catch((e) => console.error("Amazon sync failed:", e.message));
+  setTimeout(amazon, 40000).unref();
+  setInterval(amazon, 15 * 60 * 1000).unref();
+  setInterval(() => require("./amazon/ship").trackAllEasyShip().catch((e) => console.error("Easy Ship tracking failed:", e.message)), 2 * 60 * 60 * 1000).unref();
   setInterval(() => require("./shopify/inventory").pushAll().catch((e) => console.error("Inventory sync failed:", e.message)), 30 * 60 * 1000).unref();
   setInterval(() => require("./shopify/ship").trackAll().catch((e) => console.error("Courier tracking failed:", e.message)), 2 * 60 * 60 * 1000).unref();
   setInterval(() => require("./shopify/sync").refreshAllDeliveries().catch((e) => console.error("Shopify delivery check failed:", e.message)), 2 * 60 * 60 * 1000).unref();

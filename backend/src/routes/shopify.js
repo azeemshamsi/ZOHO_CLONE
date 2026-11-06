@@ -195,7 +195,7 @@ router.post(
 );
 
 /* ---------------- orders ---------------- */
-const LIST_FIELDS = { "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.vendor": 1, sellers: 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 };
+const LIST_FIELDS = { channel: 1, "amazon.easyShip": 1, "amazon.confirmedAt": 1, "amazon.confirmError": 1, "amazon.shipBy": 1, "amazon.label": 1, "amazon.slot": 1, "amazon.gstin": 1, "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.vendor": 1, sellers: 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 };
 // The order list: filters, counts, sort and search from the in-memory index; only the page shown is read.
 router.get(
   "/orders",
@@ -295,11 +295,22 @@ router.post(
   "/orders/invoice",
   ah(async (req, res) => {
     const d = validate(Joi.object({ ids: idsJoi }), req.body);
-    const store = await storeOf(req);
+    const store = await storeOf(req, false);
+    const AmazonAccount = require("../models/AmazonAccount");
     const results = [];
     for (const o of await ordersFor(req, d.ids)) {
       try {
-        const r = await invoiceOrder(ctxOf(req), o, store);
+        let r;
+        if (o.channel === "amazon") {
+          // Amazon orders are invoiced in the company whose Amazon account they came from (its GSTIN).
+          const acc = await AmazonAccount.findById(o.amazon?.account);
+          if (!acc) throw new Error("Its Amazon account isn't connected any more");
+          if (String(acc.organization) !== String(req.org)) throw new Error("Amazon orders are invoiced in the company that connected Amazon — switch to that company");
+          r = await require("../utils/amazon/invoice").invoiceAmazonOrder(o, acc, { user: req.user });
+        } else {
+          if (!store) throw new Error("Connect your Shopify store first (Shopify Settings)");
+          r = await invoiceOrder(ctxOf(req), o, store);
+        }
         results.push({ id: o._id, name: o.name, ...r, ok: !r.skipped });
       } catch (e) {
         o.invoiceError = e.message;
@@ -388,7 +399,7 @@ router.post(
     const results = [];
     for (const o of await ordersFor(req, d.ids)) {
       try {
-        if (d.invoiceFirst && !o.invoice && store) await invoiceOrder(ctxOf(req), o, store).catch(() => {});
+        if (d.invoiceFirst && !o.invoice && store && o.channel !== "amazon") await invoiceOrder(ctxOf(req), o, store).catch(() => {});
         const r = await bookOrder(ctxOf(req), o, { accountId: d.account, pkg: d.pkg, manual: d.ids.length === 1 ? d.manual : {}, skipCheck: d.skipCheck, pickupFrom: d.ids.length === 1 ? d.pickupFrom : "" });
         results.push({ id: o._id, name: o.name, ok: true, ...r });
       } catch (e) {
@@ -495,7 +506,17 @@ router.get(
   ah(async (req, res) => {
     const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg }).select("+shipment.labelPdf");
     if (!o) throw new HttpError(404, "Order not found");
-    if (!o.shipment?.awb) throw new HttpError(400, "Book a courier first");
+    if (o.shipment?.carrier === "amazon_easyship" && !o.shipment.labelPdf?.length) {
+      // Amazon's Easy Ship label: fetched from Amazon on first use.
+      let r;
+      try {
+        r = await require("../utils/amazon/ship").fetchLabel(o);
+      } catch (e) {
+        throw new HttpError(400, e.message);
+      }
+      if (r.state !== "ready") throw new HttpError(409, r.message);
+    }
+    if (!o.shipment?.awb && o.shipment?.carrier !== "amazon_easyship") throw new HttpError(400, "Book a courier first");
     await require("../utils/shopify/labelOut").sendLabel(res, o, { org: req.org, storeOrg: req.storeOrg, own: req.query.own === "1" });
   })
 );
@@ -504,8 +525,10 @@ router.post(
   "/orders/labels",
   ah(async (req, res) => {
     const d = validate(Joi.object({ ids: idsJoi, format: Joi.string().valid("4x6", "a4").allow("") }), req.body);
-    const orders = (await ordersFor(req, d.ids)).filter((o) => o.shipment?.awb);
-    if (!orders.length) throw new HttpError(400, "None of these orders has a shipment booked");
+    const all = await ordersFor(req, d.ids);
+    // Easy Ship parcels carry Amazon's own label (open it from the order), never OrdexaGo's.
+    const orders = all.filter((o) => o.shipment?.awb && o.shipment.carrier !== "amazon_easyship");
+    if (!orders.length) throw new HttpError(400, all.some((o) => o.shipment?.carrier === "amazon_easyship") ? "Easy Ship orders use Amazon's label — open it from each order" : "None of these orders has a shipment booked");
     const org = await Organization.findById(req.org);
     const accs = new Map((await CourierAccount.find({ organization: req.storeOrg })).map((a) => [String(a._id), a]));
     res.setHeader("Content-Type", "application/pdf");

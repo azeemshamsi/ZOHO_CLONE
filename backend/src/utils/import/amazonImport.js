@@ -64,11 +64,27 @@ async function preview(org, files) {
     Customer.find({ organization: org, gstin: { $in: [...new Set(p.invoices.concat(p.creditNotes).filter((d) => d.b2b).map((d) => d.buyerGstin))] } }, { gstin: 1, displayName: 1 }).lean(),
   ]);
   const have = new Map([...invs.map((x) => [`i|${x.invoiceNumber}`, x]), ...cns.map((x) => [`c|${x.number}`, x])]);
+  // Orders OrdexaGo already invoiced from the Amazon connection (and their return credit notes): not imported again.
+  const ShopifyOrder = require("../../models/ShopifyOrder");
+  const orderIds = [...new Set(docs.flatMap((d) => [...d.orders]))].filter(Boolean);
+  const apiOrders = orderIds.length ? (await ShopifyOrder.find({ channel: "amazon", shopifyId: { $in: orderIds.map((x) => `amazon:${x}`) } }, { shopifyId: 1, invoice: 1, invoiceOrg: 1, returnCreditNote: 1 }).lean()).filter((x) => String(x.invoiceOrg) === String(org)) : [];
+  const byOrder = new Map(apiOrders.map((x) => [x.shopifyId.slice(7), x]));
+  const fromApi = (d) => {
+    const os = [...d.orders].filter(Boolean);
+    if (!os.length) return null;
+    const ids = os.map((x) => byOrder.get(x)?.[d.kind === "invoice" ? "invoice" : "returnCreditNote"]);
+    return ids.every(Boolean) ? [...new Set(ids.map(String))] : null;
+  };
   const match = skuMatcher(items);
   const unmatched = new Map();
   for (const d of docs) {
     const h = have.get(`${d.kind === "invoice" ? "i" : "c"}|${d.number}`);
     d.state = !h ? "new" : String(h.importRef || "").startsWith("amazon:") ? "imported" : "conflict";
+    const api = d.state === "new" ? fromApi(d) : null;
+    if (api) {
+      d.state = "ordexago";
+      d.link = api;
+    }
     for (const l of d.lines) if (l.kind === "product" && !match(l.sku)) unmatched.set(l.sku || "(no SKU)", (unmatched.get(l.sku || "(no SKU)") || 0) + 1);
   }
   const newBuyers = [...new Set(docs.filter((d) => d.b2b && !buyers.some((b) => b.gstin === d.buyerGstin)).map((d) => `${d.buyerName || d.buyerGstin} (${d.buyerGstin})`))];
@@ -88,6 +104,7 @@ async function preview(org, files) {
     creditNotes: part(p.creditNotes),
     toCreate: docs.filter((d) => d.state === "new").length,
     alreadyImported: docs.filter((d) => d.state === "imported").length,
+    fromOrders: docs.filter((d) => d.state === "ordexago").length,
     conflicts: docs.filter((d) => d.state === "conflict").map((d) => d.number),
     skipped: p.skipped,
     unmatchedSkus: [...unmatched.entries()].map(([sku, n]) => ({ sku, lines: n })).sort((a, b) => b.lines - a.lines),
@@ -135,8 +152,8 @@ function startImport(ctx, planId, { ledger } = {}) {
   if (!pl || pl.org !== String(ctx.org)) throw new Error("This preview has expired. Upload the files again.");
   for (const j of jobs.values()) if (j.org === String(ctx.org) && j.status === "running") throw new Error("An Amazon import is already running for this company");
   const id = crypto.randomUUID();
-  const docs = [...pl.plan.invoices, ...pl.plan.creditNotes].filter((d) => d.state === "new");
-  const job = { id, org: String(ctx.org), status: "running", total: docs.length, done: 0, created: { invoices: 0, creditNotes: 0 }, errors: [], warnings: [], at: Date.now(), month: pl.month };
+  const docs = [...pl.plan.invoices, ...pl.plan.creditNotes].filter((d) => d.state === "new" || d.state === "ordexago");
+  const job = { id, org: String(ctx.org), status: "running", total: docs.length, done: 0, created: { invoices: 0, creditNotes: 0, linked: 0 }, errors: [], warnings: [], at: Date.now(), month: pl.month };
   jobs.set(id, job);
   run(ctx, pl, docs, ledger, job).catch((e) => {
     job.status = "failed";
@@ -155,6 +172,19 @@ async function run(ctx, pl, docs, ledgerCode, job) {
   docs.sort((a, b) => (a.kind === b.kind ? a.date - b.date : a.kind === "invoice" ? -1 : 1));
   for (const d of docs) {
     try {
+      if (d.state === "ordexago") {
+        // Already invoiced from the order: tag OrdexaGo's document with Amazon's number so the GSTR-1 check counts it.
+        const Model = d.kind === "invoice" ? Invoice : CreditNote;
+        const ref = `amazon:${pl.gstin}:${pl.month}:${d.number}`;
+        let n = 0;
+        for (const id of d.link || []) {
+          await Model.updateOne({ _id: id, organization: ctx.org }, { $set: { importRef: n ? `${ref}#${n + 1}` : ref } });
+          n++;
+        }
+        job.created.linked++;
+        job.done++;
+        continue;
+      }
       const c = await customerFor(ctx.org, d, cache);
       const sign = d.kind === "creditNote" ? -1 : 1;
       const lineItems = d.lines.map((l) => {
@@ -344,4 +374,4 @@ async function months(org) {
   return { gstin: o?.gstin || "", months: [...by.values()].sort((a, b) => b.month.localeCompare(a.month)) };
 }
 
-module.exports = { preview, startImport, jobOf, reconcile, months, monthOfName };
+module.exports = { preview, startImport, jobOf, reconcile, months, monthOfName, salesLedger, skuMatcher };

@@ -42,7 +42,12 @@ const eventSchema = new mongoose.Schema({ at: Date, status: String, location: St
 const shopifyOrderSchema = new mongoose.Schema(
   {
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true },
-    shopifyId: { type: String, required: true }, // gid://shopify/Order/123
+    shopifyId: { type: String, required: true }, // gid://shopify/Order/123, or "amazon:<order id>" for Amazon orders
+    channel: { type: String, enum: ["shopify", "amazon"], default: "shopify" },
+    // Amazon order details: { account, orderId, marketplaceId, easyShip, programs, fulfillmentStatus, serviceLevel,
+    // shipBy, deliverBy, gstin, buyerCompany, items [{orderItemId, sku, quantity}], confirmedAt, confirmError,
+    // packageStatus, slot {slotId, start, end, method}, scheduledAt, label {feedId, state, error, at} }
+    amazon: { type: mongoose.Schema.Types.Mixed },
     name: String, // "#1001"
     orderNumber: Number,
     orderDate: Date,

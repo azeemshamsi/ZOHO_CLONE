@@ -61,6 +61,7 @@ app.use("/api/companies", auth, require("./routes/companies"));
 app.use("/api/superadmin", auth, require("./routes/superadmin"));
 app.use("/api/sellers", auth, permit((req) => (req.method === "GET" && req.path === "/" ? ["store_sellers", "store_orders", "store_shipping"] : "store_sellers")), require("./routes/sellers"));
 app.use("/api/seller-portal", auth, require("./routes/sellerPortal"));
+app.use("/api/amazon-orders", auth, permit((req) => require("./routes/amazonOrders").moduleOf(req)), require("./routes/amazonOrders"));
 app.use("/api/amazon", auth, permit((req) => (req.method === "GET" ? ["sales", "gst"] : "sales")), require("./routes/amazon"));
 app.use("/api/attachments", auth, require("./routes/attachments"));
 app.use("/api/bill-scan", auth, permit("purchases"), require("./routes/billScan"));

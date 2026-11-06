@@ -54,7 +54,7 @@ async function closeInShopify(store, id) {
 async function markReturnCreated(ctx, order, store, note = "") {
   if (!["shipped", "delivered", "ready_to_ship"].includes(order.status)) throw new Error(`Order is ${order.status.replace(/_/g, " ")}; only shipped or delivered orders can have a return`);
   let warning = "";
-  if (store?.connected)
+  if (order.channel !== "amazon" && store?.connected)
     try {
       order.shopifyReturnId = await createInShopify(store, order, note);
     } catch (e) {
@@ -88,8 +88,9 @@ async function creditNoteFor(ctx, order, store) {
     ...(inv.warehouse ? { warehouse: String(inv.warehouse) } : {}),
     ...(inv.branch ? { branch: String(inv.branch) } : {}),
     adjustment: inv.adjustment || 0,
+    ...(inv.ledger ? { ledger: String(inv.ledger) } : {}),
     lineItems: inv.lineItems.map((l) => ({ item: l.item && restock.has(String(l.item)) ? String(l.item) : null, name: l.name, description: l.description || "", hsnSac: l.hsnSac || "", unit: l.unit || "", quantity: l.quantity, rate: l.rate, discount: l.discount || 0, taxRate: l.taxRate || 0 })),
-    customerNotes: `Return of Shopify order ${order.name}${order.shipment?.awb ? ` (AWB ${order.shipment.awb})` : ""}`,
+    customerNotes: `Return of ${order.channel === "amazon" ? "Amazon" : "Shopify"} order ${order.name}${order.shipment?.awb ? ` (AWB ${order.shipment.awb})` : ""}`,
   });
   return cn;
 }
@@ -97,7 +98,7 @@ async function creditNoteFor(ctx, order, store) {
 // The part that talks to Shopify and makes the credit note (slow: several network calls).
 async function finishReturn(ctx, order, store, was) {
   const out = { warning: "" };
-  if (store?.connected && was !== "ready_to_ship")
+  if (order.channel !== "amazon" && store?.connected && was !== "ready_to_ship")
     try {
       const id = order.shopifyReturnId || (await createInShopify(store, order, was === "rto" ? "RTO — returned by courier" : "Returned"));
       order.shopifyReturnId = id;

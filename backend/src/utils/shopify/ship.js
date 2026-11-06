@@ -26,6 +26,7 @@ async function fulfillInShopify(store, order, sh) {
 
 async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {}, skipCheck = false, pickupFrom = "" }) {
   if (order.status === "cancelled") throw new Error("Order is cancelled");
+  if (order.channel === "amazon" && order.amazon?.easyShip) throw new Error("Amazon Easy Ship order: Amazon picks it up — use Schedule Easy Ship pickup");
   if (order.shipment?.awb && order.status !== "new" && order.status !== "packed") throw new Error(`Already booked: ${order.shipment.courierName} ${order.shipment.awb}`);
   const realAcc = await CourierAccount.findOne({ _id: accountId, organization: ctx.storeOrg || ctx.org, active: true });
   if (!realAcc) throw new Error("Choose a courier");
@@ -83,7 +84,11 @@ async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {}, skipChe
   order.status = "ready_to_ship";
   order.statusChangedAt = new Date();
   let warning = "";
-  if (store?.fulfillInShopify) {
+  if (order.channel === "amazon") {
+    // Amazon order: tell Amazon the courier and AWB, and invoice it if OrdexaGo invoices Amazon orders.
+    await order.save();
+    warning = await require("../amazon/ship").afterBooked(order);
+  } else if (store?.fulfillInShopify) {
     try {
       order.shipment.shopifyFulfilled = await fulfillInShopify(store, order, order.shipment);
     } catch (e) {
@@ -98,6 +103,7 @@ async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {}, skipChe
 
 async function trackOrder(order) {
   const sh = order.shipment;
+  if (sh?.carrier === "amazon_easyship") return require("../amazon/ship").trackEasyShip(order);
   if (!sh?.awb || !sh.account) return null;
   const acc = await CourierAccount.findById(sh.account);
   if (!acc) return null;
@@ -124,6 +130,7 @@ async function trackOrder(order) {
 async function cancelShipment(order) {
   const sh = order.shipment;
   if (!sh?.awb) throw new Error("No shipment to cancel");
+  if (sh.carrier === "amazon_easyship") throw new Error("Easy Ship pickups are cancelled or rescheduled in Seller Central");
   if (["shipped", "delivered", "rto"].includes(order.status)) throw new Error("The shipment has already left; raise it with the courier");
   const acc = sh.account ? await CourierAccount.findById(sh.account) : null;
   const was = `${sh.courierName || ""} ${sh.awb}`.trim();

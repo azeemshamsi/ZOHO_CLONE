@@ -5,7 +5,7 @@
  */
 const ShopifyOrder = require("../../models/ShopifyOrder");
 
-const FIELDS = { name: 1, orderNumber: 1, status: 1, orderDate: 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, invoice: 1, invoiceNumber: 1, tags: 1, remarks: 1, updatedAt: 1, customer: 1, "shippingAddress.name": 1, "shippingAddress.phone": 1, "shippingAddress.zip": 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shipment.awb": 1, "shipment.courierName": 1, "shipment.account": 1, "shopifyFulfillments.number": 1, "lines.sku": 1, "lines.title": 1, "lines.variantTitle": 1, "lines.vendor": 1, sellers: 1 };
+const FIELDS = { channel: 1, "amazon.easyShip": 1, name: 1, orderNumber: 1, status: 1, orderDate: 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, invoice: 1, invoiceNumber: 1, tags: 1, remarks: 1, updatedAt: 1, customer: 1, "shippingAddress.name": 1, "shippingAddress.phone": 1, "shippingAddress.zip": 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shipment.awb": 1, "shipment.courierName": 1, "shipment.account": 1, "shopifyFulfillments.number": 1, "lines.sku": 1, "lines.title": 1, "lines.variantTitle": 1, "lines.vendor": 1, sellers: 1 };
 const cache = new Map(); // org → { stamp, entries, building }
 
 function entryOf(o) {
@@ -17,6 +17,7 @@ function entryOf(o) {
   return {
     _id: o._id,
     status: o.status,
+    channel: o.channel === "amazon" ? (o.amazon?.easyShip ? "amazon_easyship" : "amazon_self") : "shopify",
     orderDate: o.orderDate ? new Date(o.orderDate).getTime() : 0,
     paymentMode: o.paymentMode,
     financialStatus: o.financialStatus,
@@ -67,6 +68,7 @@ function filterEntries(entries, q) {
     (e) =>
       (from === null || e.orderDate >= from) &&
       (to === null || e.orderDate <= to) &&
+      (!q.channel || e.channel === q.channel || (q.channel === "amazon" && e.channel.startsWith("amazon"))) &&
       (!q.payment || e.paymentMode === q.payment) &&
       (!q.financial || e.financialStatus === q.financial) &&
       (!q.fulfillment || e.fulfillmentStatus === q.fulfillment) &&

@@ -49,6 +49,7 @@ import ComingSoon from "./pages/ComingSoon";
 import Superadmin from "./pages/Superadmin";
 import Itc from "./pages/Itc";
 import AmazonSales from "./pages/AmazonSales";
+import AmazonSettings from "./pages/AmazonSettings";
 import Sellers from "./pages/Sellers";
 import SellerPortal from "./pages/SellerPortal";
 
@@ -113,6 +114,7 @@ export default function App() {
           <Route path="gst/reconcile" element={<GstReconcile />} />
           <Route path="itc" element={<Itc />} />
           <Route path="amazon" element={<AmazonSales />} />
+          <Route path="amazon-settings" element={<AmazonSettings />} />
           <Route path="e-invoices" element={<GstCompliance tab="einvoice" />} />
           <Route path="e-way-bills" element={<GstCompliance tab="eway" />} />
           <Route path="transfer-orders" element={<TransferList />} />
