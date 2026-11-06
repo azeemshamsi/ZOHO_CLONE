@@ -149,7 +149,9 @@ async function buildEntries(org, { to } = {}) {
       drB(account, amt);
       if (lines.length > n) lines[n][tag] = true;
     };
-    meta.build(dr, cr, drB, crB, st);
+    meta.build(dr, cr, drB, crB, st, lines);
+    // Receivable / payable lines carry their customer or vendor (party-wise trial balance, like Tally's debtors / creditors).
+    if (meta.partyId) for (const l of lines) if ((l.account === "ar" || l.account === "ap") && !l.partyId) Object.assign(l, { partyId: String(meta.partyId), partyKind: meta.partyKind, partyName: meta.party || "" });
     // Converting each line separately can leave a paisa or two over: post it to rounding.
     const diff = round2(lines.reduce((s, l) => s + l.debit - l.credit, 0));
     if (diff && Math.abs(diff) < 1) crB("adjustments", diff);
@@ -159,7 +161,7 @@ async function buildEntries(org, { to } = {}) {
 
   for (const i of invoices) {
     add({
-      date: i.date, type: "Invoice", id: i._id, number: i.invoiceNumber, party: i.customerName, rate: i.exchangeRate,
+      date: i.date, type: "Invoice", id: i._id, number: i.invoiceNumber, party: i.customerName, partyId: i.customer, partyKind: "customer", rate: i.exchangeRate,
       build: (dr, cr, drB, crB, st) => {
         dr("ar", i.total);
         if (i.opening) return cr("opening_equity", i.total); // balance brought forward from another system
@@ -181,7 +183,7 @@ async function buildEntries(org, { to } = {}) {
   }
   for (const p of payments) {
     add({
-      date: p.date, type: "Customer Payment", id: p._id, number: p.paymentNumber, party: p.customerName,
+      date: p.date, type: "Customer Payment", id: p._id, number: p.paymentNumber, party: p.customerName, partyId: p.customer, partyKind: "customer",
       build: (dr, cr, drB, crB) => {
         const r = Number(p.exchangeRate) || 1;
         const received = round2(p.amount * r);
@@ -195,7 +197,7 @@ async function buildEntries(org, { to } = {}) {
   }
   for (const c of cns) {
     add({
-      date: c.date, type: "Credit Note", id: c._id, number: c.number, party: c.customerName, rate: c.exchangeRate,
+      date: c.date, type: "Credit Note", id: c._id, number: c.number, party: c.customerName, partyId: c.customer, partyKind: "customer", rate: c.exchangeRate,
       build: (dr, cr, drB, crB, st) => {
         if (c.opening) {
           dr("opening_equity", c.total);
@@ -218,7 +220,7 @@ async function buildEntries(org, { to } = {}) {
     });
     for (const r of c.refunds || []) {
       add({
-        date: r.date, type: "Credit Note Refund", id: c._id, number: c.number, party: c.customerName, rate: c.exchangeRate,
+        date: r.date, type: "Credit Note Refund", id: c._id, number: c.number, party: c.customerName, partyId: c.customer, partyKind: "customer", rate: c.exchangeRate,
         build: (dr, cr) => {
           dr("ar", r.amount);
           cr(modeAccount(r.mode, r.bankAccount), r.amount);
@@ -228,7 +230,7 @@ async function buildEntries(org, { to } = {}) {
   }
   for (const b of bills) {
     add({
-      date: b.date, type: "Bill", id: b._id, number: b.billNumber, party: b.vendorName, rate: b.exchangeRate,
+      date: b.date, type: "Bill", id: b._id, number: b.billNumber, party: b.vendorName, partyId: b.vendor, partyKind: "vendor", rate: b.exchangeRate,
       build: (dr, cr, drB, crB, st) => {
         if (b.opening) {
           dr("opening_equity", b.total);
@@ -252,7 +254,7 @@ async function buildEntries(org, { to } = {}) {
   }
   for (const v of vps) {
     add({
-      date: v.date, type: "Vendor Payment", id: v._id, number: v.paymentNumber, party: v.vendorName,
+      date: v.date, type: "Vendor Payment", id: v._id, number: v.paymentNumber, party: v.vendorName, partyId: v.vendor, partyKind: "vendor",
       build: (dr, cr, drB, crB) => {
         const r = Number(v.exchangeRate) || 1;
         const paid = round2(v.amount * r);
@@ -265,7 +267,7 @@ async function buildEntries(org, { to } = {}) {
   }
   for (const e of expenses) {
     add({
-      date: e.date, type: "Expense", id: e._id, number: e.reference || e.category, party: e.vendorName,
+      date: e.date, type: "Expense", id: e._id, number: e.reference || e.category, party: e.vendorName, partyId: e.vendor, partyKind: "vendor",
       build: (dr, cr) => {
         dr(e.account || expCode(e.category), e.amount);
         dr("input_cgst", e.cgst);
@@ -277,7 +279,7 @@ async function buildEntries(org, { to } = {}) {
   }
   for (const c of vcs) {
     add({
-      date: c.date, type: "Vendor Credit", id: c._id, number: c.number, party: c.vendorName, rate: c.exchangeRate,
+      date: c.date, type: "Vendor Credit", id: c._id, number: c.number, party: c.vendorName, partyId: c.vendor, partyKind: "vendor", rate: c.exchangeRate,
       build: (dr, cr, drB, crB, st) => {
         dr("ap", c.total);
         if (c.opening) return cr("opening_equity", c.total);
@@ -296,7 +298,7 @@ async function buildEntries(org, { to } = {}) {
     });
     for (const r of c.refunds || []) {
       add({
-        date: r.date, type: "Vendor Credit Refund", id: c._id, number: c.number, party: c.vendorName, rate: c.exchangeRate,
+        date: r.date, type: "Vendor Credit Refund", id: c._id, number: c.number, party: c.vendorName, partyId: c.vendor, partyKind: "vendor", rate: c.exchangeRate,
         build: (dr, cr) => {
           dr(modeAccount(r.mode, r.bankAccount), r.amount);
           cr("ap", r.amount);
@@ -381,10 +383,13 @@ async function buildEntries(org, { to } = {}) {
   for (const j of journals) {
     add({
       date: j.date, type: "Journal", id: j._id, number: j.number, party: j.reference,
-      build: (dr, cr) => {
+      build: (dr, cr, drB, crB, st, out) => {
         for (const l of j.lines) {
+          const n = out.length;
           dr(l.account, l.debit);
           cr(l.account, l.credit);
+          const pid = l.customer || l.vendor;
+          if (pid) for (let k = n; k < out.length; k++) Object.assign(out[k], { partyId: String(pid), partyKind: l.customer ? "customer" : "vendor", partyName: l.partyName || l.customerName || l.vendorName || "" });
         }
       },
     });

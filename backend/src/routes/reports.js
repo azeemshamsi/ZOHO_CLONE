@@ -152,15 +152,46 @@ router.get(
       if (prior) rows.push({ code: "_pl_opening", name: "Profit & Loss A/c", group: "Equity", type: "equity", debit: prior < 0 ? -prior : 0, credit: prior > 0 ? prior : 0 });
     }
     const closingStock = isTally(req) ? TV.stockValue(entries0, to) : undefined;
+    const detail = req.query.detail === "1";
+    const fyStartOf = (d) => {
+      const t = new Date(d.getTime() + 5.5 * 3600000);
+      const y = t.getUTCMonth() >= 3 ? t.getUTCFullYear() : t.getUTCFullYear() - 1;
+      return new Date(Date.UTC(y, 3, 1) - 5.5 * 3600000);
+    };
+    // Accounts Receivable / Payable party-wise, like Tally's Sundry Debtors / Creditors: each customer's or vendor's
+    // balance (and, detailed, their opening and transactions). Entries without a party show as "Other entries".
+    const partyRows = rows.filter((r) => r.code === "ar" || r.code === "ap");
+    if (partyRows.length) {
+      const Customer = require("../models/Customer");
+      const Vendor = require("../models/Vendor");
+      const [cs, vs] = await Promise.all([Customer.find({ organization: req.org }, { displayName: 1 }).lean(), Vendor.find({ organization: req.org }, { displayName: 1 }).lean()]);
+      const names = new Map([...cs, ...vs].map((x) => [String(x._id), x.displayName]));
+      const dFrom = period ? pFrom : fyStartOf(to);
+      for (const r of partyRows) {
+        const map = new Map();
+        for (const e of entries) {
+          const at = new Date(e.date);
+          for (const l of e.lines) {
+            if (l.account !== r.code) continue;
+            const k = l.partyId || "";
+            if (!map.has(k)) map.set(k, { id: l.partyId || null, kind: l.partyKind || (r.code === "ar" ? "customer" : "vendor"), name: l.partyId ? names.get(l.partyId) || l.partyName || e.party || "(deleted)" : "Other entries (exchange differences, journals without a party)", net: 0, opening: 0, txns: [] });
+            const p = map.get(k);
+            p.net = round2(p.net + l.debit - l.credit);
+            if (!detail) continue;
+            if (at < dFrom) p.opening = round2(p.opening + l.debit - l.credit);
+            else p.txns.push({ date: e.date, type: e.type, id: e.id, number: e.number, party: e.party || "", debit: round2(l.debit), credit: round2(l.credit) });
+          }
+        }
+        r.parties = [...map.values()]
+          .filter((p) => p.net || (detail && p.txns.length))
+          .map((p) => ({ id: p.id, kind: p.kind, name: p.name, debit: p.net > 0 ? p.net : 0, credit: p.net < 0 ? -p.net : 0, ...(detail ? { opening: p.opening, txns: p.txns } : {}) }))
+          .sort((a, b) => (a.id ? 0 : 1) - (b.id ? 0 : 1) || a.name.localeCompare(b.name));
+      }
+    }
     // Detailed (Alt+F5): each ledger's transactions in the period (From, else the start of To's financial year),
     // after an opening balance, so opening + transactions = the closing balance shown.
-    if (req.query.detail === "1") {
-      const fyStart = (() => {
-        const t = new Date(to.getTime() + 5.5 * 3600000);
-        const y = t.getUTCMonth() >= 3 ? t.getUTCFullYear() : t.getUTCFullYear() - 1;
-        return new Date(Date.UTC(y, 3, 1) - 5.5 * 3600000);
-      })();
-      const dFrom = period ? pFrom : fyStart;
+    if (detail) {
+      const dFrom = period ? pFrom : fyStartOf(to);
       const byCode = new Map(rows.map((r) => [r.code, r]));
       for (const r of rows) {
         r.opening = 0;

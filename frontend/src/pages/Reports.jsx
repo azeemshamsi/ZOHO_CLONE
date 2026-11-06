@@ -624,7 +624,40 @@ function TrialBalance({ d, range }) {
                 <td className="num">{amt(r.debit)}</td>
                 <td className="num">{amt(r.credit)}</td>
               </tr>,
-              ...(d.detail
+              // Accounts Receivable / Payable: one line per customer / vendor (Tally's Sundry Debtors / Creditors).
+              ...(r.parties || []).flatMap((p) => [
+                <tr key={`${r.code}-p-${p.id || "other"}`} className={d.detail ? "row-sub" : ""}>
+                  <td style={{ paddingLeft: 48 }}>{p.id ? <Link to={`/${p.kind === "vendor" ? "vendors" : "customers"}/${p.id}`}>{p.name}</Link> : <span className="muted">{p.name}</span>}</td>
+                  {d.detail && <td />}
+                  <td className="num">{amt(p.debit)}</td>
+                  <td className="num">{amt(p.credit)}</td>
+                </tr>,
+                ...(d.detail
+                  ? [
+                      ...(p.opening
+                        ? [
+                            <tr key={`${r.code}-p-${p.id || "other"}-ob`} className="row-muted small">
+                              <td style={{ paddingLeft: 72 }}>Opening balance</td>
+                              <td />
+                              <td className="num">{p.opening > 0 ? money(p.opening) : ""}</td>
+                              <td className="num">{p.opening < 0 ? money(-p.opening) : ""}</td>
+                            </tr>,
+                          ]
+                        : []),
+                      ...(p.txns || []).map((t, i) => (
+                        <tr key={`${r.code}-p-${p.id || "other"}-${i}`} className="small">
+                          <td style={{ paddingLeft: 72 }}>
+                            <span className="muted">{date(t.date)}</span> · {t.type}
+                          </td>
+                          <td>{t.id ? <Link to={docLink(t.type, t.id)}>{t.number}</Link> : t.number}</td>
+                          <td className="num">{amt(t.debit)}</td>
+                          <td className="num">{amt(t.credit)}</td>
+                        </tr>
+                      )),
+                    ]
+                  : []),
+              ]),
+              ...(d.detail && !r.parties
                 ? [
                     ...(r.opening
                       ? [
