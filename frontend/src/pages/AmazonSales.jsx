@@ -36,7 +36,7 @@ export default function AmazonSales() {
           if (gstr1Files?.length) runCheck(month, gstr1Files, setCheck);
         }}
       />
-      <div className="card" style={{ marginTop: 16 }}>
+      <div className="card" style={{ marginTop: 16, overflowX: "auto" }}>
         <div className="card-head">
           <h3>Imported months</h3>
         </div>
@@ -306,7 +306,7 @@ function CheckResult({ r, onClose }) {
   ];
   const bad = (sec) => sec.rows.filter((x) => !x.ok).length;
   return (
-    <div className="card" style={{ marginTop: 16 }}>
+    <div className="card" style={{ marginTop: 16, overflowX: "auto" }}>
       <div className="card-head">
         <h3>
           {monthLabel(r.month)} · OrdexaGo vs Amazon's GSTR-1 ({r.gstin})
