@@ -173,7 +173,15 @@ export const docLink = (type, id) => (DOC_LINK[type] ? DOC_LINK[type](id) : "#")
 
 export function AccountDetail() {
   const { code } = useParams();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
+  // Accounts Receivable / Payable: party-wise (default), one party's transactions (?party=), or all (?by=txn).
+  const party = params.get("party") || "";
+  const by = params.get("by") || "";
+  const go = (next) => {
+    const p = new URLSearchParams(params);
+    for (const [k, v] of Object.entries(next)) v ? p.set(k, v) : p.delete(k);
+    setParams(p);
+  };
   const navigate = useNavigate();
   const [range, setRange] = useState(() =>
     params.get("from") ? { key: "custom", from: params.get("from"), to: params.get("to") } : { key: "this_fy", ...periodRange("this_fy") }
@@ -183,11 +191,11 @@ export function AccountDetail() {
   const [confirm, setConfirm] = useState(false);
   const [view, setView] = useState("tally"); // tally: as Tally / the reports show it; live: with stock movements
 
-  const load = () => api.get(`/accounts/${encodeURIComponent(code)}/transactions`, { params: { from: range.from, to: range.to, view } }).then((r) => setData(r.data));
+  const load = () => api.get(`/accounts/${encodeURIComponent(code)}/transactions`, { params: { from: range.from, to: range.to, view, party: party || undefined, by: by || undefined } }).then((r) => setData(r.data));
   useEffect(() => {
     setData(null);
     load();
-  }, [code, range.from, range.to, view]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [code, range.from, range.to, view, party, by]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) return <Spinner />;
   const a = data.account;
@@ -205,6 +213,16 @@ export function AccountDetail() {
             </button>
           </div>
         )}
+        {(a.code === "ar" || a.code === "ap") && (
+          <div className="seg" title="Party-wise: one line per customer / vendor, like Tally's Sundry Debtors / Creditors">
+            <button className={data.by === "party" ? "on" : ""} onClick={() => go({ party: "", by: "" })}>
+              Party-wise
+            </button>
+            <button className={data.by === "txn" && !data.party ? "on" : ""} onClick={() => go({ party: "", by: "txn" })}>
+              All transactions
+            </button>
+          </div>
+        )}
         <PeriodPicker value={range} onChange={setRange} />
         {!a.system && (
           <>
@@ -217,6 +235,59 @@ export function AccountDetail() {
           </>
         )}
       </PageHeader>
+      {data.party && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+          <button className="btn btn-sm" onClick={() => go({ party: "", by: "" })}>
+            ← All {a.code === "ar" ? "customers" : "vendors"}
+          </button>
+          <strong>{data.partyName}</strong>
+          {data.party !== "other" && (
+            <Link className="small" to={`/${a.code === "ar" ? "customers" : "vendors"}/${data.party}`}>
+              Open {a.code === "ar" ? "customer" : "vendor"}
+            </Link>
+          )}
+        </div>
+      )}
+      {data.by === "party" ? (
+        <div className="card flush">
+          <table className="table table-click">
+            <thead>
+              <tr>
+                <th>{a.code === "ar" ? "Customer" : "Vendor"}</th>
+                <th className="num">Opening</th>
+                <th className="num">Debit</th>
+                <th className="num">Credit</th>
+                <th className="num">Closing</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.parties.map((p) => (
+                <tr key={p.id} onClick={() => go({ party: p.id, by: "" })}>
+                  <td className={p.id === "other" ? "muted" : "link"}>{p.name}</td>
+                  <td className="num">{p.opening ? money(p.opening) : ""}</td>
+                  <td className="num">{p.debit ? money(p.debit) : ""}</td>
+                  <td className="num">{p.credit ? money(p.credit) : ""}</td>
+                  <td className="num">{money(p.closing)}</td>
+                </tr>
+              ))}
+              {!data.parties.length && (
+                <tr>
+                  <td colSpan={5} className="muted center">
+                    No balances in this period
+                  </td>
+                </tr>
+              )}
+              <tr className="row-total">
+                <td>{data.parties.length} {a.code === "ar" ? "customers" : "vendors"}</td>
+                <td className="num">{money(data.opening)}</td>
+                <td className="num">{money(data.totals.debit)}</td>
+                <td className="num">{money(data.totals.credit)}</td>
+                <td className="num">{money(data.closing)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : (
       <div className="card flush">
         <table className="table">
           <thead>
@@ -262,6 +333,7 @@ export function AccountDetail() {
           </tbody>
         </table>
       </div>
+      )}
       <AccountModal open={modal} account={a} onClose={() => setModal(false)} onSaved={() => (setModal(false), load())} />
       <Confirm
         open={confirm}

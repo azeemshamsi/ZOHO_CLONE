@@ -145,11 +145,48 @@ router.get(
     let entries = await buildEntries(req.org, { to });
     if (tally) entries = require("../utils/tallyView").tallyEntries(entries, accounts);
     const sign = debitNormal(acc.type) ? 1 : -1;
+    // Accounts Receivable / Payable: party-wise like Tally's Sundry Debtors / Creditors (by=party, the default), or
+    // one party's transactions (party=<id> | "other"), or every transaction (by=txn).
+    const isParty = acc.code === "ar" || acc.code === "ap";
+    const party = isParty ? String(req.query.party || "") : "";
+    if (isParty && !party && req.query.by !== "txn") {
+      const Model = require(acc.code === "ar" ? "../models/Customer" : "../models/Vendor");
+      const names = new Map((await Model.find({ organization: req.org }, { displayName: 1 }).lean()).map((x) => [String(x._id), x.displayName]));
+      const map = new Map();
+      for (const e of entries)
+        for (const l of e.lines) {
+          if (l.account !== acc.code) continue;
+          const k = l.partyId || "other";
+          if (!map.has(k)) map.set(k, { id: k, name: l.partyId ? names.get(l.partyId) || l.partyName || e.party || "(deleted)" : "Other entries (exchange differences, journals without a party)", opening: 0, debit: 0, credit: 0 });
+          const p = map.get(k);
+          if (from && new Date(e.date) < from) p.opening = round2(p.opening + sign * (l.debit - l.credit));
+          else {
+            p.debit = round2(p.debit + l.debit);
+            p.credit = round2(p.credit + l.credit);
+          }
+        }
+      const parties = [...map.values()]
+        .map((p) => ({ ...p, closing: round2(p.opening + sign * (p.debit - p.credit)) }))
+        .filter((p) => p.opening || p.debit || p.credit)
+        .sort((a, b) => (a.id === "other") - (b.id === "other") || a.name.localeCompare(b.name));
+      const opening = round2(parties.reduce((t, p) => t + p.opening, 0));
+      const closing = round2(parties.reduce((t, p) => t + p.closing, 0));
+      return res.send({ account: acc, from, to, opening, closing, parties, by: "party", view: tally ? "tally" : "live", totals: { debit: round2(parties.reduce((t, p) => t + p.debit, 0)), credit: round2(parties.reduce((t, p) => t + p.credit, 0)) } });
+    }
+    let partyName = "";
+    if (party) {
+      if (party === "other") partyName = "Other entries";
+      else {
+        const Model = require(acc.code === "ar" ? "../models/Customer" : "../models/Vendor");
+        partyName = (await Model.findOne({ _id: party, organization: req.org }, { displayName: 1 }).lean().catch(() => null))?.displayName || "";
+      }
+    }
     let opening = 0;
     const rows = [];
     for (const e of entries) {
       for (const l of e.lines) {
         if (l.account !== acc.code) continue;
+        if (party && (party === "other" ? !!l.partyId : l.partyId !== party)) continue;
         const net = sign * (l.debit - l.credit);
         if (from && new Date(e.date) < from) {
           opening += net;
@@ -164,7 +201,7 @@ router.get(
       run = round2(run + sign * (r.debit - r.credit));
       r.balance = run;
     }
-    res.send({ account: acc, from, to, opening, closing: run, rows, view: tally ? "tally" : "live" });
+    res.send({ account: acc, from, to, opening, closing: run, rows, view: tally ? "tally" : "live", ...(isParty ? { by: "txn", party: party || null, partyName } : {}) });
   })
 );
 
