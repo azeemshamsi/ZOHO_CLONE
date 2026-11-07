@@ -24,6 +24,7 @@ const CourierPincode = require("../models/CourierPincode");
 const { resolvePackage } = require("../utils/shopify/package");
 const PackageType = require("../models/PackageType");
 const { orderIndex, filterEntries } = require("../utils/shopify/orderIndex");
+const audit = require("../utils/audit");
 
 const STATUSES = ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "return_created", "returned", "cancelled"];
 const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -240,6 +241,9 @@ router.get(
           .map(csv)
           .join(",")
       );
+    const amazonRows = rows.filter((o) => o.channel === "amazon").length;
+    if (amazonRows) await audit.amazonAccess(req, "order_export", "orders CSV", { rows: rows.length, amazon: amazonRows, status: req.query.status || "all" });
+    else await audit.log(req, "order_export", { target: "orders CSV", meta: { rows: rows.length, amazon: 0, status: req.query.status || "all" } });
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="shopify-orders.csv"`);
     res.send("﻿" + out.join("\r\n"));
@@ -251,6 +255,7 @@ router.get(
   ah(async (req, res) => {
     const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg }).populate("lines.item", "name sku hsnSac taxRate needsReview reviewNote trackInventory packageType").lean();
     if (!o) throw new HttpError(404, "Order not found");
+    if (o.channel === "amazon") await audit.amazonAccess(req, "amazon_order_view", o.name, { orderId: String(o._id) });
     // Where to pick each item from.
     const ids = o.lines.map((l) => l.item?._id).filter(Boolean);
     if (ids.length) {
@@ -517,6 +522,7 @@ router.get(
       if (r.state !== "ready") throw new HttpError(409, r.message);
     }
     if (!o.shipment?.awb && o.shipment?.carrier !== "amazon_easyship") throw new HttpError(400, "Book a courier first");
+    if (o.channel === "amazon") await audit.amazonAccess(req, "amazon_label_download", o.name, { orderId: String(o._id), carrier: o.shipment?.carrier || "" });
     await require("../utils/shopify/labelOut").sendLabel(res, o, { org: req.org, storeOrg: req.storeOrg, own: req.query.own === "1" });
   })
 );
@@ -531,6 +537,8 @@ router.post(
     if (!orders.length) throw new HttpError(400, all.some((o) => o.shipment?.carrier === "amazon_easyship") ? "Easy Ship orders use Amazon's label — open it from each order" : "None of these orders has a shipment booked");
     const org = await Organization.findById(req.org);
     const accs = new Map((await CourierAccount.find({ organization: req.storeOrg })).map((a) => [String(a._id), a]));
+    const amz = orders.filter((o) => o.channel === "amazon");
+    if (amz.length) await audit.amazonAccess(req, "amazon_label_download", amz.length === 1 ? amz[0].name : `${amz.length} orders`, { count: amz.length, total: orders.length });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="labels.pdf"`);
     res.send(await labelsPdf(orders, org, accs, d.format));

@@ -16,6 +16,9 @@ const userSchema = new mongoose.Schema(
     inviteExpires: { type: Date },
     verified: { type: Boolean, default: false },
     superadmin: { type: Boolean, default: false }, // OrdexaGo's own operator: manages subscribers and plans
+    // Lockout after repeated wrong passwords (utils/lockout.js)
+    loginFailures: { count: { type: Number, default: 0 }, since: { type: Date } },
+    lockedUntil: { type: Date },
   },
   { timestamps: true }
 );

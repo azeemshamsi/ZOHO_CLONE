@@ -86,6 +86,7 @@ function startScheduler() {
     require("./fx").autoRefresh().catch((e) => console.error("Exchange rates failed:", e.message));
     require("./amazon/orders").erasePii().catch((e) => console.error("Amazon buyer data erase failed:", e.message));
     require("./sellers").monthlyTick().catch((e) => console.error("Seller purchase orders failed:", e.message));
+    require("./audit").purgeOld().catch((e) => console.error("Security log purge failed:", e.message));
   };
   setTimeout(tick, 5000);
   setInterval(tick, 60 * 60 * 1000).unref();

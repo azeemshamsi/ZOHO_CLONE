@@ -12,6 +12,7 @@ const errorHandler = require("./middleware/errorHandler");
 const app = express();
 
 app.disable("x-powered-by");
+app.set("trust proxy", "loopback"); // nginx on the same server sets X-Forwarded-For
 app.use(cors());
 app.use("/api/shopify-webhook", express.raw({ type: "*/*", limit: "5mb" }), require("./routes/shopifyWebhook"));
 app.use("/api/import", express.json({ limit: "80mb" }));
@@ -20,6 +21,7 @@ app.use("/api/amazon", express.json({ limit: "60mb" }));
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/api/health", (req, res) => res.send({ ok: true }));
+app.use("/api", require("./utils/audit").trail);
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/organization", auth, permit("settings", { readAll: true }), require("./routes/organization"));
 app.use("/api/customers", auth, permit("sales"), require("./routes/customers"));
@@ -58,6 +60,7 @@ app.use("/api/import", auth, permit("settings"), require("./routes/import"));
 app.use("/api/users", auth, permit("settings"), require("./routes/users"));
 app.use("/api/roles", auth, permit("settings"), require("./routes/roles"));
 app.use("/api/companies", auth, require("./routes/companies"));
+app.use("/api/security", auth, require("./routes/security"));
 app.use("/api/superadmin", auth, require("./routes/superadmin"));
 app.use("/api/sellers", auth, permit((req) => (req.method === "GET" && req.path === "/" ? ["store_sellers", "store_orders", "store_shipping"] : "store_sellers")), require("./routes/sellers"));
 app.use("/api/seller-portal", auth, require("./routes/sellerPortal"));

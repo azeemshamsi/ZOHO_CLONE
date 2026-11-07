@@ -32,6 +32,8 @@ export function AuthProvider({ children }) {
   };
 
   const signOut = () => {
+    const t = localStorage.getItem("mgi_token");
+    if (t) api.post("/auth/logout", null, { headers: { Authorization: `Bearer ${t}` } }).catch(() => {});
     localStorage.removeItem("mgi_token");
     localStorage.removeItem("ordexago_org");
     setState({ loading: false, user: null, organization: null });

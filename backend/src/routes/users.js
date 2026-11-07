@@ -8,6 +8,7 @@ const Membership = require("../models/Membership");
 const Role = require("../models/Role");
 const { ROLES, resolveRole } = require("../utils/roles");
 const { ah, validate, HttpError } = require("../utils/http");
+const audit = require("../utils/audit");
 
 // A role key is a built-in role or "custom:<id>" of a role in this company.
 async function checkRole(org, role) {
@@ -88,12 +89,14 @@ router.post(
       // Already has an OrdexaGo login (e.g. in your other company): just give access here.
       if (await Membership.exists({ user: user._id, organization: req.org })) throw new HttpError(409, "This person already has access to this company");
       const m = await Membership.create({ user: user._id, organization: req.org, role, extraRoles, status: user.status === "invited" ? "invited" : "active", invitedBy: req.user._id });
+      await roleAudit(req, "user_added", user, null, [role, ...extraRoles]);
       if (user.status === "invited") return res.status(201).send({ user: pub(user, m), ...(await invite(req, user, role)) });
       return res.status(201).send({ user: pub(user, m), added: true, message: `${user.name} already has an OrdexaGo login and can now open this company from the company switcher.` });
     }
     user = new User({ name: data.name, email, role, organization: req.org, status: "invited", invitedBy: req.user._id, verified: true });
     const r = await invite(req, user, role);
     const m = await Membership.create({ user: user._id, organization: req.org, role, extraRoles, status: "invited", invitedBy: req.user._id });
+    await roleAudit(req, "user_invited", user, null, [role, ...extraRoles]);
     res.status(201).send({ user: pub(user, m), ...r });
   })
 );
@@ -108,6 +111,14 @@ router.post(
     res.send(await invite(req, user, m.role));
   })
 );
+
+// Log a change to someone's access and alert the admins.
+async function roleAudit(req, action, user, from, to) {
+  const label = async (list) => (list ? (await Promise.all(list.map((r) => resolveRole(r, req.org).then((x) => x.label)))).join(" + ") || "none" : "—");
+  const [a, b] = [await label(from), await label(to)];
+  audit.log(req, action, { target: user.email, meta: { userId: String(user._id), from: from || [], to, fromLabel: a, toLabel: b } });
+  audit.alert(req.org, `User access changed: ${user.email}`, `${req.user.name} <${req.user.email}> changed access for ${user.email}: ${action.replace(/_/g, " ")} (${a} → ${b}).`, `role:${user._id}:${b}`);
+}
 
 // Make sure a company always keeps at least one active admin.
 async function guardLastAdmin(req, m, next) {
@@ -132,12 +143,16 @@ router.put(
     if (data.status && m.status === "invited") throw new HttpError(400, "This user hasn't accepted the invitation yet");
     await guardLastAdmin(req, m, { role: data.role || m.role, status: data.status || m.status });
     if (data.status === "active" && m.status === "inactive") await require("../utils/subscription").checkLimit(req.org, "users", { userId: user._id });
+    const before = { roles: [m.role, ...(m.extraRoles || [])], status: m.status };
     if (data.role) {
       m.role = data.role;
       m.extraRoles = extra;
     }
     if (data.status) m.status = data.status;
     await m.save();
+    const after = [m.role, ...(m.extraRoles || [])];
+    if (before.roles.join() !== after.join()) await roleAudit(req, "user_role_changed", user, before.roles, after);
+    if (before.status !== m.status) audit.log(req, "user_status_changed", { target: user.email, meta: { userId: String(user._id), from: before.status, to: m.status } });
     if (data.name) {
       user.name = data.name;
       await user.save();
@@ -154,6 +169,8 @@ router.delete(
     if (String(m.user) === String(req.user._id)) throw new HttpError(400, "You can't remove yourself");
     await guardLastAdmin(req, m, { role: "none", status: "inactive" });
     await m.deleteOne();
+    const gone = await User.findById(req.params.id, { email: 1 }).lean();
+    await roleAudit(req, "user_removed", gone || { _id: req.params.id, email: "" }, [m.role, ...(m.extraRoles || [])], []);
     const user = await User.findById(req.params.id);
     if (user && !(await Membership.exists({ user: user._id }))) await user.deleteOne();
     else if (user && String(user.organization) === String(req.org)) {

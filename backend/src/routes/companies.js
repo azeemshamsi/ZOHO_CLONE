@@ -73,7 +73,7 @@ router.delete(
     for (const f of require("fs").readdirSync(dir)) if (f.endsWith(".js") && f !== "shared.js") require(require("path").join(dir, f));
     const counts = {};
     for (const name of mongoose.modelNames()) {
-      if (["Organization", "User", "Membership"].includes(name)) continue;
+      if (["Organization", "User", "Membership", "AuditLog"].includes(name)) continue; // the security log is kept
       const M = mongoose.model(name);
       if (!M.schema.path("organization")) continue;
       const r = await M.deleteMany({ organization: id });

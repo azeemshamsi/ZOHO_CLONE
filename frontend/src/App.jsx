@@ -53,6 +53,7 @@ import AmazonSettings from "./pages/AmazonSettings";
 import Privacy from "./pages/Privacy";
 import Sellers from "./pages/Sellers";
 import SellerPortal from "./pages/SellerPortal";
+import Security from "./pages/Security";
 
 function Private({ children }) {
   const { loading, user } = useAuth();
@@ -196,6 +197,7 @@ export default function App() {
           <Route path="payments/:id" element={<PaymentView />} />
           <Route path="settings" element={<Settings />} />
           <Route path="users" element={<UsersPage />} />
+          <Route path="security" element={<Security />} />
           <Route path="superadmin" element={<Superadmin />} />
           <Route path="sellers" element={<Sellers />} />
           <Route path="seller" element={<SellerPortal />} />

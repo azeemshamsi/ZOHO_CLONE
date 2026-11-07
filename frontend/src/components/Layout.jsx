@@ -148,6 +148,7 @@ const PATH_MODULES = [
   ["/reports", "reports"],
   ["/settings", "settings"],
   ["/users", "settings"],
+  ["/security", "settings"],
 ];
 // Pages outside the company role permissions (only for the OrdexaGo superadmin).
 const SUPER_PATHS = ["/superadmin"];
@@ -250,6 +251,12 @@ export default function Layout() {
               <Icon name="users" />
               <span>Users & Roles</span>
             </NavLink>
+            {(user?.superadmin || user?.role === "admin") && (
+              <NavLink to="/security" className="nav-item" onClick={close}>
+                <Icon name="shield" />
+                <span>Security</span>
+              </NavLink>
+            )}
             <NavLink to="/locations" className="nav-item" onClick={close}>
               <Icon name="bank" />
               <span>Branches & Warehouses</span>

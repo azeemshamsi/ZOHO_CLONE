@@ -9,6 +9,7 @@ const Token = require("../models/Token");
 const sendEmail = require("../utils/sendEmail");
 const auth = require("../middleware/auth");
 const { ah, validate, HttpError } = require("../utils/http");
+const audit = require("../utils/audit");
 
 const password = Joi.string()
   .min(8)
@@ -99,8 +100,27 @@ router.post(
       Joi.object({ email: Joi.string().email().required().label("Email"), password: Joi.string().required() }),
       req.body
     );
-    const user = await User.findOne({ email: data.email.toLowerCase() });
+    const email = data.email.toLowerCase();
+    const user = await User.findOne({ email });
+    const L = require("../utils/lockout");
+    if (user) {
+      const ms = L.lockedFor(user);
+      if (ms) {
+        audit.log(req, "login_blocked_locked", { user: user._id, organization: user.organization, email });
+        throw new HttpError(423, `Too many wrong passwords. This account is locked — try again in ${L.minutesLeft(ms)} minute${L.minutesLeft(ms) > 1 ? "s" : ""}.`);
+      }
+    }
     if (!user || !user.password || !(await bcrypt.compare(data.password, user.password))) {
+      audit.log(req, "login_failed", { user: user?._id || null, organization: user?.organization || null, email, meta: { reason: user ? "wrong_password" : "unknown_email" } });
+      if (user && user.password) {
+        const r = L.recordFailure(user);
+        await User.updateOne({ _id: user._id }, { $set: { loginFailures: user.loginFailures, lockedUntil: user.lockedUntil || null } });
+        if (r.locked) {
+          audit.log(req, "account_locked", { user: user._id, organization: user.organization, email, meta: { minutes: L.LOCK_MS / 60000 } });
+          audit.alert(user.organization, `Account locked after ${L.MAX_FAILURES} failed logins: ${email}`, `${L.MAX_FAILURES} wrong passwords were entered for ${user.name} <${email}> within 10 minutes. The account is locked for 15 minutes.\nLast attempt from IP: ${audit.info(req).ip}`, `lock:${user._id}`);
+          throw new HttpError(423, "Too many wrong passwords. This account is locked for 15 minutes.");
+        }
+      }
       throw new HttpError(401, "Invalid email or password");
     }
     if (user.status === "inactive" && !(await require("../models/Membership").exists({ user: user._id, status: "active" }))) throw new HttpError(403, "Your access has been turned off. Contact your admin.");
@@ -110,8 +130,20 @@ router.post(
       throw new HttpError(403, "Please verify your email. We sent you a new link.");
     }
     user.lastLogin = new Date();
+    L.clearFailures(user);
     await user.save();
-    res.send(await sessionPayload(user, req.get("x-org")));
+    const payload = await sessionPayload(user, req.get("x-org"));
+    audit.log(req, "login", { user: user._id, organization: payload.organization?._id || user.organization, email });
+    res.send(payload);
+  })
+);
+
+router.post(
+  "/logout",
+  auth,
+  ah(async (req, res) => {
+    await audit.log(req, "logout");
+    res.send({ ok: true });
   })
 );
 
@@ -144,6 +176,7 @@ router.post(
     user.inviteToken = "";
     await user.save();
     await require("../models/Membership").updateMany({ user: user._id, status: "invited" }, { status: "active" });
+    audit.log(req, "invite_accepted", { user: user._id, organization: user.organization, email: user.email });
     res.send(await sessionPayload(user, String(user.organization)));
   })
 );
@@ -168,6 +201,7 @@ router.post(
     }
     const user = await User.findOne({ email: email.toLowerCase() });
     if (user) {
+      audit.log(req, "password_reset_requested", { user: user._id, organization: user.organization, email: user.email });
       const t = await createToken(user._id, "reset");
       await sendEmail(user.email, "Reset your OrdexaGo password", `Reset your password: ${env.APP_URL}/reset-password/${user._id}/${t.token}`);
     }
@@ -187,6 +221,8 @@ router.post(
       { password: await bcrypt.hash(data.password, 10), verified: true }
     );
     await token.deleteOne();
+    const u = await User.findById(req.params.id, { email: 1, organization: 1, name: 1 }).lean();
+    audit.log(req, "password_reset", { user: req.params.id, organization: u?.organization || null, email: u?.email || "" });
     res.send({ message: "Password updated. You can log in now." });
   })
 );
