@@ -104,8 +104,8 @@ function CheckButton({ month, onResult }) {
   };
   return (
     <>
-      <input ref={ref} type="file" multiple accept=".xlsx,.zip" style={{ display: "none" }} onChange={pick} />
-      <button className="btn btn-sm" disabled={busy} onClick={() => ref.current?.click()} title="Upload Amazon's GSTR-1 report for this month">
+      <input ref={ref} type="file" multiple accept=".xlsx,.zip,.csv" style={{ display: "none" }} onChange={pick} />
+      <button className="btn btn-sm" disabled={busy} onClick={() => ref.current?.click()} title="Select Amazon's GSTR-1 report for this month — add the MTR B2C and B2B files too to see each invoice">
         {busy ? "Checking…" : "Check with Amazon GSTR-1"}
       </button>
     </>
@@ -334,8 +334,9 @@ function CheckResult({ r, onClose }) {
     ["b2b", "B2B invoices", S.b2b],
     ["cdnr", "B2B credit notes", S.cdnr],
     ["hsn", "HSN summary", S.hsn],
+    ...(S.documents ? [["documents", "Documents", S.documents]] : []),
   ];
-  const bad = (sec) => sec.rows.filter((x) => !x.ok).length;
+  const bad = (sec) => (sec === S.documents ? sec.rows.filter((x) => x.problem !== "no_hsn").length : sec.rows.filter((x) => !x.ok).length);
   return (
     <div className="card" style={{ marginTop: 16, overflowX: "auto" }}>
       <div className="card-head">
@@ -383,6 +384,56 @@ function CheckResult({ r, onClose }) {
             </tr>
           </tbody>
         </table>
+      )}
+      {!S.documents && (
+        <p className="small muted">
+          To see which invoices cause a difference, run the check again and select Amazon's MTR B2C and B2B files together with the GSTR-1 report — a Documents tab then lists each one.
+        </p>
+      )}
+      {tab === "documents" && S.documents && (
+        <>
+          <p className="small muted" style={{ marginTop: 0 }}>
+            {S.documents.checked} Amazon documents checked against what was imported.
+            {S.documents.missingTaxable ? ` Missing documents account for ${money(S.documents.missingTaxable)} of taxable value.` : ""}
+          </p>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Document</th>
+                <th>Date</th>
+                <th className="num">Amazon taxable</th>
+                <th className="num">OrdexaGo taxable</th>
+                <th>What to do</th>
+              </tr>
+            </thead>
+            <tbody>
+              {S.documents.rows.map((x, i) => (
+                <tr key={i} style={x.problem === "no_hsn" ? undefined : { background: "var(--red-50)" }}>
+                  <td>
+                    {x.id ? <Link to={`/${x.kind === "invoice" ? "invoices" : "credit-notes"}/${x.id}`}>{x.number}</Link> : x.number}
+                    <div className="small muted">
+                      {x.kind === "invoice" ? "Invoice" : "Credit note"}
+                      {x.b2b ? " · B2B" : ""}
+                    </div>
+                  </td>
+                  <td className="small">{x.date}</td>
+                  <td className="num">{x.amazon == null ? "—" : money(x.amazon)}</td>
+                  <td className="num">{x.ordexago == null ? "—" : money(x.ordexago)}</td>
+                  <td className="small" style={{ maxWidth: 520 }}>
+                    <strong>{{ missing: "Missing", differs: "Differs", extra: "Extra", no_hsn: "No HSN from Amazon" }[x.problem]}.</strong> {x.note}
+                  </td>
+                </tr>
+              ))}
+              {!S.documents.rows.length && (
+                <tr>
+                  <td colSpan={5} className="muted center">
+                    Every document matches
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </>
       )}
       {(tab === "b2b" || tab === "cdnr") && (
         <table className="table">

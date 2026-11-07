@@ -403,6 +403,50 @@ async function reconcile(org, month, files) {
     return row(k, `${h || "(no HSN)"} @ ${rt}%`, ah.get(k), oh.get(k));
   });
 
+  // Document by document, when the MTR files are uploaded with the GSTR-1: what's missing, different, or
+  // where Amazon gave no HSN (OrdexaGo then uses the item's HSN, so the HSN summary differs on purpose).
+  let documents = null;
+  if (u.mtr.length) {
+    const p = A.plan(u.mtr, gstin);
+    const byInv = new Map(invoices.map((d) => [d.invoiceNumber, d]));
+    const byCn = new Map(creditNotes.map((d) => [d.number, d]));
+    const planDocs = [...p.invoices, ...p.creditNotes];
+    const lost = planDocs.filter((d) => !(d.kind === "invoice" ? byInv : byCn).has(d.number));
+    const [oi, oc] = await Promise.all([
+      Invoice.find({ organization: org, invoiceNumber: { $in: lost.filter((d) => d.kind === "invoice").map((d) => d.number) } }, { invoiceNumber: 1, importRef: 1, date: 1, customerName: 1, subTotal: 1 }).lean(),
+      CreditNote.find({ organization: org, number: { $in: lost.filter((d) => d.kind !== "invoice").map((d) => d.number) } }, { number: 1, importRef: 1, date: 1, customerName: 1, subTotal: 1 }).lean(),
+    ]);
+    const other = new Map([...oi.map((x) => [`invoice|${x.invoiceNumber}`, x]), ...oc.map((x) => [`creditNote|${x.number}`, x])]);
+    const rows = [];
+    const day = (x) => (x ? new Date(x).toISOString().slice(0, 10) : "");
+    for (const d of planDocs) {
+      const kind = d.kind === "invoice" ? "invoice" : "creditNote";
+      const ours = (kind === "invoice" ? byInv : byCn).get(d.number);
+      const amzTaxable = r2(Math.abs(d.taxable));
+      const base = { number: d.number, kind, date: day(d.date), b2b: !!d.b2b, amazon: amzTaxable };
+      if (!ours) {
+        const o = other.get(`${kind}|${d.number}`);
+        rows.push({ ...base, ordexago: null, id: o?._id || null, problem: "missing", note: o ? `Number already used by another ${kind === "invoice" ? "invoice" : "credit note"}${o.customerName ? ` (${o.customerName}` : " ("}${o.importRef ? `, imported as ${o.importRef}` : ", not from this import"}, ${day(o.date)}) — if it's the same sale, it's already in the books but not counted here; otherwise change one of the numbers and import again` : "Not in OrdexaGo — import the same MTR file again; only missing documents are created" });
+        continue;
+      }
+      const diff = r2(Math.abs(ours.subTotal) - amzTaxable);
+      if (Math.abs(diff) >= 0.05) rows.push({ ...base, ordexago: r2(Math.abs(ours.subTotal)), id: ours._id, problem: "differs", note: `Taxable differs by ${diff} — open it and compare its lines with Amazon's (edit, or delete it and import again)` });
+      const blank = d.lines.filter((l) => !l.hsn);
+      if (blank.length) {
+        const used = [...new Set(ours.lineItems.filter((l, i) => d.lines[i] && !d.lines[i].hsn).map((l) => l.hsnSac || "none"))].join(", ");
+        rows.push({ ...base, ordexago: r2(Math.abs(ours.subTotal)), id: ours._id, problem: "no_hsn", note: `Amazon gave no HSN for ${[...new Set(blank.map((l) => l.sku || l.name))].join(", ")}; OrdexaGo used the item's HSN (${used}). Your GSTR-1 will show it under that HSN, so this HSN row won't match Amazon's. Fix the HSN on the Amazon listing for future months.` });
+      }
+    }
+    // Imported for this month but not in these MTR files.
+    const inPlan = new Set(planDocs.map((d) => `${d.kind === "invoice" ? "invoice" : "creditNote"}|${d.number}`));
+    for (const d of invoices) if (!inPlan.has(`invoice|${d.invoiceNumber}`)) rows.push({ number: d.invoiceNumber, kind: "invoice", date: day(d.date), b2b: !!d.customerGstin, amazon: null, ordexago: r2(d.subTotal), id: d._id, problem: "extra", note: "Imported for this month but not in these MTR files" });
+    for (const d of creditNotes) if (!inPlan.has(`creditNote|${d.number}`)) rows.push({ number: d.number, kind: "creditNote", date: day(d.date), b2b: !!d.customerGstin, amazon: null, ordexago: r2(d.subTotal), id: d._id, problem: "extra", note: "Imported for this month but not in these MTR files" });
+    const order = { missing: 0, differs: 1, extra: 2, no_hsn: 3 };
+    rows.sort((a, b) => order[a.problem] - order[b.problem] || a.number.localeCompare(b.number));
+    const missingTaxable = r2(rows.filter((x) => x.problem === "missing").reduce((t, x) => t + (x.kind === "invoice" ? x.amazon : -x.amazon), 0));
+    documents = { rows, ok: !rows.some((x) => x.problem !== "no_hsn"), checked: planDocs.length, missingTaxable };
+  }
+
   const tot = (xs, f) => r2(xs.reduce((t, x) => t + f(x), 0));
   return {
     month,
@@ -414,6 +458,7 @@ async function reconcile(org, month, files) {
       cdnr: { rows: cdnr, ok: cdnr.every((r) => r.ok) },
       b2c: { rows: b2c, ok: b2c.every((r) => r.ok), amazon: tot(b2c, (r) => r.amazon), ordexago: tot(b2c, (r) => r.ordexago) },
       hsn: { rows: hsn, ok: hsn.every((r) => r.ok), amazon: tot(hsn, (r) => r.amazon), ordexago: tot(hsn, (r) => r.ordexago) },
+      ...(documents ? { documents } : {}),
     },
   };
 }
