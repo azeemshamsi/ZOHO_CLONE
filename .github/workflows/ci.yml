@@ -16,3 +16,10 @@ jobs:
           node-version: "20"
       - run: npm run build
       - run: npm test
+      # Known vulnerabilities in production dependencies (high or critical) fail the build — fix or upgrade, don't skip.
+      - name: Dependency audit (backend)
+        working-directory: backend
+        run: npm audit --omit=dev --audit-level=high
+      - name: Dependency audit (frontend)
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high

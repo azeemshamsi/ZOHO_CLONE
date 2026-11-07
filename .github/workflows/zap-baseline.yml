@@ -1,0 +1,43 @@
+name: OWASP ZAP baseline scan
+
+# Passive OWASP ZAP baseline scan of the live site, monthly and on demand. Findings are written to a GitHub issue
+# ("ZAP baseline scan: ordexago.com"), updated on every run, labelled "security" + "zap-scan" (see SECURITY.md).
+on:
+  schedule:
+    - cron: "30 21 1 * *" # 03:00 IST on the 2nd of every month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  zap:
+    runs-on: ubuntu-latest
+    env:
+      ISSUE_TITLE: "ZAP baseline scan: ordexago.com"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create security --color B60205 --description "Security finding or fix" --force -R "$GITHUB_REPOSITORY"
+          gh label create zap-scan --color 5319E7 --description "From the OWASP ZAP baseline scan" --force -R "$GITHUB_REPOSITORY"
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.15.0
+        with:
+          target: https://ordexago.com
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue_title: ${{ env.ISSUE_TITLE }}
+          allow_issue_writing: true
+          fail_action: false
+          cmd_options: "-a -j"
+          artifact_name: zap_scan
+      - name: Label the report issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          n=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number')
+          if [ -n "$n" ]; then gh issue edit "$n" -R "$GITHUB_REPOSITORY" --add-label security --add-label zap-scan; fi
