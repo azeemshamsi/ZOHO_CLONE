@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { money } from "../lib/format";
-import { PageHeader, Spinner, Empty, Field, toast } from "../components/ui";
+import { PageHeader, Spinner, Empty, Field, Modal, toast } from "../components/ui";
 import Icon from "../components/Icon";
 
 // Sales → Amazon: import Amazon's Merchant Tax Report (B2C / B2B) and check the month against Amazon's GSTR-1.
@@ -19,6 +19,7 @@ const monthLabel = (m) => (m ? new Date(`${m}-15T00:00:00Z`).toLocaleString("en-
 export default function AmazonSales() {
   const [list, setList] = useState(null);
   const [check, setCheck] = useState(null); // { month, result }
+  const [moveFor, setMoveFor] = useState(null);
   const loadMonths = () =>
     api
       .get("/amazon/months")
@@ -69,7 +70,14 @@ export default function AmazonSales() {
                   <td className="num">{money(m.taxable)}</td>
                   <td className="num">{money(m.value)}</td>
                   <td className="num">
-                    <CheckButton month={m.month} onResult={setCheck} />
+                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                      <CheckButton month={m.month} onResult={setCheck} />
+                      {m.b2b > 0 && (
+                        <button className="btn btn-sm" onClick={() => setMoveFor(m.month)} title="B2B invoices recorded under the Amazon party ledger → their buyers">
+                          Move B2B to buyers
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -78,6 +86,7 @@ export default function AmazonSales() {
         )}
       </div>
       {check && <CheckResult r={check} onClose={() => setCheck(null)} />}
+      {moveFor && <MoveB2b month={moveFor} onClose={() => setMoveFor(null)} />}
     </>
   );
 }
@@ -89,6 +98,101 @@ async function runCheck(month, files, setCheck) {
   } catch (e) {
     toast(errMsg(e), "error");
   }
+}
+
+// B2B documents imported under the Amazon party (Amazon_SRE) → the buyer named on each, by GSTIN.
+function MoveB2b({ month, onClose }) {
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(null);
+  useEffect(() => {
+    api
+      .get("/amazon/move-b2b", { params: { month } })
+      .then((r) => setRows(r.data.rows))
+      .catch((e) => (toast(errMsg(e), "error"), onClose()));
+  }, [month]);
+  const go = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post("/amazon/move-b2b", { month });
+      setDone(data);
+      setRows(data.rows);
+      toast(`${data.moved} moved to their buyers${data.skipped ? `, ${data.skipped} skipped` : ""}`);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  const movable = (rows || []).filter((r) => !r.skip).length;
+  return (
+    <Modal
+      open
+      title={`Move B2B to buyers — ${monthLabel(month)}`}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            {done ? "Close" : "Cancel"}
+          </button>
+          {!done && (
+            <button className="btn btn-primary" disabled={busy || !movable} onClick={go}>
+              {busy ? "Moving…" : `Move ${movable} document${movable === 1 ? "" : "s"}`}
+            </button>
+          )}
+        </>
+      }
+    >
+      {!rows ? (
+        <Spinner />
+      ) : !rows.length ? (
+        <p>Every B2B document of this month is already with its buyer — nothing to move.</p>
+      ) : (
+        <>
+          <p className="small muted" style={{ marginTop: 0 }}>
+            Only the party changes (customer, name, billing address). Number, items, Online Sale ledger, GST, the buyer's GSTIN and Amazon's IRN stay as they are, so the trial balance doesn't change — the amount moves from the Amazon party to each buyer under Sundry Debtors. Documents with a payment applied are left as they are.
+          </p>
+          <div style={{ overflowX: "auto" }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Document</th>
+                  <th>Date</th>
+                  <th className="num">Amount</th>
+                  <th>Now under</th>
+                  <th>{done ? "Moved to" : "Will move to"}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} style={r.skip ? { opacity: 0.6 } : undefined}>
+                    <td>
+                      <Link to={`/${r.kind === "invoice" ? "invoices" : "credit-notes"}/${r.id}`}>{r.number}</Link>
+                      <div className="small muted">{r.kind === "invoice" ? "Invoice" : "Credit note"}</div>
+                    </td>
+                    <td className="small">{r.date ? new Date(r.date).toLocaleDateString("en-IN") : ""}</td>
+                    <td className="num">{money(r.total)}</td>
+                    <td className="small">{r.from}</td>
+                    <td className="small">
+                      {r.skip ? (
+                        <span className="text-red">Skipped — {r.skip}</span>
+                      ) : (
+                        <>
+                          <b>{r.to}</b> <span className="muted">{r.gstin}</span>
+                          {r.newBuyer && !done && <span className="muted"> · new customer</span>}
+                          {done && r.done && " ✓"}
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
 }
 
 function CheckButton({ month, onResult }) {

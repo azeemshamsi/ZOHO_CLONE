@@ -346,6 +346,72 @@ const jobOf = (org, id) => {
   return j && j.org === String(org) ? j : null;
 };
 
+/* ---------------- move B2B documents from the Amazon party to their buyers ---------------- */
+// Documents imported under the Amazon party (Amazon_SRE) that carry a business buyer's GSTIN. Only the party
+// changes (customer, name, billing address): number, lines, ledgers, GST, buyer GSTIN and IRN stay as they are.
+async function b2bOnParty(org, month) {
+  const o = await Organization.findById(org);
+  const gstin = String(o.gstin || "").toUpperCase();
+  const { invoices, creditNotes } = await imported(org, gstin, month);
+  const docs = [...invoices.map((d) => ({ d, kind: "invoice" })), ...creditNotes.map((d) => ({ d, kind: "creditNote" }))].filter(({ d }) => String(d.customerGstin || "").length === 15);
+  const custs = new Map((await Customer.find({ organization: org }, { displayName: 1, gstin: 1 }).lean()).map((c) => [String(c._id), c]));
+  const byGstin = new Map([...custs.values()].filter((c) => c.gstin).map((c) => [String(c.gstin).toUpperCase(), c]));
+  const rows = [];
+  for (const { d, kind } of docs) {
+    const now = custs.get(String(d.customer));
+    const g = String(d.customerGstin).toUpperCase();
+    if (now && String(now.gstin || "").toUpperCase() === g) continue; // already with its buyer
+    const buyer = byGstin.get(g);
+    const paid = kind === "invoice" ? (d.amountPaid || 0) + (d.creditsApplied || 0) > 0 : (d.applications || []).length + (d.refunds || []).length > 0;
+    const name = (String(d.customerNotes || "").match(/Buyer: (.*?) \(/) || [])[1] || "";
+    rows.push({
+      id: d._id,
+      kind,
+      number: kind === "invoice" ? d.invoiceNumber : d.number,
+      date: d.date,
+      total: d.total,
+      from: now?.displayName || d.customerName || "",
+      gstin: g,
+      to: buyer ? buyer.displayName : name || g,
+      buyerId: buyer ? buyer._id : null,
+      buyerName: name,
+      newBuyer: !buyer,
+      skip: paid ? "payment applied" : "",
+    });
+  }
+  rows.sort((a, b) => a.kind.localeCompare(b.kind) || String(a.number).localeCompare(String(b.number)));
+  return rows;
+}
+
+async function moveB2b(ctx, month, req) {
+  const rows = await b2bOnParty(ctx.org, month);
+  const made = new Map();
+  const out = { moved: 0, skipped: 0, created: 0, rows: [] };
+  for (const r of rows) {
+    if (r.skip) {
+      out.skipped++;
+      out.rows.push({ ...r, done: false });
+      continue;
+    }
+    let buyer = r.buyerId ? await Customer.findById(r.buyerId) : made.get(r.gstin);
+    if (!buyer) {
+      const name = r.buyerName || r.gstin;
+      const taken = await Customer.exists({ organization: ctx.org, displayName: name });
+      buyer = await Customer.create({ organization: ctx.org, displayName: taken ? `${name} (${r.gstin})` : name, companyName: r.buyerName || "", customerType: "business", gstin: r.gstin, gstTreatment: "registered", placeOfSupply: r.gstin.slice(0, 2), notes: "Amazon business buyer (moved from the Amazon party ledger)" });
+      made.set(r.gstin, buyer);
+      out.created++;
+    }
+    const Model = r.kind === "invoice" ? Invoice : CreditNote;
+    const set = { customer: buyer._id, customerName: buyer.displayName };
+    if (buyer.billingAddress && (buyer.billingAddress.street || buyer.billingAddress.city)) set.billingAddress = buyer.billingAddress;
+    await Model.updateOne({ _id: r.id, organization: ctx.org }, { $set: set });
+    out.moved++;
+    out.rows.push({ ...r, to: buyer.displayName, done: true });
+    if (req) await require("../audit").log(req, "amazon_b2b_moved", { target: `${r.kind} ${r.number}`, meta: { from: r.from, to: buyer.displayName, gstin: r.gstin } });
+  }
+  return out;
+}
+
 /* ---------------- check against Amazon's GSTR-1 ---------------- */
 async function imported(org, gstin, month) {
   const [y, m] = month.split("-").map(Number);
@@ -578,4 +644,4 @@ async function months(org) {
   return { gstin: o?.gstin || "", months: [...by.values()].sort((a, b) => b.month.localeCompare(a.month)) };
 }
 
-module.exports = { preview, startImport, jobOf, reconcile, months, monthOfName, salesLedger, skuMatcher, ledgerName, keyFor, norm };
+module.exports = { b2bOnParty, moveB2b, preview, startImport, jobOf, reconcile, months, monthOfName, salesLedger, skuMatcher, ledgerName, keyFor, norm };

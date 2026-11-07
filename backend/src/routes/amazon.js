@@ -51,6 +51,23 @@ router.get(
   })
 );
 
+// B2B documents imported under the Amazon party: list (preview) and move to their buyers.
+router.get(
+  "/move-b2b",
+  ah(async (req, res) => {
+    const month = String(req.query.month || "");
+    if (!/^\d{4}-\d{2}$/.test(month)) throw new HttpError(400, "Pick a month");
+    res.send({ month, rows: await AI.b2bOnParty(req.org, month) });
+  })
+);
+router.post(
+  "/move-b2b",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ month: Joi.string().pattern(/^\d{4}-\d{2}$/).required() }), req.body);
+    res.send(await AI.moveB2b({ org: req.org, user: req.user }, d.month, req));
+  })
+);
+
 router.post(
   "/reconcile",
   ah(async (req, res) => {
