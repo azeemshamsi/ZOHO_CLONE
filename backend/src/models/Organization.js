@@ -81,5 +81,9 @@ const organizationSchema = new mongoose.Schema(
   }
 );
 
+// Secrets are stored encrypted (AES-256-GCM) and read back as plain text.
+const { encryptFields, FIELDS } = require("../utils/secrets");
+encryptFields(organizationSchema, FIELDS.Organization);
+
 module.exports = mongoose.model("Organization", organizationSchema);
 module.exports.addressSchema = addressSchema;

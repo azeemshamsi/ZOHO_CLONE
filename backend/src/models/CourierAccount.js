@@ -42,4 +42,8 @@ const courierAccountSchema = new mongoose.Schema(
   }
 );
 
+// Secrets are stored encrypted (AES-256-GCM) and read back as plain text.
+const { encryptFields, FIELDS } = require("../utils/secrets");
+encryptFields(courierAccountSchema, FIELDS.CourierAccount);
+
 module.exports = mongoose.model("CourierAccount", courierAccountSchema);

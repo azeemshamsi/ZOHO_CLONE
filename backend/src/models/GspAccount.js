@@ -30,7 +30,7 @@ const gspAccountSchema = new mongoose.Schema(
     toJSON: {
       transform: (doc, ret) => {
         ret.tokenSaved = !!ret.token;
-        ret.tokenEnd = ret.token ? ret.token.slice(-4) : "";
+        ret.tokenEnd = ret.token ? String(require("../utils/secrets").decrypt(ret.token)).slice(-4) : "";
         ret.secretSaved = !!ret.clientSecret;
         ret.passwordSaved = !!ret.password;
         ret.publicKeySaved = !!ret.publicKey;
@@ -40,5 +40,9 @@ const gspAccountSchema = new mongoose.Schema(
     },
   }
 );
+
+// Secrets are stored encrypted (AES-256-GCM) and read back as plain text.
+const { encryptFields, FIELDS } = require("../utils/secrets");
+encryptFields(gspAccountSchema, FIELDS.GspAccount);
 
 module.exports = mongoose.model("GspAccount", gspAccountSchema);

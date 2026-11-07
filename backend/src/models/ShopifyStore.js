@@ -86,4 +86,8 @@ const shopifyStoreSchema = new mongoose.Schema(
   }
 );
 
+// Secrets are stored encrypted (AES-256-GCM) and read back as plain text.
+const { encryptFields, FIELDS } = require("../utils/secrets");
+encryptFields(shopifyStoreSchema, FIELDS.ShopifyStore);
+
 module.exports = mongoose.model("ShopifyStore", shopifyStoreSchema);
