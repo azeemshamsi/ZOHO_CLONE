@@ -242,7 +242,7 @@ function ImportBox({ onImported }) {
               Skipped lines: {pv.skipped.cancel} cancelled, {pv.skipped.freeReplacement} free replacements
               {Object.entries(pv.skipped.otherGstin).map(([g, n]) => ` · ${n} of GSTIN ${g}`)}
             </li>
-            {!party && pv.newBuyers.length > 0 && <li>{pv.newBuyers.length} new B2B customers will be created: {pv.newBuyers.slice(0, 5).join(", ")}{pv.newBuyers.length > 5 ? "…" : ""}</li>}
+            {pv.newBuyers.length > 0 && <li>{pv.newBuyers.length} new B2B customers will be created: {pv.newBuyers.slice(0, 5).join(", ")}{pv.newBuyers.length > 5 ? "…" : ""}</li>}
             {pv.unmatchedSkus.length > 0 && (
               <li>
                 {pv.unmatchedSkus.length} Amazon SKUs have no item in OrdexaGo — those lines are imported without stock movement:{" "}
@@ -258,7 +258,7 @@ function ImportBox({ onImported }) {
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
             <Field label="Party (customer)">
               <select value={party} onChange={(e) => setParty(e.target.value)}>
-                {pv.posting?.party && <option value={pv.posting.party._id}>{pv.posting.party.name} — all Amazon sales</option>}
+                {pv.posting?.party && <option value={pv.posting.party._id}>{pv.posting.party.name} for B2C · each business buyer (GSTIN) for B2B</option>}
                 <option value="">Amazon B2C + each business buyer separately</option>
               </select>
             </Field>
@@ -288,7 +288,7 @@ function ImportBox({ onImported }) {
             <p className="small muted" style={{ margin: "8px 0 0" }}>
               Ledgers used: {pv.posting.ledgers.map((l) => l.name + (l.exists ? "" : " (new)")).join(", ")}
               {pv.posting.ledgers.some((l) => !l.exists) ? `. New ones are created${pv.posting.group ? ` under ${pv.posting.group}` : ""}.` : "."}
-              {party ? " Business buyers' GSTINs stay on each invoice for GSTR-1." : ""}
+              {party ? ` B2C sales go to ${pv.posting.party.name}; B2B sales to the buyer named on the invoice, found by GSTIN or created.` : ""}
             </p>
           )}
           {job && (

@@ -204,11 +204,15 @@ async function customerFor(org, d, cache) {
     c = await Customer.findOne({ organization: org, displayName: "Amazon B2C" });
     if (!c) c = await Customer.create({ organization: org, displayName: "Amazon B2C", companyName: "Amazon B2C customers", customerType: "individual", gstTreatment: "consumer", notes: "Amazon sales to consumers (imported from Amazon's MTR B2C report)" });
   } else {
-    c = await Customer.findOne({ organization: org, gstin: d.buyerGstin });
+    c = (await Customer.find({ organization: org }, { gstin: 1 }).lean()).find((x) => String(x.gstin || "").toUpperCase() === d.buyerGstin);
+    if (c) c = await Customer.findById(c._id);
+    const name = d.buyerName || d.buyerGstin;
+    // A different customer may already use the buyer's name: keep both apart with the GSTIN.
+    const taken = !c && (await Customer.exists({ organization: org, displayName: name }));
     if (!c)
       c = await Customer.create({
         organization: org,
-        displayName: d.buyerName || d.buyerGstin,
+        displayName: taken ? `${name} (${d.buyerGstin})` : name,
         companyName: d.buyerName || "",
         customerType: "business",
         gstin: d.buyerGstin,
@@ -268,7 +272,8 @@ async function run(ctx, pl, docs, opts, job) {
         job.done++;
         continue;
       }
-      const c = party || (await customerFor(ctx.org, d, cache));
+      // B2C → the Amazon party ledger (Amazon_SRE); B2B → the actual buyer by GSTIN (created if new).
+      const c = party && !d.b2b ? party : await customerFor(ctx.org, d, cache);
       const sign = d.kind === "creditNote" ? -1 : 1;
       const lineItems = d.lines.map((l) => {
         const it = l.kind === "product" ? match(l.sku) : null;
@@ -309,10 +314,10 @@ async function run(ctx, pl, docs, opts, job) {
         lineItems,
         ...(ledger ? { ledger } : {}),
         // One party ledger for all Amazon sales: the business buyer's GSTIN stays on the document for GSTR-1 (B2B).
-        ...(party && d.b2b ? { customerGstin: d.buyerGstin } : {}),
+
         ...(adjustment ? { adjustment } : {}),
         shipTo: { name: "", phone: "", street: "", city: d.shipTo.city, state: d.shipTo.state, pincode: d.shipTo.pincode, country: "India" },
-        customerNotes: `${party && d.b2b ? `Buyer: ${d.buyerName || ""} (${d.buyerGstin}) · ` : ""}Amazon ${d.channel === "AFN" ? "FBA" : d.channel === "MFN" ? "self-ship" : ""} order${d.orders.length > 1 ? "s" : ""} ${d.orders.join(", ")}${d.payment ? ` · ${d.payment}` : ""}${d.tcs ? ` · TCS by Amazon ₹${Math.abs(d.tcs)}` : ""}`,
+        customerNotes: `Amazon ${d.channel === "AFN" ? "FBA" : d.channel === "MFN" ? "self-ship" : ""} order${d.orders.length > 1 ? "s" : ""} ${d.orders.join(", ")}${d.payment ? ` · ${d.payment}` : ""}${d.tcs ? ` · TCS by Amazon ₹${Math.abs(d.tcs)}` : ""}`,
       };
       const ref = `amazon:${pl.gstin}:${pl.month}:${d.number}`;
       if (d.kind === "invoice") {
