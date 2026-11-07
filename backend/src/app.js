@@ -13,7 +13,41 @@ const app = express();
 
 app.disable("x-powered-by");
 app.set("trust proxy", "loopback"); // nginx on the same server sets X-Forwarded-For
-app.use(cors({ exposedHeaders: ["X-Session-Token"] }));
+// The app and its API share one origin; other sites may not call the API from a browser.
+const env = require("./config/env");
+const origins = [env.APP_URL, env.APP_URL.replace("://", "://www.")];
+app.use(cors({ origin: (o, cb) => cb(null, !o || origins.includes(o) ? o || false : false), exposedHeaders: ["X-Session-Token"] }));
+// Security headers (OWASP ZAP baseline findings).
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com data:",
+  "img-src 'self' data: blob: https:",
+  "connect-src 'self'",
+  "media-src 'self' blob:",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
+  "frame-src 'self' blob:",
+  "object-src 'self' blob:",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
+app.use((req, res, next) => {
+  res.set({
+    "Content-Security-Policy": CSP,
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    "Cross-Origin-Resource-Policy": "same-origin",
+  });
+  // API answers (orders, buyer data, labels) are never cached by browsers or proxies.
+  if (req.path.startsWith("/api/")) res.set("Cache-Control", "no-store");
+  next();
+});
 app.use("/api/shopify-webhook", express.raw({ type: "*/*", limit: "5mb" }), require("./routes/shopifyWebhook"));
 app.use("/api/import", express.json({ limit: "80mb" }));
 app.use(["/api/attachments", "/api/bill-scan", "/api/gst/returns/2b", "/api/seller-portal"], express.json({ limit: "15mb" }));

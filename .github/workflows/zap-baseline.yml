@@ -18,7 +18,14 @@ jobs:
       ISSUE_TITLE: "ZAP baseline scan: ordexago.com"
     steps:
       - uses: actions/checkout@v4
+      # GitHub Issues must be turned on for the report issue (Settings → General → Features → Issues).
+      - name: Are issues enabled?
+        id: repo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "issues=$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)" >> "$GITHUB_OUTPUT"
       - name: Labels
+        if: steps.repo.outputs.issues == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -30,12 +37,17 @@ jobs:
           target: https://ordexago.com
           token: ${{ secrets.GITHUB_TOKEN }}
           issue_title: ${{ env.ISSUE_TITLE }}
-          allow_issue_writing: true
+          allow_issue_writing: ${{ steps.repo.outputs.issues == 'true' }}
           fail_action: false
           cmd_options: "-a -j"
           artifact_name: zap_scan
-      - name: Label the report issue
+      - name: Report in the run summary
         if: always()
+        run: |
+          if [ -f report_md.md ]; then cat report_md.md >> "$GITHUB_STEP_SUMMARY"; else echo "No ZAP report was produced." >> "$GITHUB_STEP_SUMMARY"; fi
+          if [ "${{ steps.repo.outputs.issues }}" != "true" ]; then echo "> GitHub Issues are off for this repository, so no issue was written. Turn them on in Settings → General → Features → Issues." >> "$GITHUB_STEP_SUMMARY"; fi
+      - name: Label the report issue
+        if: always() && steps.repo.outputs.issues == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
