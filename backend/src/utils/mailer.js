@@ -114,8 +114,37 @@ async function sendOrgMail(org, msg) {
 }
 
 // System emails (sign-up verification, password reset, invites): server settings.
+// No server-wide email settings: send from a company's own email account (Settings → Email), the superadmin's
+// companies first, so security alerts and password resets still go out.
+let fallback = { at: 0, acc: null };
+async function companyAccount() {
+  if (Date.now() - fallback.at < 10 * 60000) return fallback.acc;
+  let acc = null;
+  try {
+    const User = require("../models/User");
+    const Membership = require("../models/Membership");
+    const Organization = require("../models/Organization");
+    const supers = await User.find({ superadmin: true }, { _id: 1 }).lean();
+    const mine = new Set((await Membership.find({ user: { $in: supers.map((u) => u._id) } }, { organization: 1 }).lean()).map((m) => String(m.organization)));
+    const orgs = (await Organization.find({}, { name: 1, smtp: 1 })).sort((a, b) => mine.has(String(b._id)) - mine.has(String(a._id)));
+    for (const o of orgs) {
+      const s = o.smtp || {};
+      if (!s.user || !(s.apiKey || s.pass)) continue;
+      const a = accountFor(o);
+      if (a) {
+        acc = { ...a, name: "OrdexaGo" };
+        break;
+      }
+    }
+  } catch (e) {
+    console.error(`[email] couldn't look up a company email account: ${e.message}`);
+  }
+  fallback = { at: Date.now(), acc };
+  return acc;
+}
+
 async function sendSystemMail(to, subject, text) {
-  const acc = serverAccount("OrdexaGo");
+  const acc = serverAccount("OrdexaGo") || (await companyAccount());
   if (!acc) {
     console.log(`[email disabled] Would send "${subject}" to ${to}: ${text}`);
     return false;

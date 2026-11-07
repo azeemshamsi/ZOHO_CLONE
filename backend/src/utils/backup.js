@@ -165,6 +165,7 @@ async function runBackup({ client, now = new Date() } = {}) {
     console.log(`Backup ${folder}: ${names.length} collections, ${manifest.totalRecords} records, ${(bytes / 1048576).toFixed(1)} MB${old.length ? `; removed ${old.length} old backup(s)` : ""}`);
     return r;
   } catch (e) {
+    e.message = describe(e);
     const r = { ok: false, at: now, folder, error: e.message, seconds: Math.round((Date.now() - started) / 1000) };
     await saveStatus({ last: r, lastDay: folder.slice(0, 10) }).catch(() => {});
     console.error(`Backup failed: ${e.message}`);
@@ -173,6 +174,18 @@ async function runBackup({ client, now = new Date() } = {}) {
   } finally {
     running = false;
   }
+}
+
+// Object Storage errors with their code / HTTP status and what usually fixes them.
+function describe(e) {
+  const code = e.Code || (e.name && e.name !== "Error" ? e.name : "");
+  const http = e.$metadata?.httpStatusCode;
+  let m = `${e.message}${code || http ? ` (${[code, http && `HTTP ${http}`].filter(Boolean).join(", ")})` : ""}`;
+  if (http === 401 || /authentication|signature|access key/i.test(e.message))
+    m += ". Oracle didn't accept the key: check OCI_BACKUP_ACCESS_KEY is the Access key of the same Customer secret key whose secret is in OCI_BACKUP_SECRET, that the key wasn't deleted, and that OCI_BACKUP_NAMESPACE and OCI_BACKUP_REGION are right. A new key can take a few minutes to start working.";
+  else if (http === 404) m += ". Bucket not found: check OCI_BACKUP_BUCKET, OCI_BACKUP_NAMESPACE and OCI_BACKUP_REGION.";
+  else if (http === 403) m += ". The key's user isn't allowed to write to this bucket (needs manage objects permission in the bucket's compartment).";
+  return m;
 }
 
 async function failed(e) {
