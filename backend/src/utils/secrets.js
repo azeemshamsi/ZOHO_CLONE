@@ -22,6 +22,7 @@ const FIELDS = {
   CourierAccount: ["credentials", "token"],
   GspAccount: ["token", "clientSecret", "password", "authToken", "sek"],
   Organization: ["smtp.pass", "smtp.apiKey", "ai.geminiKey"],
+  User: ["totp.secret", "totp.pendingSecret"], // two-step login secrets
 };
 
 function parseKey(v) {

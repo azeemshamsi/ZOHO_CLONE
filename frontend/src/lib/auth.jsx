@@ -15,7 +15,11 @@ export function AuthProvider({ children }) {
       const { data } = await api.get("/auth/me");
       if (data.organization?._id) localStorage.setItem("ordexago_org", data.organization._id);
       setState({ loading: false, user: data.user, organization: data.organization, organizations: data.organizations || [], subscription: data.subscription || null });
-    } catch {
+    } catch (e) {
+      // e.g. two-step login now required: say why on the sign-in page
+      try {
+        if (e?.response?.status === 401 && e.response.data?.message && localStorage.getItem("mgi_token")) sessionStorage.setItem("ordexago_blocked", e.response.data.message);
+      } catch {}
       localStorage.removeItem("mgi_token");
       setState({ loading: false, user: null, organization: null });
     }

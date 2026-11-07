@@ -86,6 +86,7 @@ test("legacy plain values loaded from the database still read", () => {
 test("start-up pass encrypts plain values and moves derived-key values to CREDENTIALS_KEY", async () => {
   const mongoose = require("mongoose");
   require("../src/models/ShopifyStore");
+  require("../src/models/User");
   S.resetKeys();
   const derivedValue = S.encrypt("old-derived");
   const rows = {
@@ -94,6 +95,7 @@ test("start-up pass encrypts plain values and moves derived-key values to CREDEN
     CourierAccount: [{ _id: 2, credentials: { token: "plain-tok", user: "" }, token: "" }],
     GspAccount: [],
     Organization: [{ _id: 3, smtp: { pass: "", apiKey: "xk" }, ai: {} }],
+    User: [{ _id: 4, totp: { secret: "", pendingSecret: "" } }],
   };
   const updates = [];
   for (const name of Object.keys(rows)) {

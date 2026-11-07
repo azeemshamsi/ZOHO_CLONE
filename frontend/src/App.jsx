@@ -54,6 +54,7 @@ import Privacy from "./pages/Privacy";
 import Sellers from "./pages/Sellers";
 import SellerPortal from "./pages/SellerPortal";
 import Security from "./pages/Security";
+import Account from "./pages/Account";
 
 function Private({ children }) {
   const { loading, user } = useAuth();
@@ -198,6 +199,7 @@ export default function App() {
           <Route path="settings" element={<Settings />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="security" element={<Security />} />
+          <Route path="account" element={<Account />} />
           <Route path="superadmin" element={<Superadmin />} />
           <Route path="sellers" element={<Sellers />} />
           <Route path="seller" element={<SellerPortal />} />

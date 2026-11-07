@@ -4,13 +4,14 @@ import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { date } from "../lib/format";
 import { PageHeader, Spinner, Field, Modal, Confirm, toast } from "../components/ui";
-import { AuthShell } from "./Auth";
+import { AuthShell, SignInSteps, PASSWORD_HINT } from "./Auth";
 import Icon from "../components/Icon";
 
 const LEVEL = { full: "✓ Full", view: "View", none: "—" };
 const statusCls = { active: "paid", invited: "sent", inactive: "void" };
 
 export function UsersPage() {
+  const { user: me } = useAuth();
   const [users, setUsers] = useState(null);
   const [roles, setRoles] = useState([]);
   const [modal, setModal] = useState(null); // {mode:'invite'} | {mode:'edit', user}
@@ -67,6 +68,7 @@ export function UsersPage() {
               <tr key={u._id}>
                 <td className="strong">
                   {u.name} {u.you && <span className="muted small">(you)</span>}
+                  {u.twoFactor && <span className="muted small" title="Two-step login is on"> · 2-step</span>}
                 </td>
                 <td>{u.email}</td>
                 <td>{(u.roles || [u.role]).map(roleLabel).join(" + ")}</td>
@@ -83,6 +85,11 @@ export function UsersPage() {
                   <button className="btn btn-sm" onClick={() => setModal({ mode: "edit", user: u })}>
                     Edit
                   </button>{" "}
+                  {u.twoFactor && (me?.role === "admin" || me?.superadmin) && (
+                    <button className="btn btn-sm" title="For a lost phone: they set up two-step login again at their next sign-in" onClick={() => window.confirm(`Reset two-step login for ${u.name}? They'll be signed out and set it up again at their next sign-in.`) && act(() => api.post(`/users/${u._id}/reset-2fa`), "Two-step login reset")}>
+                      Reset 2-step
+                    </button>
+                  )}{" "}
                   {!u.you && u.status !== "invited" && (
                     <button className="btn btn-sm" onClick={() => act(() => api.put(`/users/${u._id}`, { status: u.status === "active" ? "inactive" : "active" }), u.status === "active" ? "User deactivated" : "User reactivated")}>
                       {u.status === "active" ? "Deactivate" : "Activate"}
@@ -398,6 +405,7 @@ export function AcceptInvite() {
   const [error, setError] = useState("");
   const [form, setForm] = useState({ name: "", password: "", confirm: "" });
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(null);
   useEffect(() => {
     api
       .get(`/auth/invite/${id}/${token}`)
@@ -414,6 +422,7 @@ export function AcceptInvite() {
     setError("");
     try {
       const { data } = await api.post(`/auth/invite/${id}/${token}`, { name: form.name, password: form.password });
+      if (data.step) return setPending(data);
       signIn(data);
       navigate("/");
     } catch (err) {
@@ -421,6 +430,7 @@ export function AcceptInvite() {
       setBusy(false);
     }
   };
+  if (pending) return <SignInSteps start={pending} onCancel={() => navigate("/login")} />;
   return (
     <AuthShell title={info ? `Join ${info.organization}` : "Accept invitation"} subtitle={info ? `You've been invited as ${info.role}. Set a password for ${info.email}.` : ""}>
       {!info ? (
@@ -439,8 +449,8 @@ export function AcceptInvite() {
           <Field label="Your Name" required>
             <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </Field>
-          <Field label="Password" required hint="At least 8 characters, with letters and numbers">
-            <input type="password" required value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+          <Field label="Password" required hint={PASSWORD_HINT}>
+            <input type="password" required minLength={12} autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
           </Field>
           <Field label="Confirm Password" required>
             <input type="password" required value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} />

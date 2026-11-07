@@ -19,12 +19,28 @@ const userSchema = new mongoose.Schema(
     // Lockout after repeated wrong passwords (utils/lockout.js)
     loginFailures: { count: { type: Number, default: 0 }, since: { type: Date } },
     lockedUntil: { type: Date },
+    // Password policy (utils/password.js): expiry after 365 days, last 5 can't be reused
+    passwordChangedAt: { type: Date },
+    passwordHistory: { type: [String], default: [] },
+    tokenVersion: { type: Number, default: 0 }, // raised on password change / 2FA reset: signs out every session
+    // Two-step login (TOTP). Secrets are stored encrypted.
+    totp: {
+      enabled: { type: Boolean, default: false },
+      secret: { type: String, default: "" },
+      pendingSecret: { type: String, default: "" }, // during setup, until the first code is confirmed
+      recoveryCodes: { type: [String], default: [] }, // SHA-256 hashes of unused one-time codes
+      enabledAt: { type: Date },
+      lastStep: { type: Number, default: -1 }, // last used time step (a code can't be used twice)
+    },
   },
   { timestamps: true }
 );
 
-userSchema.methods.generateAuthToken = function () {
-  return jwt.sign({ _id: this._id }, env.JWT_SECRET, { expiresIn: "7d" });
+// Session token: 12 hours, renewed while the user is active (middleware/auth.js). `mfa`: passed two-step login.
+// tv = token version: changing the password signs out every other session.
+const SESSION_HOURS = 12;
+userSchema.methods.generateAuthToken = function (mfa = false) {
+  return jwt.sign({ _id: this._id, tv: this.tokenVersion || 0, typ: "s", mfa: !!mfa }, env.JWT_SECRET, { expiresIn: `${SESSION_HOURS}h` });
 };
 
 // r: the resolved role in the current company ({ label, perms, home }).
@@ -40,7 +56,11 @@ userSchema.methods.toPublic = function (r) {
     organization: this.organization,
     permissions: r?.perms || require("../utils/roles").permsOf(this.role),
     superadmin: !!this.superadmin,
+    twoFactor: !!this.totp?.enabled,
   };
 };
+
+const { encryptFields, FIELDS } = require("../utils/secrets");
+encryptFields(userSchema, FIELDS.User);
 
 module.exports = mongoose.model("User", userSchema);

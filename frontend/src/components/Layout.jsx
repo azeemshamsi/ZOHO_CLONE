@@ -311,6 +311,14 @@ export default function Layout() {
                   </button>
                   <button
                     onClick={() => {
+                      setProfileOpen(false);
+                      navigate("/account");
+                    }}
+                  >
+                    <Icon name="shield" size={16} /> Password & two-step login
+                  </button>
+                  <button
+                    onClick={() => {
                       signOut();
                       navigate("/login");
                     }}

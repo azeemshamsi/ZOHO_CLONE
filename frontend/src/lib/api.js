@@ -28,7 +28,12 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (r) => r,
+  (r) => {
+    // Sliding session: the server sends a fresh token while you're active.
+    const fresh = r.headers?.["x-session-token"];
+    if (fresh && localStorage.getItem("mgi_token")) localStorage.setItem("mgi_token", fresh);
+    return r;
+  },
   async (err) => {
     // Amazon order data from an unapproved device: offer "Request approval" (components/DeviceGate.jsx).
     if (err.response?.status === 403) {
@@ -50,6 +55,9 @@ api.interceptors.response.use(
       if (!window.location.pathname.startsWith("/login")) window.location.href = "/login";
     }
     if (err.response?.status === 401 && !err.config.url.startsWith("/auth/")) {
+      try {
+        if (err.response.data?.message) sessionStorage.setItem("ordexago_blocked", err.response.data.message);
+      } catch {}
       localStorage.removeItem("mgi_token");
       window.location.href = "/login";
     }

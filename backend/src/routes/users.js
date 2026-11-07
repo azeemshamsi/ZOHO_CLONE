@@ -17,7 +17,7 @@ async function checkRole(org, role) {
   if (/^custom:[a-f0-9]{24}$/.test(role) && (await Role.exists({ _id: role.slice(7), organization: org }))) return role;
   throw new HttpError(400, "Choose a valid role");
 }
-const pub = (u, m) => ({ _id: u._id, name: u.name, email: u.email, role: m.role, roles: [m.role, ...(m.extraRoles || [])], status: m.status === "invited" || u.status === "invited" ? "invited" : m.status, lastLogin: u.lastLogin, createdAt: m.createdAt });
+const pub = (u, m) => ({ _id: u._id, name: u.name, email: u.email, twoFactor: !!u.totp?.enabled, role: m.role, roles: [m.role, ...(m.extraRoles || [])], status: m.status === "invited" || u.status === "invited" ? "invited" : m.status, lastLogin: u.lastLogin, createdAt: m.createdAt });
 
 async function invite(req, user, role) {
   user.inviteToken = crypto.randomBytes(24).toString("hex");
@@ -158,6 +158,24 @@ router.put(
       await user.save();
     }
     res.send(pub(user, m));
+  })
+);
+
+// Turn off someone's two-step login (lost phone): they set it up again at their next sign-in.
+router.post(
+  "/:id/reset-2fa",
+  ah(async (req, res) => {
+    if (!(req.user.superadmin || req.membership?.role === "admin")) throw new HttpError(403, "Only admins can reset two-step login");
+    const m = await Membership.findOne({ user: req.params.id, organization: req.org });
+    const user = m && (await User.findById(req.params.id));
+    if (!user) throw new HttpError(404, "User not found");
+    if (user.superadmin && !req.user.superadmin) throw new HttpError(403, "Only the OrdexaGo superadmin can reset this user's two-step login");
+    user.totp = { enabled: false, secret: "", pendingSecret: "", recoveryCodes: [], lastStep: -1 };
+    user.tokenVersion = (user.tokenVersion || 0) + 1; // signs them out everywhere
+    await user.save();
+    await audit.log(req, "2fa_reset", { target: user.email, meta: { userId: String(user._id) } });
+    audit.alert(req.org, `Two-step login reset for ${user.email}`, `${req.user.name} <${req.user.email}> reset two-step login for ${user.name} <${user.email}>. They will set it up again at their next sign-in.`, `2fareset:${user._id}`);
+    res.send({ message: `Two-step login reset for ${user.name}. They'll set it up again when they next sign in.` });
   })
 );
 

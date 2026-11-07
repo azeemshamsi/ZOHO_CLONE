@@ -13,7 +13,7 @@ const app = express();
 
 app.disable("x-powered-by");
 app.set("trust proxy", "loopback"); // nginx on the same server sets X-Forwarded-For
-app.use(cors());
+app.use(cors({ exposedHeaders: ["X-Session-Token"] }));
 app.use("/api/shopify-webhook", express.raw({ type: "*/*", limit: "5mb" }), require("./routes/shopifyWebhook"));
 app.use("/api/import", express.json({ limit: "80mb" }));
 app.use(["/api/attachments", "/api/bill-scan", "/api/gst/returns/2b", "/api/seller-portal"], express.json({ limit: "15mb" }));

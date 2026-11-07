@@ -154,6 +154,21 @@ const MIGRATIONS = [
       for (const s of await Seller.find({}, { poFrom: 1 }).lean()) if (!s.poFrom) await Seller.updateOne({ _id: s._id }, { $set: { poFrom: new Date("2026-09-30T18:30:00Z") } });
     },
   },
+  {
+    // Password expiry (365 days) counts from today for existing users — nobody is forced to change at once.
+    id: "2026-11-password-changed-at",
+    run: async () => {
+      const User = require("../models/User");
+      const now = new Date();
+      let n = 0;
+      for (const u of await User.find({}, { passwordChangedAt: 1 }).lean()) {
+        if (u.passwordChangedAt) continue;
+        await User.collection.updateOne({ _id: u._id }, { $set: { passwordChangedAt: now } });
+        n++;
+      }
+      console.log(`Password policy: ${n} user(s) start their 365 days today`);
+    },
+  },
 ];
 
 async function runMigrations() {
