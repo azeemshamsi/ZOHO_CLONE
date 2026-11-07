@@ -14,6 +14,21 @@ const { stateOf, usageOf, clearCache } = require("../utils/subscription");
 
 router.use((req, res, next) => (req.user?.superadmin ? next() : res.status(403).send({ message: "Only the OrdexaGo superadmin can do this" })));
 
+/* ---------------- Backups ---------------- */
+router.get(
+  "/backup",
+  ah(async (req, res) => res.send(await require("../utils/backup").status()))
+);
+router.post(
+  "/backup/run",
+  ah(async (req, res) => {
+    const b = require("../utils/backup");
+    if (!b.config().configured) throw new HttpError(400, "Backups aren't configured on the server yet");
+    b.runBackup().catch(() => {});
+    res.send({ started: true });
+  })
+);
+
 const limit = Joi.number().integer().min(0).allow(null, "");
 const nil = (v) => (v === "" || v === undefined ? null : v);
 

@@ -72,8 +72,11 @@ export default function Superadmin() {
         <button className={`tab ${tab === "plans" ? "active" : ""}`} onClick={() => setTab("plans")}>
           Plans
         </button>
+        <button className={`tab ${tab === "backups" ? "active" : ""}`} onClick={() => setTab("backups")}>
+          Backups
+        </button>
       </div>
-      {!plans ? <Spinner /> : tab === "subscribers" ? <Subscribers plans={plans} /> : <Plans plans={plans} reload={loadPlans} />}
+      {tab === "backups" ? <Backups /> : !plans ? <Spinner /> : tab === "subscribers" ? <Subscribers plans={plans} /> : <Plans plans={plans} reload={loadPlans} />}
     </>
   );
 }
@@ -764,5 +767,53 @@ function PlanForm({ plan, onClose, onSaved }) {
         {error && <div className="alert alert-error">{error}</div>}
       </div>
     </Modal>
+  );
+}
+
+// Encrypted nightly backups to OCI Object Storage: last run and settings status.
+function Backups() {
+  const [s, setS] = useState(null);
+  const load = () => api.get("/superadmin/backup").then((r) => setS(r.data)).catch((e) => toast(errMsg(e), "error"));
+  useEffect(() => {
+    load();
+  }, []);
+  if (!s) return <Spinner />;
+  const l = s.last?.last;
+  const run = async () => {
+    try {
+      await api.post("/superadmin/backup/run");
+      toast("Backup started — refresh in a minute");
+      setTimeout(load, 15000);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  return (
+    <div className="card">
+      <h4 className="section-title" style={{ marginTop: 0 }}>
+        Off-site backups <span className="muted small">{s.configured ? `${s.bucket} · ${s.region}` : "Not configured"}</span>
+      </h4>
+      {!s.configured ? (
+        <p className="muted small">
+          Backups are off until these are added to the server's backend/.env: {s.missing.join(", ")}. Each night at 02:00 IST every collection is exported, encrypted (AES-256-GCM) and uploaded to OCI Object Storage; 30 days are kept.
+        </p>
+      ) : (
+        <>
+          <p className="muted small">{s.schedule}. Encrypted with BACKUP_KEY — keep a copy of that key somewhere safe outside the server; without it the backups can't be restored.</p>
+          {l ? (
+            <div className={`alert ${l.ok ? "alert-success" : "alert-error"}`}>
+              {l.ok ? "Last backup OK" : "Last backup FAILED"} · {new Date(l.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST
+              {l.ok ? ` · ${l.collections} collections, ${l.records} records, ${(l.bytes / 1048576).toFixed(1)} MB in ${l.seconds}s · folder ${l.folder}` : ` · ${l.error}`}
+            </div>
+          ) : (
+            <p className="muted">No backup has run yet.</p>
+          )}
+          {s.last?.lastOkAt && !l?.ok && <p className="muted small">Last good backup: {new Date(s.last.lastOkAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</p>}
+          <button className="btn" disabled={s.running} onClick={run}>
+            {s.running ? "Running…" : "Back up now"}
+          </button>
+        </>
+      )}
+    </div>
   );
 }
