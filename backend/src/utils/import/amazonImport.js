@@ -381,8 +381,20 @@ async function reconcile(org, month, files) {
   for (const r of amz.b2cs) add(as, `${r.pos}|${r.rate}`, r.taxable);
   for (const r of amz.b2cl) add(as, `${r.pos}|${r.rate}`, r.taxable);
   const os = new Map();
-  for (const d of invoices.filter((x) => !isB2b(x))) for (const l of d.lineItems) add(os, `${d.placeOfSupply}|${rate(l)}`, l.amount);
-  for (const d of creditNotes.filter((x) => !isB2b(x))) for (const l of d.lineItems) add(os, `${d.placeOfSupply}|${rate(l)}`, -l.amount);
+  // Which documents make up each row (OrdexaGo side; Amazon side too when the MTR files are uploaded).
+  const contrib = { b2c: new Map(), hsn: new Map() };
+  const put = (sec, key, side, doc, amt) => {
+    const m = contrib[sec].get(key) || new Map();
+    const k = `${doc.kind}|${doc.number}`;
+    const x = m.get(k) || { number: doc.number, kind: doc.kind, id: null, amazon: 0, ordexago: 0 };
+    if (doc.id) x.id = doc.id;
+    x[side] = r2(x[side] + amt);
+    m.set(k, x);
+    contrib[sec].set(key, m);
+  };
+  const oDoc = (d, kind) => ({ number: kind === "invoice" ? d.invoiceNumber : d.number, kind, id: d._id });
+  for (const d of invoices.filter((x) => !isB2b(x))) for (const l of d.lineItems) (add(os, `${d.placeOfSupply}|${rate(l)}`, l.amount), put("b2c", `${d.placeOfSupply}|${rate(l)}`, "ordexago", oDoc(d, "invoice"), l.amount));
+  for (const d of creditNotes.filter((x) => !isB2b(x))) for (const l of d.lineItems) (add(os, `${d.placeOfSupply}|${rate(l)}`, -l.amount), put("b2c", `${d.placeOfSupply}|${rate(l)}`, "ordexago", oDoc(d, "creditNote"), -l.amount));
   const STATES = require("../states").STATES;
   const sname = (c) => (STATES.find(([k]) => k === c) || [c, c])[1];
   const b2c = [...new Set([...as.keys(), ...os.keys()])]
@@ -396,18 +408,41 @@ async function reconcile(org, month, files) {
   const ah = new Map();
   for (const r of amz.hsn) add(ah, `${r.hsn}|${r.rate}`, r.taxable);
   const oh = new Map();
-  for (const d of invoices) for (const l of d.lineItems) add(oh, `${l.hsnSac || ""}|${rate(l)}`, l.amount);
-  for (const d of creditNotes) for (const l of d.lineItems) add(oh, `${l.hsnSac || ""}|${rate(l)}`, -l.amount);
+  for (const d of invoices) for (const l of d.lineItems) (add(oh, `${l.hsnSac || ""}|${rate(l)}`, l.amount), put("hsn", `${l.hsnSac || ""}|${rate(l)}`, "ordexago", oDoc(d, "invoice"), l.amount));
+  for (const d of creditNotes) for (const l of d.lineItems) (add(oh, `${l.hsnSac || ""}|${rate(l)}`, -l.amount), put("hsn", `${l.hsnSac || ""}|${rate(l)}`, "ordexago", oDoc(d, "creditNote"), -l.amount));
+  const mtrPlan = u.mtr.length ? A.plan(u.mtr, gstin) : null;
+  if (mtrPlan)
+    for (const d of [...mtrPlan.invoices, ...mtrPlan.creditNotes]) {
+      const doc = { number: d.number, kind: d.kind === "invoice" ? "invoice" : "creditNote" };
+      for (const l of d.lines) {
+        put("hsn", `${l.hsn || ""}|${Number(l.rate) || 0}`, "amazon", doc, l.taxable);
+        if (!d.b2b) put("b2c", `${d.pos}|${Number(l.rate) || 0}`, "amazon", doc, l.taxable);
+      }
+    }
+  const allOurs = new Map([...invoices.map((d) => [`invoice|${d.invoiceNumber}`, d._id]), ...creditNotes.map((d) => [`creditNote|${d.number}`, d._id])]);
+  // Rows that don't match carry their documents, those that differ first.
+  const withDocs = (sec, rows) =>
+    rows.map((r) => {
+      if (r.ok) return r;
+      const docs = [...(contrib[sec].get(r.key) || new Map()).values()].map((x) => {
+        const have = allOurs.get(`${x.kind}|${x.number}`);
+        return { ...x, id: x.id || have || null, elsewhere: !x.id && !!have, diff: r2(x.ordexago - x.amazon) };
+      });
+      docs.sort((a, b) => (mtrPlan ? Math.abs(b.diff) - Math.abs(a.diff) : 0) || a.number.localeCompare(b.number));
+      return { ...r, docs, sides: mtrPlan ? "both" : "ordexago" };
+    });
   const hsn = [...new Set([...ah.keys(), ...oh.keys()])].map((k) => {
     const [h, rt] = k.split("|");
     return row(k, `${h || "(no HSN)"} @ ${rt}%`, ah.get(k), oh.get(k));
   });
+  const hsnRows = withDocs("hsn", hsn);
+  const b2cRows = withDocs("b2c", b2c);
 
   // Document by document, when the MTR files are uploaded with the GSTR-1: what's missing, different, or
   // where Amazon gave no HSN (OrdexaGo then uses the item's HSN, so the HSN summary differs on purpose).
   let documents = null;
-  if (u.mtr.length) {
-    const p = A.plan(u.mtr, gstin);
+  if (mtrPlan) {
+    const p = mtrPlan;
     const byInv = new Map(invoices.map((d) => [d.invoiceNumber, d]));
     const byCn = new Map(creditNotes.map((d) => [d.number, d]));
     const planDocs = [...p.invoices, ...p.creditNotes];
@@ -456,8 +491,8 @@ async function reconcile(org, month, files) {
     sections: {
       b2b: { rows: b2b, ok: b2b.every((r) => r.ok) },
       cdnr: { rows: cdnr, ok: cdnr.every((r) => r.ok) },
-      b2c: { rows: b2c, ok: b2c.every((r) => r.ok), amazon: tot(b2c, (r) => r.amazon), ordexago: tot(b2c, (r) => r.ordexago) },
-      hsn: { rows: hsn, ok: hsn.every((r) => r.ok), amazon: tot(hsn, (r) => r.amazon), ordexago: tot(hsn, (r) => r.ordexago) },
+      b2c: { rows: b2cRows, ok: b2c.every((r) => r.ok), amazon: tot(b2c, (r) => r.amazon), ordexago: tot(b2c, (r) => r.ordexago) },
+      hsn: { rows: hsnRows, ok: hsn.every((r) => r.ok), amazon: tot(hsn, (r) => r.amazon), ordexago: tot(hsn, (r) => r.ordexago) },
       ...(documents ? { documents } : {}),
     },
   };

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { money } from "../lib/format";
@@ -328,6 +328,7 @@ function ImportBox({ onImported }) {
 
 function CheckResult({ r, onClose }) {
   const [tab, setTab] = useState("b2c");
+  const [open, setOpen] = useState(null);
   const S = r.sections;
   const TABS = [
     ["b2c", "B2C (state & rate)", S.b2c],
@@ -369,12 +370,55 @@ function CheckResult({ r, onClose }) {
           </thead>
           <tbody>
             {S[tab].rows.map((x) => (
-              <tr key={x.key} style={x.ok ? undefined : { background: "var(--red-50)" }}>
-                <td>{x.label}</td>
-                <td className="num">{money(x.amazon)}</td>
-                <td className="num">{money(x.ordexago)}</td>
-                <td className="num">{x.ok ? "✓" : money(x.diff)}</td>
-              </tr>
+              <Fragment key={x.key}>
+                <tr style={x.ok ? undefined : { background: "var(--red-50)", cursor: "pointer" }} onClick={x.ok ? undefined : () => setOpen(open === x.key ? null : x.key)} title={x.ok ? "" : "Click to see the documents in this row"}>
+                  <td>
+                    {!x.ok && <span style={{ display: "inline-block", width: 14 }}>{open === x.key ? "▾" : "▸"}</span>}
+                    {x.label}
+                  </td>
+                  <td className="num">{money(x.amazon)}</td>
+                  <td className="num">{money(x.ordexago)}</td>
+                  <td className="num">{x.ok ? "✓" : money(x.diff)}</td>
+                </tr>
+                {open === x.key && x.docs && (
+                  <tr>
+                    <td colSpan={4} style={{ background: "var(--bg)", padding: "8px 12px 12px 26px" }}>
+                      {x.sides !== "both" && (
+                        <p className="small muted" style={{ margin: "0 0 6px" }}>
+                          Showing OrdexaGo's documents in this row. To see Amazon's figure per document and spot the ones that differ, run the check with the MTR B2C and B2B files selected together with the GSTR-1.
+                        </p>
+                      )}
+                      <table className="table" style={{ margin: 0 }}>
+                        <thead>
+                          <tr>
+                            <th>Document</th>
+                            {x.sides === "both" && <th className="num">Amazon taxable</th>}
+                            <th className="num">OrdexaGo taxable</th>
+                            {x.sides === "both" && <th className="num">Difference</th>}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {x.docs
+                            .filter((d) => x.sides !== "both" || Math.abs(d.diff) >= 0.05)
+                            .slice(0, 300)
+                            .map((d) => (
+                              <tr key={d.kind + d.number}>
+                                <td>
+                                  {d.id ? <Link to={`/${d.kind === "invoice" ? "invoices" : "credit-notes"}/${d.id}`}>{d.number}</Link> : <span title="Not in OrdexaGo">{d.number}</span>} <span className="small muted">{d.kind === "invoice" ? "invoice" : "credit note"}</span>
+                                </td>
+                                {x.sides === "both" && <td className="num">{money(d.amazon)}</td>}
+                                <td className="num">{d.elsewhere ? <span className="small muted">{tab === "hsn" ? "under another HSN / rate" : "under another state / rate, or as B2B"}</span> : d.id ? money(d.ordexago) : <span className="text-red small">not in OrdexaGo</span>}</td>
+                                {x.sides === "both" && <td className="num">{money(d.diff)}</td>}
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                      {x.sides === "both" && !x.docs.some((d) => Math.abs(d.diff) >= 0.05) && <p className="small muted">Each document matches on its own; the difference comes from HSN or rate grouping.</p>}
+                      {x.sides !== "both" && x.docs.length > 300 && <p className="small muted">First 300 of {x.docs.length}.</p>}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
             <tr className="row-total">
               <td>Total</td>
