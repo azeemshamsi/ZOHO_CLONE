@@ -42,6 +42,19 @@ function skuMatcher(items) {
   };
 }
 
+/* ---------------- Amazon's figures per month (for the check) ---------------- */
+const AmazonMonth = require("../../models/AmazonMonth");
+const packPlan = (p) =>
+  [...p.invoices, ...p.creditNotes].map((d) => ({ k: d.kind === "invoice" ? "invoice" : "creditNote", n: d.number, d: d.date, b2b: !!d.b2b, pos: d.pos, t: d.taxable, l: d.lines.map((l) => ({ h: l.hsn || "", r: Number(l.rate) || 0, t: l.taxable, s: l.sku || "" })) }));
+const unpackPlan = (docs) => {
+  const ds = (docs || []).map((x) => ({ kind: x.k, number: x.n, date: x.d ? new Date(x.d) : null, b2b: !!x.b2b, pos: x.pos, taxable: x.t, lines: (x.l || []).map((l) => ({ hsn: l.h, rate: l.r, taxable: l.t, sku: l.s, name: l.s })) }));
+  return { invoices: ds.filter((d) => d.kind === "invoice"), creditNotes: ds.filter((d) => d.kind !== "invoice") };
+};
+async function keepMonth(org, gstin, month, p) {
+  if (!month || !p) return;
+  await AmazonMonth.updateOne({ organization: org, gstin, month }, { $set: { docs: packPlan(p) } }, { upsert: true }).catch((e) => console.error("Couldn't keep Amazon's figures:", e.message));
+}
+
 /* ---------------- posting: party and sales ledgers ---------------- */
 // Tally-style: every Amazon document to one party ledger (e.g. "Amazon_SRE"), and each line to a sales ledger under
 // the "Online Sale" master by type and rate — "Local B2B @ 5%", "OutState B2C @ 18%" … (local = seller's state).
@@ -218,6 +231,7 @@ function startImport(ctx, planId, { ledger, mode, party } = {}) {
   const docs = [...pl.plan.invoices, ...pl.plan.creditNotes].filter((d) => d.state === "new" || d.state === "ordexago");
   const job = { id, org: String(ctx.org), status: "running", total: docs.length, done: 0, created: { invoices: 0, creditNotes: 0, linked: 0 }, errors: [], warnings: [], at: Date.now(), month: pl.month };
   jobs.set(id, job);
+  keepMonth(ctx.org, pl.gstin, pl.month, pl.plan);
   run(ctx, pl, docs, { ledger, mode, party }, job).catch((e) => {
     job.status = "failed";
     job.errors.push({ number: "", message: e.message });
@@ -410,7 +424,15 @@ async function reconcile(org, month, files) {
   const oh = new Map();
   for (const d of invoices) for (const l of d.lineItems) (add(oh, `${l.hsnSac || ""}|${rate(l)}`, l.amount), put("hsn", `${l.hsnSac || ""}|${rate(l)}`, "ordexago", oDoc(d, "invoice"), l.amount));
   for (const d of creditNotes) for (const l of d.lineItems) (add(oh, `${l.hsnSac || ""}|${rate(l)}`, -l.amount), put("hsn", `${l.hsnSac || ""}|${rate(l)}`, "ordexago", oDoc(d, "creditNote"), -l.amount));
-  const mtrPlan = u.mtr.length ? A.plan(u.mtr, gstin) : null;
+  // Amazon's per-document figures: from MTR files uploaded with the check (kept for next time), else as kept at import.
+  let mtrPlan = null;
+  if (u.mtr.length) {
+    mtrPlan = A.plan(u.mtr, gstin);
+    await keepMonth(org, gstin, month, mtrPlan);
+  } else {
+    const kept = await AmazonMonth.findOne({ organization: org, gstin, month }).lean();
+    if (kept?.docs?.length) mtrPlan = unpackPlan(kept.docs);
+  }
   if (mtrPlan)
     for (const d of [...mtrPlan.invoices, ...mtrPlan.creditNotes]) {
       const doc = { number: d.number, kind: d.kind === "invoice" ? "invoice" : "creditNote" };
@@ -420,13 +442,23 @@ async function reconcile(org, month, files) {
       }
     }
   const allOurs = new Map([...invoices.map((d) => [`invoice|${d.invoiceNumber}`, d._id]), ...creditNotes.map((d) => [`creditNote|${d.number}`, d._id])]);
+  // Whole-document totals on both sides: a document whose total agrees is right even if a line sits under another HSN.
+  const ourTotal = new Map([...invoices.map((d) => [`invoice|${d.invoiceNumber}`, Math.abs(d.subTotal)]), ...creditNotes.map((d) => [`creditNote|${d.number}`, Math.abs(d.subTotal)])]);
+  const amzTotal = new Map(mtrPlan ? [...mtrPlan.invoices, ...mtrPlan.creditNotes].map((d) => [`${d.kind === "invoice" ? "invoice" : "creditNote"}|${d.number}`, Math.abs(d.taxable)]) : []);
   // Rows that don't match carry their documents, those that differ first.
   const withDocs = (sec, rows) =>
     rows.map((r) => {
       if (r.ok) return r;
       const docs = [...(contrib[sec].get(r.key) || new Map()).values()].map((x) => {
         const have = allOurs.get(`${x.kind}|${x.number}`);
-        return { ...x, id: x.id || have || null, elsewhere: !x.id && !!have, diff: r2(x.ordexago - x.amazon) };
+        const elsewhere = !x.id && !!have;
+        const diff = r2(x.ordexago - x.amazon);
+        // Needs correction: missing from OrdexaGo or a different amount. Not: in OrdexaGo under the item's HSN
+        // (Amazon gave none, or a different one) — the document itself is right.
+        const k = `${x.kind}|${x.number}`;
+        const wholeOk = ourTotal.has(k) && amzTotal.has(k) && Math.abs(ourTotal.get(k) - amzTotal.get(k)) < 0.05;
+        const status = Math.abs(diff) < 0.05 ? "ok" : !have ? "missing" : wholeOk ? "regrouped" : "differs";
+        return { ...x, id: x.id || have || null, elsewhere, diff, status };
       });
       docs.sort((a, b) => (mtrPlan ? Math.abs(b.diff) - Math.abs(a.diff) : 0) || a.number.localeCompare(b.number));
       return { ...r, docs, sides: mtrPlan ? "both" : "ordexago" };
@@ -441,6 +473,7 @@ async function reconcile(org, month, files) {
   // Document by document, when the MTR files are uploaded with the GSTR-1: what's missing, different, or
   // where Amazon gave no HSN (OrdexaGo then uses the item's HSN, so the HSN summary differs on purpose).
   let documents = null;
+  let noHsnProducts = [];
   if (mtrPlan) {
     const p = mtrPlan;
     const byInv = new Map(invoices.map((d) => [d.invoiceNumber, d]));
@@ -468,18 +501,29 @@ async function reconcile(org, month, files) {
       if (Math.abs(diff) >= 0.05) rows.push({ ...base, ordexago: r2(Math.abs(ours.subTotal)), id: ours._id, problem: "differs", note: `Taxable differs by ${diff} — open it and compare its lines with Amazon's (edit, or delete it and import again)` });
       const blank = d.lines.filter((l) => !l.hsn);
       if (blank.length) {
-        const used = [...new Set(ours.lineItems.filter((l, i) => d.lines[i] && !d.lines[i].hsn).map((l) => l.hsnSac || "none"))].join(", ");
-        rows.push({ ...base, ordexago: r2(Math.abs(ours.subTotal)), id: ours._id, problem: "no_hsn", note: `Amazon gave no HSN for ${[...new Set(blank.map((l) => l.sku || l.name))].join(", ")}; OrdexaGo used the item's HSN (${used}). Your GSTR-1 will show it under that HSN, so this HSN row won't match Amazon's. Fix the HSN on the Amazon listing for future months.` });
+        const products = d.lines.map((l, i) => (!l.hsn ? { sku: l.sku || l.name || "?", hsn: ours.lineItems[i]?.hsnSac || "none", taxable: r2(Math.abs(l.taxable)) } : null)).filter(Boolean);
+        const used = [...new Set(products.map((m) => m.hsn))].join(", ");
+        rows.push({ ...base, products, ordexago: r2(Math.abs(ours.subTotal)), id: ours._id, problem: "no_hsn", note: `Amazon gave no HSN for ${[...new Set(blank.map((l) => l.sku || l.name))].join(", ")}; OrdexaGo used the item's HSN (${used}). Your GSTR-1 will show it under that HSN, so this HSN row won't match Amazon's. Fix the HSN on the Amazon listing for future months.` });
       }
     }
     // Imported for this month but not in these MTR files.
     const inPlan = new Set(planDocs.map((d) => `${d.kind === "invoice" ? "invoice" : "creditNote"}|${d.number}`));
     for (const d of invoices) if (!inPlan.has(`invoice|${d.invoiceNumber}`)) rows.push({ number: d.invoiceNumber, kind: "invoice", date: day(d.date), b2b: !!d.customerGstin, amazon: null, ordexago: r2(d.subTotal), id: d._id, problem: "extra", note: "Imported for this month but not in these MTR files" });
     for (const d of creditNotes) if (!inPlan.has(`creditNote|${d.number}`)) rows.push({ number: d.number, kind: "creditNote", date: day(d.date), b2b: !!d.customerGstin, amazon: null, ordexago: r2(d.subTotal), id: d._id, problem: "extra", note: "Imported for this month but not in these MTR files" });
+    // Products Amazon sent without an HSN, and the HSN OrdexaGo used instead.
+    const prod = new Map();
+    for (const x of rows.filter((r) => r.problem === "no_hsn")) for (const m of x.products || []) {
+      const e = prod.get(m.sku) || { sku: m.sku, hsn: new Set(), invoices: 0, taxable: 0 };
+      e.hsn.add(m.hsn);
+      e.invoices++;
+      e.taxable = r2(e.taxable + m.taxable);
+      prod.set(m.sku, e);
+    }
+    noHsnProducts = [...prod.values()].map((e) => ({ ...e, hsn: [...e.hsn].join(", ") }));
     const order = { missing: 0, differs: 1, extra: 2, no_hsn: 3 };
     rows.sort((a, b) => order[a.problem] - order[b.problem] || a.number.localeCompare(b.number));
     const missingTaxable = r2(rows.filter((x) => x.problem === "missing").reduce((t, x) => t + (x.kind === "invoice" ? x.amazon : -x.amazon), 0));
-    documents = { rows, ok: !rows.some((x) => x.problem !== "no_hsn"), checked: planDocs.length, missingTaxable };
+    documents = { rows, ok: !rows.some((x) => x.problem !== "no_hsn"), checked: planDocs.length, missingTaxable, noHsnProducts, source: u.mtr.length ? "uploaded" : "kept" };
   }
 
   const tot = (xs, f) => r2(xs.reduce((t, x) => t + f(x), 0));

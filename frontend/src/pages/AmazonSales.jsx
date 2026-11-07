@@ -358,6 +358,19 @@ function CheckResult({ r, onClose }) {
           </button>
         ))}
       </div>
+      {tab === "hsn" && S.documents?.noHsnProducts?.length > 0 && (
+        <div className="alert alert-info small" style={{ marginBottom: 10 }}>
+          <b>Products Amazon reported without an HSN</b> — OrdexaGo used the HSN from your item master, so these invoices are correct but Amazon's HSN summary shows them under "no HSN". Add the HSN to these listings in Seller Central:
+          <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+            {S.documents.noHsnProducts.map((p) => (
+              <li key={p.sku}>
+                <b>{p.sku}</b> — OrdexaGo used HSN {p.hsn} · {p.invoices} document{p.invoices === 1 ? "" : "s"} · taxable {money(p.taxable)}
+              </li>
+            ))}
+          </ul>
+          The invoices are listed in the Documents tab ("No HSN from Amazon").
+        </div>
+      )}
       {(tab === "b2c" || tab === "hsn") && (
         <table className="table">
           <thead>
@@ -384,8 +397,14 @@ function CheckResult({ r, onClose }) {
                   <tr>
                     <td colSpan={4} style={{ background: "var(--bg)", padding: "8px 12px 12px 26px" }}>
                       {x.sides !== "both" && (
-                        <p className="small muted" style={{ margin: "0 0 6px" }}>
-                          Showing OrdexaGo's documents in this row. To see Amazon's figure per document and spot the ones that differ, run the check with the MTR B2C and B2B files selected together with the GSTR-1.
+                        <p className="small" style={{ margin: "0 0 6px", color: "var(--red)" }}>
+                          OrdexaGo doesn't have Amazon's per-invoice figures for this month yet, so it can only list its own documents. Run the check once more with the MTR B2C and B2B files selected together with the GSTR-1 — they're kept, so after that every check shows exactly which invoices need correcting.
+                        </p>
+                      )}
+                      {x.sides === "both" && (
+                        <p className="small" style={{ margin: "0 0 6px" }}>
+                          <b>{x.docs.filter((d) => d.status === "missing" || d.status === "differs").length}</b> to correct
+                          {x.docs.some((d) => d.status === "regrouped") ? ` · ${x.docs.filter((d) => d.status === "regrouped").length} correct but grouped under another ${tab === "hsn" ? "HSN" : "state or rate"} (nothing to do)` : ""}
                         </p>
                       )}
                       <table className="table" style={{ margin: 0 }}>
@@ -395,11 +414,13 @@ function CheckResult({ r, onClose }) {
                             {x.sides === "both" && <th className="num">Amazon taxable</th>}
                             <th className="num">OrdexaGo taxable</th>
                             {x.sides === "both" && <th className="num">Difference</th>}
+                            {x.sides === "both" && <th>Status</th>}
                           </tr>
                         </thead>
                         <tbody>
                           {x.docs
-                            .filter((d) => x.sides !== "both" || Math.abs(d.diff) >= 0.05)
+                            .filter((d) => x.sides !== "both" || d.status !== "ok")
+                            .sort((a, b) => (x.sides === "both" ? (a.status === "regrouped") - (b.status === "regrouped") : 0))
                             .slice(0, 300)
                             .map((d) => (
                               <tr key={d.kind + d.number}>
@@ -409,11 +430,18 @@ function CheckResult({ r, onClose }) {
                                 {x.sides === "both" && <td className="num">{money(d.amazon)}</td>}
                                 <td className="num">{d.elsewhere ? <span className="small muted">{tab === "hsn" ? "under another HSN / rate" : "under another state / rate, or as B2B"}</span> : d.id ? money(d.ordexago) : <span className="text-red small">not in OrdexaGo</span>}</td>
                                 {x.sides === "both" && <td className="num">{money(d.diff)}</td>}
+                                {x.sides === "both" && (
+                                  <td className="small">
+                                    {d.status === "missing" && <span className="text-red">Correct: not in OrdexaGo — import the MTR again</span>}
+                                    {d.status === "differs" && <span className="text-red">Correct: amount differs — open and fix</span>}
+                                    {d.status === "regrouped" && <span className="muted">OK — whole invoice matches; HSN from item master</span>}
+                                  </td>
+                                )}
                               </tr>
                             ))}
                         </tbody>
                       </table>
-                      {x.sides === "both" && !x.docs.some((d) => Math.abs(d.diff) >= 0.05) && <p className="small muted">Each document matches on its own; the difference comes from HSN or rate grouping.</p>}
+                      {x.sides === "both" && !x.docs.some((d) => d.status !== "ok") && <p className="small muted">Each document matches; nothing to correct.</p>}
                       {x.sides !== "both" && x.docs.length > 300 && <p className="small muted">First 300 of {x.docs.length}.</p>}
                     </td>
                   </tr>
@@ -430,8 +458,8 @@ function CheckResult({ r, onClose }) {
         </table>
       )}
       {!S.documents && (
-        <p className="small muted">
-          To see which invoices cause a difference, run the check again and select Amazon's MTR B2C and B2B files together with the GSTR-1 report — a Documents tab then lists each one.
+        <p className="small" style={{ color: "var(--red)" }}>
+          To see exactly which invoices need correcting (and which products came without HSN), run the check once more selecting the MTR B2C and B2B files together with the GSTR-1. OrdexaGo keeps them, so you won't need to add them again for this month.
         </p>
       )}
       {tab === "documents" && S.documents && (
