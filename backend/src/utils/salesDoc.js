@@ -30,6 +30,8 @@ const baseDocJoi = {
   adjustment: Joi.number(),
   adjustmentAccount: Joi.string().allow(""),
   ledger: Joi.string().allow(""),
+  // Only for documents billed to a marketplace party ledger (Amazon_SRE) on behalf of a registered buyer.
+  customerGstin: Joi.string().trim().uppercase().pattern(/^\d{2}[A-Z0-9]{13}$/).allow(""),
   customerNotes: Joi.string().allow(""),
   terms: Joi.string().allow(""),
   branch: Joi.string().allow(null, ""),
@@ -113,7 +115,7 @@ async function prepareDoc(req, data, party = "customer") {
       ...(await currencyFor(req, customer, data.exchangeRate)),
       placeOfSupply,
       [`${party}Name`]: customer.displayName,
-      [`${party}Gstin`]: customer.gstin,
+      [`${party}Gstin`]: (party === "customer" && data.customerGstin) || customer.gstin,
       // Bill To / Ship To: as given on the document, else the customer's addresses.
       billingAddress: hasAddr(data.billingAddress) ? data.billingAddress : customer.billingAddress,
       ...(party === "customer" ? { shipTo: shipToFor(data.shipTo, customer) } : {}),

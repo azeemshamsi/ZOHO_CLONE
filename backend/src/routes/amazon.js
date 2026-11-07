@@ -33,9 +33,9 @@ router.post(
 router.post(
   "/import",
   ah(async (req, res) => {
-    const d = validate(Joi.object({ planId: Joi.string().required(), ledger: Joi.string().allow("") }), req.body);
+    const d = validate(Joi.object({ planId: Joi.string().required(), ledger: Joi.string().allow(""), mode: Joi.string().valid("online", "single").default("single"), party: Joi.string().allow("") }), req.body);
     try {
-      res.status(202).send(AI.startImport({ org: req.org, user: req.user }, d.planId, { ledger: d.ledger }));
+      res.status(202).send(AI.startImport({ org: req.org, user: req.user }, d.planId, { ledger: d.ledger, mode: d.mode, party: d.party }));
     } catch (e) {
       throw fail(e);
     }

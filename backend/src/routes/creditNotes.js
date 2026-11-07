@@ -100,6 +100,8 @@ router.put(
     const { fields } = await prepareDoc(req, data);
     await linkInvoice(req, fields);
     if (!fields.number) fields.number = cn.number;
+    // A buyer GSTIN kept on a document billed to a marketplace party (Amazon_SRE) survives edits from the form.
+    if (data.customerGstin === undefined && cn.customerGstin && String(fields.customer) === String(cn.customer)) fields.customerGstin = cn.customerGstin;
     if (fields.total < used(cn)) throw new HttpError(400, "The new total is less than the credit already used");
     if (String(fields.customer) !== String(cn.customer) && used(cn) > 0) {
       throw new HttpError(400, "Remove the applied credits before changing the customer");

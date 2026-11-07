@@ -119,6 +119,8 @@ function ImportBox({ onImported }) {
   const [busy, setBusy] = useState(false);
   const [ledgers, setLedgers] = useState([]);
   const [ledger, setLedger] = useState("");
+  const [mode, setMode] = useState("single");
+  const [party, setParty] = useState("");
   const [job, setJob] = useState(null);
   useEffect(() => {
     api
@@ -143,6 +145,9 @@ function ImportBox({ onImported }) {
     try {
       const { data } = await api.post("/amazon/preview", { files: raw });
       setPv(data);
+      // Tally-style posting when the company has an "Online Sale" master ledger and an Amazon_SRE party.
+      setMode(data.posting?.group ? "online" : "single");
+      setParty(data.posting?.party?._id || "");
     } catch (e) {
       toast(errMsg(e), "error");
     }
@@ -151,7 +156,7 @@ function ImportBox({ onImported }) {
   const start = async () => {
     setBusy(true);
     try {
-      const { data } = await api.post("/amazon/import", { planId: pv.planId, ledger });
+      const { data } = await api.post("/amazon/import", { planId: pv.planId, ledger, mode, party });
       setJob(data);
       const poll = setInterval(async () => {
         try {
@@ -237,7 +242,7 @@ function ImportBox({ onImported }) {
               Skipped lines: {pv.skipped.cancel} cancelled, {pv.skipped.freeReplacement} free replacements
               {Object.entries(pv.skipped.otherGstin).map(([g, n]) => ` · ${n} of GSTIN ${g}`)}
             </li>
-            {pv.newBuyers.length > 0 && <li>{pv.newBuyers.length} new B2B customers will be created: {pv.newBuyers.slice(0, 5).join(", ")}{pv.newBuyers.length > 5 ? "…" : ""}</li>}
+            {!party && pv.newBuyers.length > 0 && <li>{pv.newBuyers.length} new B2B customers will be created: {pv.newBuyers.slice(0, 5).join(", ")}{pv.newBuyers.length > 5 ? "…" : ""}</li>}
             {pv.unmatchedSkus.length > 0 && (
               <li>
                 {pv.unmatchedSkus.length} Amazon SKUs have no item in OrdexaGo — those lines are imported without stock movement:{" "}
@@ -245,7 +250,25 @@ function ImportBox({ onImported }) {
               </li>
             )}
           </ul>
+          {pv.posting?.onParty && party && (
+            <div className="alert alert-error small" style={{ marginBottom: 10 }}>
+              {pv.posting.party.name} already has {pv.posting.onParty.count} invoices worth {money(pv.posting.onParty.total)} in {pv.month} that didn't come from this import (e.g. from Tally). If those are the same Amazon sales, importing would count them twice — skip this month.
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <Field label="Party (customer)">
+              <select value={party} onChange={(e) => setParty(e.target.value)}>
+                {pv.posting?.party && <option value={pv.posting.party._id}>{pv.posting.party.name} — all Amazon sales</option>}
+                <option value="">Amazon B2C + each business buyer separately</option>
+              </select>
+            </Field>
+            <Field label="Sales ledgers">
+              <select value={mode} onChange={(e) => setMode(e.target.value)}>
+                <option value="online">{pv.posting?.group ? `${pv.posting.group}: ` : ""}by type and rate (Local / Outstate · B2B / B2C · GST %)</option>
+                <option value="single">One ledger for all</option>
+              </select>
+            </Field>
+            {mode === "single" && (
             <Field label="Sales ledger">
               <select value={ledger} onChange={(e) => setLedger(e.target.value)}>
                 {!ledgers.some((l) => l.name === "Amazon Sales") && <option value="">Amazon Sales (new ledger)</option>}
@@ -256,10 +279,18 @@ function ImportBox({ onImported }) {
                 ))}
               </select>
             </Field>
+            )}
             <button className="btn btn-primary" disabled={busy || !(pv.toCreate || pv.fromOrders)} onClick={start}>
               <Icon name="upload" size={16} /> Import {pv.toCreate} documents{pv.fromOrders ? ` + tag ${pv.fromOrders}` : ""}
             </button>
           </div>
+          {mode === "online" && pv.posting?.ledgers?.length > 0 && (
+            <p className="small muted" style={{ margin: "8px 0 0" }}>
+              Ledgers used: {pv.posting.ledgers.map((l) => l.name + (l.exists ? "" : " (new)")).join(", ")}
+              {pv.posting.ledgers.some((l) => !l.exists) ? `. New ones are created${pv.posting.group ? ` under ${pv.posting.group}` : ""}.` : "."}
+              {party ? " Business buyers' GSTINs stay on each invoice for GSTR-1." : ""}
+            </p>
+          )}
           {job && (
             <div style={{ marginTop: 12 }}>
               <div className="meter">

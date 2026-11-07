@@ -99,6 +99,8 @@ router.put(
     const data = validate(schema, req.body);
     const { fields } = await build(req, data);
     if (!fields.invoiceNumber) fields.invoiceNumber = invoice.invoiceNumber;
+    // A buyer GSTIN kept on a document billed to a marketplace party (Amazon_SRE) survives edits from the form.
+    if (data.customerGstin === undefined && invoice.customerGstin && String(fields.customer) === String(invoice.customer)) fields.customerGstin = invoice.customerGstin;
     if (fields.total < invoice.amountPaid + invoice.creditsApplied) {
       throw new HttpError(400, "The new total is less than the payments and credits already applied to this invoice");
     }

@@ -42,6 +42,66 @@ function skuMatcher(items) {
   };
 }
 
+/* ---------------- posting: party and sales ledgers ---------------- */
+// Tally-style: every Amazon document to one party ledger (e.g. "Amazon_SRE"), and each line to a sales ledger under
+// the "Online Sale" master by type and rate — "Local B2B @ 5%", "OutState B2C @ 18%" … (local = seller's state).
+const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const ledgerName = (local, b2b, rate) => `${local ? "Local" : "Outstate"} ${b2b ? "B2B" : "B2C"} @ ${Number(rate) || 0}%`;
+const isAmazonParty = (c) => /^amazon[\s_-]*sre$/i.test(String(c.displayName || "").trim());
+
+async function onlineMaster(org) {
+  const LedgerGroup = require("../../models/LedgerGroup");
+  const groups = await LedgerGroup.find({ organization: org, kind: "sales" });
+  return groups.find((g) => norm(g.name) === "onlinesale") || groups.find((g) => norm(g.name).startsWith("onlinesale")) || null;
+}
+
+async function ledgerBook(org, group) {
+  const { chartOfAccounts } = require("../ledger");
+  const coa = await chartOfAccounts(org);
+  const members = new Set(group?.members || []);
+  const byName = new Map();
+  // Members of the master first, then any sales ledger with the same name.
+  for (const a of coa) if (members.has(a.code)) byName.set(norm(a.name), a.code);
+  for (const a of coa) if (a.active !== false && !byName.has(norm(a.name)) && (a.ledgerKind === "sales" || a.type === "income")) byName.set(norm(a.name), a.code);
+  return byName;
+}
+const keyFor = (local, b2b, rate) => norm(ledgerName(local, b2b, rate));
+const docLines = (d, orgState) => d.lines.map((l) => ({ local: (d.pos || orgState) === orgState, b2b: !!d.b2b, rate: Number(l.rate) || 0 }));
+
+// The ledgers a plan needs: which exist, which will be created (inside the master).
+async function postingInfo(org, o, docs) {
+  const group = await onlineMaster(org);
+  const book = await ledgerBook(org, group);
+  const need = new Map();
+  for (const d of docs) for (const x of docLines(d, o.state)) need.set(keyFor(x.local, x.b2b, x.rate), ledgerName(x.local, x.b2b, x.rate));
+  const ledgers = [...need.entries()].map(([k, name]) => ({ name, exists: book.has(k) })).sort((a, b) => a.name.localeCompare(b.name));
+  const party = (await Customer.find({ organization: org }, { displayName: 1, gstin: 1 }).lean()).find(isAmazonParty) || null;
+  return { group: group ? group.name : "", ledgers, party: party ? { _id: String(party._id), name: party.displayName } : null };
+}
+
+async function resolveLedger(org, group, book, local, b2b, rate) {
+  const k = keyFor(local, b2b, rate);
+  if (book.has(k)) return book.get(k);
+  const a = await Account.create({ organization: org, name: ledgerName(local, b2b, rate), group: "Income", ledgerKind: "sales", description: "Amazon sales (created by the Amazon import)" });
+  const code = String(a._id);
+  book.set(k, code);
+  if (group) {
+    group.members = [...new Set([...(group.members || []), code])];
+    await group.save();
+  }
+  return code;
+}
+
+// Invoices already on the Amazon party in the report month that didn't come from this import (e.g. from Tally).
+async function existingOnParty(org, partyId, month) {
+  if (!partyId || !month) return null;
+  const [y, m] = month.split("-").map(Number);
+  const from = new Date(Date.UTC(y, m - 1, 1));
+  const to = new Date(Date.UTC(y, m, 1));
+  const rows = (await Invoice.find({ organization: org, customer: partyId, date: { $gte: from, $lt: to } }, { total: 1, importRef: 1 }).lean()).filter((x) => !String(x.importRef || "").startsWith("amazon:"));
+  return rows.length ? { count: rows.length, total: round2(rows.reduce((t, x) => t + (x.total || 0), 0)) } : null;
+}
+
 /* ---------------- preview ---------------- */
 async function preview(org, files) {
   sweep();
@@ -90,6 +150,8 @@ async function preview(org, files) {
   const newBuyers = [...new Set(docs.filter((d) => d.b2b && !buyers.some((b) => b.gstin === d.buyerGstin)).map((d) => `${d.buyerName || d.buyerGstin} (${d.buyerGstin})`))];
   const sum = (xs, f) => round2(xs.reduce((t, x) => t + f(x), 0));
   const part = (xs) => ({ count: xs.length, taxable: sum(xs, (d) => d.taxable), tax: sum(xs, (d) => d.amazon.tax), value: sum(xs, (d) => d.amazon.value), tcs: sum(xs, (d) => d.tcs) });
+  const posting = await postingInfo(org, o, docs.filter((d) => d.state === "new"));
+  posting.onParty = posting.party ? await existingOnParty(org, posting.party._id, month) : null;
   const id = crypto.randomUUID();
   plans.set(id, { org: String(org), gstin, month, plan: p, at: Date.now() });
   return {
@@ -109,6 +171,7 @@ async function preview(org, files) {
     skipped: p.skipped,
     unmatchedSkus: [...unmatched.entries()].map(([sku, n]) => ({ sku, lines: n })).sort((a, b) => b.lines - a.lines),
     newBuyers,
+    posting,
   };
 }
 
@@ -146,7 +209,7 @@ async function customerFor(org, d, cache) {
   return c;
 }
 
-function startImport(ctx, planId, { ledger } = {}) {
+function startImport(ctx, planId, { ledger, mode, party } = {}) {
   sweep();
   const pl = plans.get(planId);
   if (!pl || pl.org !== String(ctx.org)) throw new Error("This preview has expired. Upload the files again.");
@@ -155,17 +218,23 @@ function startImport(ctx, planId, { ledger } = {}) {
   const docs = [...pl.plan.invoices, ...pl.plan.creditNotes].filter((d) => d.state === "new" || d.state === "ordexago");
   const job = { id, org: String(ctx.org), status: "running", total: docs.length, done: 0, created: { invoices: 0, creditNotes: 0, linked: 0 }, errors: [], warnings: [], at: Date.now(), month: pl.month };
   jobs.set(id, job);
-  run(ctx, pl, docs, ledger, job).catch((e) => {
+  run(ctx, pl, docs, { ledger, mode, party }, job).catch((e) => {
     job.status = "failed";
     job.errors.push({ number: "", message: e.message });
   });
   return job;
 }
 
-async function run(ctx, pl, docs, ledgerCode, job) {
+async function run(ctx, pl, docs, opts, job) {
   const { call } = require("./commit");
   const org = await Organization.findById(ctx.org);
-  const ledger = await salesLedger(ctx.org, ledgerCode);
+  // "online": a sales ledger per line by type and rate (Online Sale master); else one ledger for everything.
+  const online = opts.mode === "online";
+  const ledger = online ? "" : await salesLedger(ctx.org, opts.ledger);
+  const group = online ? await onlineMaster(ctx.org) : null;
+  const book = online ? await ledgerBook(ctx.org, group) : null;
+  const party = opts.party ? await Customer.findOne({ _id: opts.party, organization: ctx.org }) : null;
+  if (opts.party && !party) throw new Error("The party ledger chosen for Amazon wasn't found");
   const match = skuMatcher(await Item.find({ organization: ctx.org }, { sku: 1, name: 1, hsnSac: 1 }).lean());
   const cache = new Map();
   // Invoices first, so credit notes can link to them.
@@ -185,7 +254,7 @@ async function run(ctx, pl, docs, ledgerCode, job) {
         job.done++;
         continue;
       }
-      const c = await customerFor(ctx.org, d, cache);
+      const c = party || (await customerFor(ctx.org, d, cache));
       const sign = d.kind === "creditNote" ? -1 : 1;
       const lineItems = d.lines.map((l) => {
         const it = l.kind === "product" ? match(l.sku) : null;
@@ -203,6 +272,10 @@ async function run(ctx, pl, docs, ledgerCode, job) {
           account: "",
         };
       });
+      if (online) {
+        const local = (d.pos || org.state) === org.state;
+        for (let n = 0; n < lineItems.length; n++) lineItems[n].account = await resolveLedger(ctx.org, group, book, local, !!d.b2b, d.lines[n].rate);
+      }
       if (lineItems.some((l) => l.rate < 0)) throw new Error("A line has a negative value (promotion larger than the item)");
       const pos = d.pos || org.state;
       // Tax rounding: a few paise so the total equals Amazon's invoice amount.
@@ -220,10 +293,12 @@ async function run(ctx, pl, docs, ledgerCode, job) {
         date: iso,
         placeOfSupply: pos,
         lineItems,
-        ledger,
+        ...(ledger ? { ledger } : {}),
+        // One party ledger for all Amazon sales: the business buyer's GSTIN stays on the document for GSTR-1 (B2B).
+        ...(party && d.b2b ? { customerGstin: d.buyerGstin } : {}),
         ...(adjustment ? { adjustment } : {}),
         shipTo: { name: "", phone: "", street: "", city: d.shipTo.city, state: d.shipTo.state, pincode: d.shipTo.pincode, country: "India" },
-        customerNotes: `Amazon ${d.channel === "AFN" ? "FBA" : d.channel === "MFN" ? "self-ship" : ""} order${d.orders.length > 1 ? "s" : ""} ${d.orders.join(", ")}${d.payment ? ` · ${d.payment}` : ""}${d.tcs ? ` · TCS by Amazon ₹${Math.abs(d.tcs)}` : ""}`,
+        customerNotes: `${party && d.b2b ? `Buyer: ${d.buyerName || ""} (${d.buyerGstin}) · ` : ""}Amazon ${d.channel === "AFN" ? "FBA" : d.channel === "MFN" ? "self-ship" : ""} order${d.orders.length > 1 ? "s" : ""} ${d.orders.join(", ")}${d.payment ? ` · ${d.payment}` : ""}${d.tcs ? ` · TCS by Amazon ₹${Math.abs(d.tcs)}` : ""}`,
       };
       const ref = `amazon:${pl.gstin}:${pl.month}:${d.number}`;
       if (d.kind === "invoice") {
@@ -374,4 +449,4 @@ async function months(org) {
   return { gstin: o?.gstin || "", months: [...by.values()].sort((a, b) => b.month.localeCompare(a.month)) };
 }
 
-module.exports = { preview, startImport, jobOf, reconcile, months, monthOfName, salesLedger, skuMatcher };
+module.exports = { preview, startImport, jobOf, reconcile, months, monthOfName, salesLedger, skuMatcher, ledgerName, keyFor, norm };

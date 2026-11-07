@@ -27,3 +27,14 @@ test("MTR rows: invoice, refund as negative credit note, cancel and other GSTIN 
   assert.equal(p.skipped.cancel, 1);
   assert.deepEqual(p.skipped.otherGstin, { G2: 1 });
 });
+
+test("Online Sale ledgers: Tally names match by place, type and rate whatever the capitals or spaces", () => {
+  const AI = require("../src/utils/import/amazonImport");
+  const tally = ["Local B2B @ 5%", "Local B2C @ 12%", "Local B2C @ 18%", "Local B2C @ 5%", "Outstate B2B @ 18%", "Outstate B2B @ 5%", "OutState B2C @ 12%", "OutState B2C @ 18%", "OutState B2C @ 5%"];
+  const keys = new Set(tally.map(AI.norm));
+  assert.ok(keys.has(AI.keyFor(false, false, 12)), "OutState B2C @ 12%");
+  assert.ok(keys.has(AI.keyFor(true, true, 5)), "Local B2B @ 5%");
+  assert.ok(keys.has(AI.keyFor(false, true, 18)), "Outstate B2B @ 18%");
+  assert.ok(!keys.has(AI.keyFor(true, true, 18)), "Local B2B @ 18% isn't in Tally: created");
+  assert.equal(AI.ledgerName(true, true, 18), "Local B2B @ 18%");
+});
