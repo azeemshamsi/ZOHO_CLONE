@@ -70,5 +70,77 @@ router.get(
   })
 );
 
+/* ---------------- devices ---------------- */
+const Joi = require("joi");
+const { validate, HttpError } = require("../utils/http");
+const Device = require("../models/Device");
+const devices = require("../utils/devices");
+
+// This browser: is it approved? (any signed-in user)
+router.get(
+  "/devices/mine",
+  ah(async (req, res) => {
+    const d = await devices.touch(req);
+    res.send({ deviceId: devices.deviceIdOf(req), approved: devices.isAdmin(req) || !!d?.approved, admin: devices.isAdmin(req), requested: !!d?.requestedAt, name: d?.name || "" });
+  })
+);
+
+// Ask the admins to approve this browser.
+router.post(
+  "/devices/request",
+  ah(async (req, res) => {
+    const { name } = validate(Joi.object({ name: Joi.string().trim().max(60).allow("") }), req.body || {});
+    if (!devices.deviceIdOf(req)) throw new HttpError(400, "This browser has no device id — reload the page and try again");
+    const d = await devices.touch(req, { admin: false });
+    if (!d) throw new HttpError(400, "Couldn't record this device");
+    if (d.approved) return res.send({ approved: true });
+    await Device.updateOne({ _id: d._id }, { $set: { requestedAt: new Date(), ...(name ? { name } : {}) } });
+    await audit.log(req, "device_approval_requested", { target: name || d.deviceId, meta: { deviceId: d.deviceId } });
+    audit.alert(req.org, `Device approval requested by ${req.user.email}`, `${req.user.name} <${req.user.email}> asked to approve a device for Amazon order data${name ? ` ("${name}")` : ""}.\nBrowser: ${d.userAgent}\nIP: ${audit.info(req).ip}\n\nApprove or ignore it in Settings → Security → Devices.`, `devreq:${d._id}`);
+    res.send({ requested: true });
+  })
+);
+
+router.get(
+  "/devices",
+  adminOnly,
+  ah(async (req, res) => {
+    const list = await Device.find({ organization: req.org }).sort({ lastSeen: -1 }).limit(1000).lean();
+    const ids = [...new Set(list.map((d) => String(d.user)))];
+    const users = new Map((ids.length ? await User.find({ _id: { $in: ids } }, { name: 1, email: 1 }).lean() : []).map((u) => [String(u._id), u]));
+    const Membership = require("../models/Membership");
+    const ms = new Map((await Membership.find({ organization: req.org }, { user: 1, role: 1 }).lean()).map((m) => [String(m.user), m.role]));
+    const rows = list
+      .filter((d) => users.has(String(d.user)))
+      .map((d) => ({ ...d, userName: users.get(String(d.user)).name, userEmail: users.get(String(d.user)).email, userIsAdmin: ms.get(String(d.user)) === "admin", current: d.deviceId === devices.deviceIdOf(req) && String(d.user) === String(req.user._id) }));
+    rows.sort((a, b) => (b.requestedAt && !b.approved ? 1 : 0) - (a.requestedAt && !a.approved ? 1 : 0));
+    res.send(rows);
+  })
+);
+
+router.put(
+  "/devices/:id",
+  adminOnly,
+  ah(async (req, res) => {
+    const d0 = validate(Joi.object({ name: Joi.string().trim().max(60).allow(""), approved: Joi.boolean() }), req.body);
+    const d = await Device.findOne({ _id: req.params.id, organization: req.org });
+    if (!d) throw new HttpError(404, "Device not found");
+    const owner = await User.findById(d.user, { email: 1 }).lean();
+    if (d0.name !== undefined && d0.name !== d.name) {
+      d.name = d0.name;
+      audit.log(req, "device_renamed", { target: owner?.email || "", meta: { deviceId: d.deviceId, to: d0.name } });
+    }
+    if (d0.approved !== undefined && d0.approved !== d.approved) {
+      d.approved = d0.approved;
+      d.approvedBy = d0.approved ? req.user._id : undefined;
+      d.approvedAt = d0.approved ? new Date() : undefined;
+      if (!d0.approved) d.requestedAt = undefined;
+      audit.log(req, d0.approved ? "device_approved" : "device_revoked", { target: owner?.email || "", meta: { deviceId: d.deviceId, label: d.name } });
+    }
+    await d.save();
+    res.send(d);
+  })
+);
+
 router.ACTIONS = ACTIONS;
 module.exports = router;

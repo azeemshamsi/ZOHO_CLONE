@@ -134,6 +134,7 @@ router.post(
     await user.save();
     const payload = await sessionPayload(user, req.get("x-org"));
     audit.log(req, "login", { user: user._id, organization: payload.organization?._id || user.organization, email });
+    await require("../utils/devices").touch(req, { user, org: payload.organization?._id, admin: user.superadmin || user.role === "admin" });
     res.send(payload);
   })
 );
@@ -232,6 +233,7 @@ router.get(
   auth,
   ah(async (req, res) => {
     const organization = await Organization.findById(req.org);
+    await require("../utils/devices").touch(req);
     res.send({ user: req.user.toPublic(req.roleInfo), organization, organizations: await companiesOf(req.user), subscription: req.subscription });
   })
 );

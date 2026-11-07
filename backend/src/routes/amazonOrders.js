@@ -15,6 +15,7 @@ const AS = require("../utils/amazon/ship");
 const { resolvePackage } = require("../utils/shopify/package");
 
 const audit = require("../utils/audit");
+const devices = require("../utils/devices");
 const fail = (e) => (e instanceof HttpError ? e : new HttpError(400, e.message));
 
 router.get(
@@ -102,7 +103,7 @@ router.post(
 async function orderOf(req) {
   const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: await AO.storeOrgFor(req.org), channel: "amazon" });
   if (!o) throw new HttpError(404, "Amazon order not found");
-  await audit.amazonAccess(req, "amazon_order_action", o.name, { action: req.path.split("/").slice(3).join("/"), orderId: String(o._id) });
+  await devices.amazonData(req, "amazon_order_action", o.name, { action: req.path.split("/").slice(3).join("/"), orderId: String(o._id) });
   return o;
 }
 const pkgJoi = Joi.object({ packageType: Joi.string().allow("", null), weight: Joi.number().min(0).allow(null, ""), length: Joi.number().min(0).allow(null, ""), breadth: Joi.number().min(0).allow(null, ""), height: Joi.number().min(0).allow(null, "") }).default({});

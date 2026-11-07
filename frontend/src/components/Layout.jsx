@@ -5,6 +5,7 @@ import Logo from "./Logo";
 import Icon from "./Icon";
 import { useAuth } from "../lib/auth";
 import TallyKeys from "./TallyKeys";
+import DeviceGate from "./DeviceGate";
 
 const NAV = [
   { to: "/", label: "Home", icon: "home", end: true },
@@ -322,6 +323,7 @@ export default function Layout() {
           </div>
         </header>
         <TallyKeys nav={nav} />
+        <DeviceGate />
         <main className={`content ${level === "view" ? "readonly" : ""}`}>
           {level === "none" ? (
             <div className="card center no-access">
