@@ -9,6 +9,7 @@ import DeviceGate from "./DeviceGate";
 
 const NAV = [
   { to: "/", label: "Home", icon: "home", end: true },
+  { to: "/inbox", label: "Inbox", icon: "chat", mod: "inbox" },
   {
     label: "Items",
     icon: "box",
@@ -100,6 +101,17 @@ const NAV = [
       { to: "/e-way-bills", label: "e-Way Bills" },
     ],
   },
+  {
+    label: "Marketing",
+    icon: "megaphone",
+    mod: "marketing",
+    children: [
+      { to: "/marketing/campaigns", label: "Campaigns" },
+      { to: "/marketing/automations", label: "Automations" },
+      { to: "/marketing/auto-replies", label: "Auto-replies" },
+      { to: "/marketing/integrations", label: "Integrations" },
+    ],
+  },
   { to: "/reports", label: "Reports", icon: "chart", mod: "reports" },
 ];
 const HOME_MODS = ["sales", "purchases", "reports", "accountant", "banking"];
@@ -149,6 +161,8 @@ const PATH_MODULES = [
   ["/fixed-assets", "accountant"],
   ["/chart-of-accounts", "accountant"],
   ["/reports", "reports"],
+  ["/inbox", "inbox"],
+  ["/marketing", "marketing"],
   ["/settings", "settings"],
   ["/users", "settings"],
   ["/security", "settings"],

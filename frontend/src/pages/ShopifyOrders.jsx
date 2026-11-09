@@ -9,6 +9,7 @@ import { breakdownText } from "../components/rates";
 import SearchSelect from "../components/SearchSelect";
 import PackagePicker, { packageOptions } from "../components/PackagePicker";
 import { useAuth } from "../lib/auth";
+import { can } from "../components/Layout";
 
 const TABS = [
   ["new", "New"],
@@ -886,11 +887,60 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
           {o.tags?.length > 0 && <>Tags: {o.tags.join(", ")}</>}
         </p>
       )}
+      <WhatsAppLog orderId={o._id} />
       <Field label="Remarks (only in OrdexaGo)">
         <textarea rows={2} value={remarks} onChange={(e) => setRemarks(e.target.value)} onBlur={() => remarks !== (o.remarks || "") && api.put(`/shopify/orders/${o._id}/remarks`, { remarks }).then(() => toast("Remarks saved"))} />
       </Field>
     </Modal>
     </>
+  );
+}
+
+// WhatsApp order updates sent for this order (Marketing → Automations), and the buyer's COD answer.
+const WA_STATUS = { sent: "Sent", delivered: "Delivered", read: "Read", failed: "Failed", skipped: "Skipped", replied: "Replied" };
+function WhatsAppLog({ orderId }) {
+  const { user } = useAuth();
+  const [d, setD] = useState(null);
+  const [busy, setBusy] = useState("");
+  const load = () => api.get(`/marketing/order-log/${orderId}`).then((r) => setD(r.data)).catch(() => setD(null));
+  useEffect(() => {
+    load();
+  }, [orderId]);
+  if (!d || (!d.rows.length && !d.codConfirm)) return null;
+  const canResend = can(user, ["marketing", "store_orders"], "full");
+  const resend = async (event) => {
+    setBusy(event);
+    try {
+      await api.post(`/marketing/order-log/${orderId}/resend`, { event });
+      toast("Sent again on WhatsApp");
+      await load();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy("");
+  };
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="label-sm">WhatsApp updates</div>
+      {d.codConfirm?.state && (
+        <div className={`alert ${d.codConfirm.state === "confirmed" ? "alert-success" : "alert-warn"}`} style={{ margin: "6px 0" }}>
+          {d.codConfirm.state === "confirmed" ? "Buyer confirmed this COD order on WhatsApp" : "Buyer asked to cancel this COD order on WhatsApp — check and cancel in Shopify if right"} ({new Date(d.codConfirm.at).toLocaleString("en-IN")})
+        </div>
+      )}
+      <ul className="track-list">
+        {d.rows.map((r) => (
+          <li key={r._id}>
+            <span className="muted small">{new Date(r.at).toLocaleString("en-IN")}</span> {d.events[r.event] || r.event} · <span className={r.status === "failed" ? "text-danger" : r.status === "skipped" ? "muted" : ""}>{WA_STATUS[r.status] || r.status}</span>
+            {r.error && <span className="muted small"> — {r.error}</span>}
+            {canResend && ["failed", "skipped"].includes(r.status) && (
+              <button className="link-btn" style={{ marginLeft: 8 }} disabled={!!busy} onClick={() => resend(r.event)}>
+                {busy === r.event ? "Sending…" : "Send again"}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -951,7 +1001,7 @@ export function ShopifyOrders() {
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState(null);
   const [ship, setShip] = useState(null);
-  const [view, setView] = useState(null);
+  const [view, setView] = useState(() => params.get("open") || null); // ?open=<order id> (links from the Inbox)
   const [review, setReview] = useState([]);
   const [showReview, setShowReview] = useState(false);
   const q = useDebounced(filters.q, 300);

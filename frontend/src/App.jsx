@@ -56,6 +56,8 @@ import Sellers from "./pages/Sellers";
 import SellerPortal from "./pages/SellerPortal";
 import Security from "./pages/Security";
 import Account from "./pages/Account";
+import Inbox from "./pages/Inbox";
+import { Integrations, Automations, Campaigns, AutoReplies } from "./pages/Marketing";
 
 function Private({ children }) {
   const { loading, user } = useAuth();
@@ -205,6 +207,12 @@ export default function App() {
           <Route path="superadmin" element={<Superadmin />} />
           <Route path="sellers" element={<Sellers />} />
           <Route path="seller" element={<SellerPortal />} />
+          <Route path="inbox" element={<Inbox />} />
+          <Route path="marketing" element={<Navigate to="/marketing/campaigns" replace />} />
+          <Route path="marketing/integrations" element={<Integrations />} />
+          <Route path="marketing/automations" element={<Automations />} />
+          <Route path="marketing/campaigns" element={<Campaigns />} />
+          <Route path="marketing/auto-replies" element={<AutoReplies />} />
           {SOON.map((p) => (
             <Route key={p} path={p.slice(1)} element={<ComingSoon />} />
           ))}
