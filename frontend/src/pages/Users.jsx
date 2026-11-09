@@ -292,6 +292,7 @@ const HOMES = [
   ["", "Dashboard (or first page they can open)"],
   ["/returns-scan", "Scan Returns"],
   ["/shopify-orders", "Store orders"],
+  ["/inbox", "Inbox"],
   ["/inventory", "Inventory"],
   ["/invoices", "Invoices"],
   ["/bills", "Bills"],
