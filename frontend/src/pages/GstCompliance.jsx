@@ -172,7 +172,9 @@ export function GstCompliance({ tab: initial = "einvoice" }) {
   useEffect(() => {
     setTab(initial);
   }, [initial]);
-  useEffect(load, [tab, status, on]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load();
+  }, [tab, status, on]); // eslint-disable-line react-hooks/exhaustive-deps
   const save = async (body) => {
     try {
       const { data } = await api.put("/gst/settings", body);

@@ -165,7 +165,9 @@ export function ReturnScan() {
   const [log, setLog] = useState([]);
   const input = useRef();
   const focus = () => setTimeout(() => input.current?.focus(), 50);
-  useEffect(focus, []);
+  useEffect(() => {
+    focus();
+  }, []);
 
   const busyRef = useRef(false);
   // Shopify return + credit note finish in the background: check back a few times.

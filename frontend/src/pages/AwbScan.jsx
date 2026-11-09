@@ -14,7 +14,9 @@ export function AwbScan() {
   const input = useRef();
   const busyRef = useRef(false);
   const focus = () => setTimeout(() => input.current?.focus(), 50);
-  useEffect(focus, []);
+  useEffect(() => {
+    focus();
+  }, []);
 
   const submit = async (value) => {
     const codes = (Array.isArray(value) ? value : [String(value ?? code)]).map((x) => x.trim()).filter(Boolean);

@@ -351,7 +351,9 @@ export function ProjectView() {
     api.get(`/projects/${id}`).then((r) => setP(r.data));
     api.get("/time-entries", { params: { project: id } }).then((r) => setEntries(r.data));
   };
-  useEffect(load, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load();
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!p) return <Spinner />;
   const s = p.summary;
   const stat = (label, value, sub) => (
@@ -883,7 +885,9 @@ export function Timesheet() {
   useEffect(() => {
     api.get("/projects", { params: { summary: 0 } }).then((r) => setProjects(r.data));
   }, []);
-  useEffect(load, [range.from, range.to, f.project, f.status, f.mine]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load();
+  }, [range.from, range.to, f.project, f.status, f.mine]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
       <PageHeader title="Timesheet">

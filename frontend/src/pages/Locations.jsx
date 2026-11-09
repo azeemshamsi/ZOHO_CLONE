@@ -15,7 +15,9 @@ export function Locations() {
     api.get("/warehouses").then((r) => setWarehouses(r.data));
     loadLocations(true);
   };
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+  }, []);
   if (!branches || !warehouses) return <Spinner />;
   const branchName = (id) => branches.find((b) => b._id === id)?.name || "Head Office";
   return (

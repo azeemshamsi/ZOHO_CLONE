@@ -152,7 +152,9 @@ function Gstr1({ period, canEdit }) {
     setD(null);
     api.get("/gst/returns/gstr1", { params: { period } }).then((r) => setD(r.data)).catch((e) => toast(errMsg(e), "error"));
   };
-  useEffect(load, [period]);
+  useEffect(() => {
+    load();
+  }, [period]);
   if (!d) return <Spinner />;
   const rows = d.view?.[open] || [];
   return (
@@ -338,7 +340,9 @@ function Gstr3b({ period, canEdit }) {
     setD(null);
     api.get("/gst/returns/gstr3b", { params: { period, itc } }).then((r) => setD(r.data)).catch((e) => toast(errMsg(e), "error"));
   };
-  useEffect(load, [period, itc]);
+  useEffect(() => {
+    load();
+  }, [period, itc]);
   if (!d) return <Spinner />;
   const row = (l, v, hint) => (
     <tr>
@@ -502,7 +506,9 @@ function Gstr9({ canEdit }) {
     setD(null);
     api.get("/gst/returns/gstr9", { params: { fy } }).then((r) => setD(r.data)).catch((e) => toast(errMsg(e), "error"));
   };
-  useEffect(load, [fy]);
+  useEffect(() => {
+    load();
+  }, [fy]);
   const block = (title, obj, cols = ["txval", "iamt", "camt", "samt"]) => (
     <div className="card flush" style={{ marginTop: 14 }}>
       <table className="table">

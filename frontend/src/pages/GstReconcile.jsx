@@ -42,7 +42,9 @@ export function GstReconcile() {
     setD(null);
     api.get("/gst/returns/2b", { params: { period } }).then((r) => setD(r.data)).catch((e) => toast(errMsg(e), "error"));
   };
-  useEffect(load, [period]);
+  useEffect(() => {
+    load();
+  }, [period]);
   const upload = async (file) => {
     if (!file) return;
     setBusy(true);
