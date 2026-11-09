@@ -223,6 +223,37 @@ function undoCancelledFulfilment(o, wasFulfilled) {
 // Save one order; OrdexaGo's own workflow status is kept, except for cancellations and fulfilments done in Shopify.
 const OPEN_RETURN = ["RETURN_REQUESTED", "IN_PROGRESS", "INSPECTION_COMPLETE"];
 
+/**
+ * Orders in Returns, against their returns in Shopify: all declined / cancelled → back to Delivered (or Shipped);
+ * closed with none open → closed here too (toClose). No return in Shopify at all (made only in OrdexaGo) → left.
+ */
+async function reconcileReturns(store, toClose = []) {
+  const open = (await ShopifyOrder.find({ organization: store.organization, status: "return_created", channel: { $ne: "amazon" } }, { shopifyId: 1, deliveredAt: 1, returnFrom: 1, returnNote: 1 })).filter((o) => String(o.shopifyId || "").startsWith("gid://"));
+  let reverted = 0;
+  for (let i = 0; i < open.length; i += 50) {
+    const batch = open.slice(i, i + 50);
+    const data = await gql(store, `query($ids: [ID!]!) { nodes(ids: $ids) { ... on Order { id returnStatus returns(first: 10) { nodes { status } } } } }`, { ids: batch.map((o) => o.shopifyId) });
+    const byId = new Map((data.nodes || []).filter(Boolean).map((n) => [n.id, n]));
+    for (const o of batch) {
+      const n = byId.get(o.shopifyId);
+      const st = (n?.returns?.nodes || []).map((r) => r.status);
+      if (!n || !st.length) continue;
+      const anyOpen = st.some((x) => ["OPEN", "REQUESTED"].includes(x));
+      if (anyOpen) continue;
+      if (st.includes("CLOSED")) {
+        if (!toClose.some((x) => String(x) === String(o._id))) toClose.push(o._id);
+      } else if (st.every((x) => ["DECLINED", "CANCELED"].includes(x))) {
+        o.status = o.returnFrom || (o.deliveredAt ? "delivered" : "shipped");
+        o.statusChangedAt = new Date();
+        o.returnNote = [o.returnNote, "Return declined / cancelled in Shopify"].filter(Boolean).join(" · ");
+        await o.save();
+        reverted++;
+      }
+    }
+  }
+  return reverted;
+}
+
 async function upsert(orgId, n, toClose = []) {
   const existing = await ShopifyOrder.findOne({ organization: orgId, shopifyId: n.shopifyId });
   if (!existing) {
@@ -305,8 +336,9 @@ async function syncStore(store, { full = false } = {}) {
       after = data.orders.pageInfo.endCursor;
     }
     // Returns closed in Shopify: Returned in OrdexaGo, credit note + stock back (Shopify is already done).
-    // …and any still in Returns that Shopify already shows as returned.
-    for (const o of await ShopifyOrder.find({ organization: store.organization, status: "return_created" }, { returnStatus: 1 }).lean()) if (o.returnStatus === "RETURNED" && !toClose.some((x) => String(x) === String(o._id))) toClose.push(o._id);
+    // …and every order still in Returns, checked against its returns in Shopify (declined / closed earlier).
+    const reverted = await reconcileReturns(store, toClose).catch((e) => (console.error(`Shopify returns check failed: ${e.message}`), 0));
+    if (reverted || toClose.length) require("./orderIndex").forget(store.organization);
     if (toClose.length) {
       const { markReturnClosed } = require("./returns");
       for (const id of toClose) {
@@ -373,7 +405,7 @@ async function autoSyncAll() {
   }
 }
 
-module.exports = { syncStore, autoSyncAll, normalise, upsert, ORDERS_QUERY, undoCancelledFulfilment, refreshDeliveries, refreshAllDeliveries, deliveryOf, applyDelivery };
+module.exports = { reconcileReturns, syncStore, autoSyncAll, normalise, upsert, ORDERS_QUERY, undoCancelledFulfilment, refreshDeliveries, refreshAllDeliveries, deliveryOf, applyDelivery };
 
 // Real-time: Shopify calls OrdexaGo when orders are created or updated (Dev Dashboard apps; signed with the client secret).
 async function registerWebhooks(store, baseUrl) {

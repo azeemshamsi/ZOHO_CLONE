@@ -70,3 +70,28 @@ test("Shopify returns: requested → Returns; declined → back to Delivered; cl
     ShopifyOrder.findOne = orig;
   }
 });
+
+test("orders still in Returns are checked against Shopify: declined → Delivered, closed → closed, none in Shopify → left", async () => {
+  const ShopifyOrder = require("../src/models/ShopifyOrder");
+  const client = require("../src/utils/shopify/client");
+  const mk = (id, extra = {}) => Object.assign(new ShopifyOrder({ organization: "64b000000000000000000001", shopifyId: `gid://shopify/Order/${id}`, name: `#${id}`, status: "return_created", deliveredAt: new Date(), ...extra }), { save: async function () { return this; } });
+  const docs = [mk(1), mk(2), mk(3), mk(4, { returnFrom: "shipped", deliveredAt: undefined })];
+  const origFind = ShopifyOrder.find;
+  const origGql = client.gql;
+  ShopifyOrder.find = async () => docs;
+  const R = { 1: ["DECLINED"], 2: ["CLOSED"], 3: [], 4: ["CANCELED", "DECLINED"] };
+  client.gql = async (store, q, v) => ({ nodes: v.ids.map((id) => ({ id, returns: { nodes: R[id.split("/").pop()].map((status) => ({ status })) } })) });
+  delete require.cache[require.resolve("../src/utils/shopify/sync")];
+  try {
+    const { reconcileReturns } = require("../src/utils/shopify/sync");
+    const toClose = [];
+    const n = await reconcileReturns({ organization: "x" }, toClose);
+    assert.equal(n, 2);
+    assert.deepEqual(docs.map((d) => d.status), ["delivered", "return_created", "return_created", "shipped"]);
+    assert.deepEqual(toClose.map(String), [String(docs[1]._id)]);
+  } finally {
+    ShopifyOrder.find = origFind;
+    client.gql = origGql;
+    delete require.cache[require.resolve("../src/utils/shopify/sync")];
+  }
+});
