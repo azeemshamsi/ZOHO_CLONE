@@ -388,6 +388,66 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
   return results;
 }
 
+/**
+ * A seller's order to add by hand to a purchase order (e.g. to match a PO made in the old software):
+ * the seller is found from the PO's vendor, the order by its number; lines priced like the monthly PO.
+ */
+async function orderForPo(orgId, vendorId, q) {
+  const ShopifyOrder = require("../models/ShopifyOrder");
+  const Vendor = require("../models/Vendor");
+  const Item = require("../models/Item");
+  const vendor = await Vendor.findOne({ _id: vendorId, organization: orgId }).lean();
+  if (!vendor) throw new Error("Choose the vendor (the seller) first");
+  const all = await Seller.find({}).lean();
+  const seller =
+    all.find((x) => String((x.vendors || {})[String(orgId)] || "") === String(vendor._id)) ||
+    (vendor.gstin && all.find((x) => x.gstin && x.gstin === vendor.gstin)) ||
+    all.find((x) => norm(x.name) === norm(vendor.displayName));
+  if (!seller) throw new Error(`${vendor.displayName} isn't a marketplace seller (Store → Sellers)`);
+  const raw = String(q || "").trim().replace(/^#/, "");
+  if (!raw) throw new Error("Type the order number");
+  const order = (await ShopifyOrder.find({ organization: seller.organization, name: { $in: [`#${raw}`, raw] } }).lean())[0];
+  if (!order) throw new Error(`Order #${raw} not found in the store's orders`);
+  const brands = new Set((seller.brands || []).map(norm));
+  const lines = order.lines.filter((l) => l.quantity > 0 && brands.has(norm(l.vendor)));
+  if (!lines.length) throw new Error(`${order.name} has no products of ${seller.name}`);
+  const items = new Map((await Item.find({ _id: { $in: lines.map((l) => l.item).filter(Boolean) } }, { taxRate: 1, hsnSac: 1 }).lean()).map((i) => [String(i._id), i]));
+  const d = deliveredOn(order);
+  const lineItems = lines.map((l) => {
+    const it = items.get(String(l.item));
+    const gst = seller.gstin ? Number(it?.taxRate ?? l.shopifyTaxRate ?? 0) : 0;
+    const unit = r4((l.unitPrice * seller.rate) / 100);
+    return {
+      item: "",
+      name: `${order.name} · ${l.title}${l.variantTitle ? ` - ${l.variantTitle}` : ""}`.slice(0, 200),
+      description: `${l.sku ? `SKU ${l.sku} · ` : ""}${d ? `delivered ${new Date(d.getTime() + IST).toISOString().slice(0, 10)}` : order.status.replace(/_/g, " ")} · ${seller.rate}% of ₹${lineValue(l)}`,
+      hsnSac: it?.hsnSac || l.hsn || "",
+      unit: "pcs",
+      quantity: l.quantity,
+      rate: r4(unit / (1 + gst / 100)),
+      discount: 0,
+      taxRate: gst,
+    };
+  });
+  const warnings = [];
+  for (const x of order.sellerSettled || [])
+    if (String(x.seller) === String(seller._id)) warnings.push(x.excluded ? `It's marked excluded from purchase orders${x.reason ? ` (${x.reason})` : ""}` : `It's already on purchase order ${x.number || ""}`);
+  if (order.status !== "delivered") warnings.push(`Its status is ${order.status.replace(/_/g, " ")}, not delivered`);
+  return { seller: { id: seller._id, name: seller.name, rate: seller.rate }, order: { id: order._id, name: order.name, status: order.status, deliveredAt: d }, amount: r2(lines.reduce((t, l) => t + linePurchase(seller, l), 0)), lineItems, warnings };
+}
+
+// After saving a PO with hand-added seller orders: mark them as on this PO so the monthly run skips them.
+async function settleOnPo(po, orgId, entries) {
+  const ShopifyOrder = require("../models/ShopifyOrder");
+  for (const e of entries || []) {
+    const o = await ShopifyOrder.findById(e.order);
+    if (!o) continue;
+    if ((o.sellerSettled || []).some((x) => String(x.seller) === String(e.seller) && String(x.purchaseOrder) === String(po._id))) continue;
+    o.sellerSettled = [...(o.sellerSettled || []), { seller: e.seller, purchaseOrder: po._id, number: po.number, organization: orgId, amount: Number(e.amount) || 0, at: new Date(), reason: "added by hand" }];
+    await o.save();
+  }
+}
+
 // Called hourly: on/after the 8th (so an order delivered on the 31st has had its 7 days), make last month's
 // purchase orders once per store.
 const RUN_DAY = 8;
@@ -436,4 +496,4 @@ async function pendingOrders(seller, month) {
     .sort((a, b) => new Date(a.deliveredAt) - new Date(b.deliveredAt));
 }
 
-module.exports = { pendingOrders, HOLD_DAYS, norm, brandMap, clearCache, sellerOfLine, sellersOfLines, assignAll, pickupFor, withPickup, pickupProblems, registerPickup, sellerProducts, setSellerStock, runMonthly, monthlyTick, monthRange, prevMonth, linePurchase, lineValue, deliveredOn };
+module.exports = { orderForPo, settleOnPo, pendingOrders, HOLD_DAYS, norm, brandMap, clearCache, sellerOfLine, sellersOfLines, assignAll, pickupFor, withPickup, pickupProblems, registerPickup, sellerProducts, setSellerStock, runMonthly, monthlyTick, monthRange, prevMonth, linePurchase, lineValue, deliveredOn };

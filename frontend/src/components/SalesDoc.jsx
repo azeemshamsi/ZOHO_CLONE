@@ -127,6 +127,51 @@ function calc(lines, orgState, pos, shipping, adjustment) {
   return { inter, sub: round2(sub), taxByRate, total };
 }
 
+// Purchase order for a marketplace seller: add one of their store orders by its number (e.g. to match a PO from the
+// old software). Its lines are priced at the seller's rate; on save the order is marked as on this PO.
+function SellerOrderAdder({ vendor, onAdd }) {
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const add = async () => {
+    if (!vendor) return toast("Choose the vendor (the seller) first", "error");
+    if (!q.trim()) return;
+    setBusy(true);
+    try {
+      const { data } = await api.get("/purchase-orders/seller-order", { params: { vendor, q: q.trim() } });
+      if (data.warnings.length && !window.confirm(`${data.order.name}: ${data.warnings.join(". ")}.\n\nAdd it to this purchase order anyway?`)) {
+        setBusy(false);
+        return;
+      }
+      onAdd(data);
+      toast(`${data.order.name} added — ${data.lineItems.length} line${data.lineItems.length === 1 ? "" : "s"}, ₹${data.amount}`);
+      setQ("");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+      <span className="small muted">Seller's order:</span>
+      <input
+        style={{ width: 180 }}
+        placeholder="Order number, e.g. 199359"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            add();
+          }
+        }}
+      />
+      <button type="button" className="btn btn-sm" disabled={busy} onClick={add}>
+        {busy ? "Finding…" : "Add order"}
+      </button>
+    </div>
+  );
+}
+
 export function DocForm({ kind, recurring = false }) {
   const { id } = useParams();
   const [params] = useSearchParams();
@@ -395,6 +440,7 @@ export function DocForm({ kind, recurring = false }) {
         body.reason = form.reason;
       }
       if (form.purchaseOrder) body.purchaseOrder = form.purchaseOrder;
+      if (kind.key === "purchaseOrder" && form.sellerOrders?.length) body.sellerOrders = form.sellerOrders;
       if (recurring) {
         const sc = form.sched;
         const template = { ...body };
@@ -792,6 +838,18 @@ export function DocForm({ kind, recurring = false }) {
         <button type="button" className="link-btn add-row" onClick={() => setForm({ ...form, lineItems: [...form.lineItems, blankLine()] })}>
           <Icon name="plus" size={14} /> Add another line
         </button>
+        {kind.key === "purchaseOrder" && !recurring && (
+          <SellerOrderAdder
+            vendor={form.vendor}
+            onAdd={(r) =>
+              setForm((f) => ({
+                ...f,
+                lineItems: [...f.lineItems.filter((l) => l.name.trim()), ...r.lineItems.map((l) => ({ ...blankLine(), ...l }))],
+                sellerOrders: [...(f.sellerOrders || []).filter((x) => x.order !== String(r.order.id)), { order: String(r.order.id), seller: String(r.seller.id), amount: r.amount }],
+              }))
+            }
+          />
+        )}
 
         <div className="invoice-bottom">
           <div className="stack">

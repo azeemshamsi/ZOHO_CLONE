@@ -14,6 +14,8 @@ const schema = Joi.object({
   reference: Joi.string().allow(""),
   deliveryDate: Joi.date().allow(null, ""),
   status: Joi.string().valid("draft", "issued"),
+  // Marketplace seller orders added by hand (Store → Sellers): marked as on this PO when it's saved.
+  sellerOrders: Joi.array().items(Joi.object({ order: Joi.string().required(), seller: Joi.string().required(), amount: Joi.number().default(0) })).default([]),
 });
 
 const prefix = (org) => org.purchaseOrderPrefix || "PO-";
@@ -38,6 +40,18 @@ router.get(
   })
 );
 
+// A marketplace seller's order, priced for this vendor's purchase order.
+router.get(
+  "/seller-order",
+  ah(async (req, res) => {
+    try {
+      res.send(await require("../utils/sellers").orderForPo(req.org, String(req.query.vendor || ""), req.query.q));
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+  })
+);
+
 router.get(
   "/next-number",
   ah(async (req, res) => {
@@ -49,11 +63,13 @@ router.get(
 router.post(
   "/",
   ah(async (req, res) => {
-    const data = validate(schema, req.body);
+    const { sellerOrders, ...data } = validate(schema, req.body);
     const { org, fields } = await prepareDoc(req, data, "vendor");
     if (!fields.number) fields.number = await nextNumber(req.org, ...(await require("../utils/salesDoc").branchSeries("purchaseOrder", prefix(org), fields.branch)));
     if (!fields.deliveryDate) fields.deliveryDate = undefined;
-    res.status(201).send(await PurchaseOrder.create({ ...fields, organization: req.org, status: data.status || "draft" }));
+    const created = await PurchaseOrder.create({ ...fields, organization: req.org, status: data.status || "draft" });
+    if (sellerOrders.length) await require("../utils/sellers").settleOnPo(created, req.org, sellerOrders);
+    res.status(201).send(created);
   })
 );
 
@@ -67,12 +83,13 @@ router.put(
   ah(async (req, res) => {
     const po = await findPO(req);
     if (["billed", "cancelled"].includes(po.status)) throw new HttpError(400, `A ${po.status} purchase order can't be edited`);
-    const data = validate(schema, req.body);
+    const { sellerOrders, ...data } = validate(schema, req.body);
     const { fields } = await prepareDoc(req, data, "vendor");
     if (!fields.number) fields.number = po.number;
     if (!fields.deliveryDate) fields.deliveryDate = undefined;
     po.set({ ...fields, status: po.status === "draft" ? data.status || "draft" : po.status });
     await po.save();
+    if (sellerOrders.length) await require("../utils/sellers").settleOnPo(po, req.org, sellerOrders);
     res.send(po);
   })
 );
