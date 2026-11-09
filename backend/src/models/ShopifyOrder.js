@@ -120,6 +120,10 @@ const shopifyOrderSchema = new mongoose.Schema(
     invoiceOrg: { type: mongoose.Schema.Types.ObjectId, ref: "Organization" }, // the company the invoice is in
     invoiceError: String,
     remarks: String,
+    // AWB scanned by us before handing the parcel to the courier (internal record): latest scan + every scan.
+    awbScannedAt: Date,
+    awbScannedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    awbScans: [{ _id: false, awb: String, courier: String, at: Date, by: mongoose.Schema.Types.ObjectId, byName: String }],
     returnFrom: String, // status before the return was opened (to go back to if it's declined)
   },
   { timestamps: true }

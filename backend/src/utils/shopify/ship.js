@@ -141,6 +141,8 @@ async function cancelShipment(order) {
   const was = `${sh.courierName || ""} ${sh.awb}`.trim();
   if (acc) await CARRIERS[acc.carrier].cancel(acc, sh);
   order.shipment = {};
+  order.awbScannedAt = undefined; // the scan belonged to the cancelled AWB (it stays in awbScans)
+  order.awbScannedBy = undefined;
   order.remarks = `${order.remarks ? `${order.remarks}\n` : ""}Shipment ${was} cancelled on ${new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}`;
   order.status = "packed";
   order.statusChangedAt = new Date();

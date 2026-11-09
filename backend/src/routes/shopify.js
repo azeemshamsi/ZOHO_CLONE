@@ -197,7 +197,7 @@ router.post(
 );
 
 /* ---------------- orders ---------------- */
-const LIST_FIELDS = { channel: 1, "amazon.easyShip": 1, "amazon.confirmedAt": 1, "amazon.confirmError": 1, "amazon.shipBy": 1, "amazon.label": 1, "amazon.slot": 1, "amazon.gstin": 1, "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.vendor": 1, sellers: 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 };
+const LIST_FIELDS = { awbScannedAt: 1, channel: 1, "amazon.easyShip": 1, "amazon.confirmedAt": 1, "amazon.confirmError": 1, "amazon.shipBy": 1, "amazon.label": 1, "amazon.slot": 1, "amazon.gstin": 1, "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.vendor": 1, sellers: 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 };
 // The order list: filters, counts, sort and search from the in-memory index; only the page shown is read.
 router.get(
   "/orders",
@@ -206,10 +206,10 @@ router.get(
     const page = Math.max(1, Number(q.page) || 1);
     const limit = Math.min(200, Math.max(10, Number(q.limit) || 50));
     const matched = filterEntries(await orderIndex(req.storeOrg), q);
-    const counts = Object.fromEntries(STATUSES.map((s) => [s, 0]));
-    for (const e of matched) counts[e.status] = (counts[e.status] || 0) + 1;
+    const counts = Object.fromEntries([...STATUSES, "awb_scanned"].map((s) => [s, 0]));
+    for (const e of matched) counts[e.tab || e.status] = (counts[e.tab || e.status] || 0) + 1;
     counts.all = matched.length;
-    const list = q.status && q.status !== "all" ? matched.filter((e) => e.status === q.status) : matched;
+    const list = q.status && q.status !== "all" ? matched.filter((e) => (e.tab || e.status) === q.status) : matched;
     const cmp = { oldest: (a, b) => a.orderDate - b.orderDate, amount: (a, b) => b.total - a.total }[q.sort] || ((a, b) => b.orderDate - a.orderDate);
     const pageIds = [...list].sort(cmp).slice((page - 1) * limit, page * limit).map((e) => e._id);
     const docs = pageIds.length ? await ShopifyOrder.find({ _id: { $in: pageIds } }, LIST_FIELDS).lean() : [];
@@ -231,7 +231,7 @@ router.get(
 router.get(
   "/orders/export",
   ah(async (req, res) => {
-    const ids = filterEntries(await orderIndex(req.storeOrg), req.query).filter((e) => !req.query.status || req.query.status === "all" || e.status === req.query.status).map((e) => e._id);
+    const ids = filterEntries(await orderIndex(req.storeOrg), req.query).filter((e) => !req.query.status || req.query.status === "all" || (e.tab || e.status) === req.query.status).map((e) => e._id);
     const rows = await ShopifyOrder.find({ _id: { $in: ids } }).sort({ orderDate: -1 }).limit(20000).lean();
     const csv = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const head = ["Order", "Date", "Customer", "Phone", "Email", "City", "State", "Pincode", "Payment", "Financial status", "Status", "Items", "Total", "Courier", "AWB", "Invoice"];
@@ -450,6 +450,31 @@ router.post(
       }
     }
     res.send({ results });
+  })
+);
+
+// Scan an AWB before handing the parcel to the courier: records when (internal record only, status unchanged).
+router.post(
+  "/orders/awb-scan",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ code: Joi.string().trim().allow(""), codes: Joi.array().items(Joi.string().trim().max(80)).max(10) }).or("code", "codes"), req.body);
+    const codes = d.codes?.length ? d.codes : [d.code];
+    const o = await R.findByCode(req.storeOrg, codes);
+    if (!o) throw new HttpError(404, `No order with AWB or order number "${codes.join('" / "')}"`);
+    const sh = o.shipment || {};
+    const fmt = (t) => new Date(t).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    const summary = { _id: o._id, name: o.name, customer: o.channel === "amazon" ? "" : o.customer?.name, awb: sh.awb, courier: sh.courierName, status: o.status, items: o.lines.filter((l) => l.quantity > 0).map((l) => `${l.quantity} × ${l.title}${l.variantTitle ? ` (${l.variantTitle})` : ""}`) };
+    if (o.status === "cancelled") throw new HttpError(400, `${o.name} is cancelled — don't hand it over`);
+    if (!sh.awb) throw new HttpError(400, `${o.name} has no shipment booked`);
+    if (["returned", "return_created", "rto"].includes(o.status)) throw new HttpError(400, `${o.name} is ${o.status.replace(/_/g, " ")} — not going out`);
+    if (o.awbScannedAt && (o.awbScans || []).some((x) => x.awb === sh.awb)) return res.send({ order: summary, already: true, scannedAt: o.awbScannedAt, message: `${o.name} already scanned on ${fmt(o.awbScannedAt)}` });
+    const now = new Date();
+    o.awbScannedAt = now;
+    o.awbScannedBy = req.user._id;
+    o.awbScans = [...(o.awbScans || []), { awb: sh.awb, courier: sh.courierName || "", at: now, by: req.user._id, byName: req.user.name || "" }];
+    await o.save();
+    require("../utils/shopify/orderIndex").forget(req.storeOrg);
+    res.send({ order: summary, scanned: true, scannedAt: now, message: `${o.name} scanned · ${sh.courierName || ""} ${sh.awb}`.trim() });
   })
 );
 

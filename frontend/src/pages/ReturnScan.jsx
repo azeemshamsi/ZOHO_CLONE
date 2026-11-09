@@ -5,7 +5,7 @@ import { money } from "../lib/format";
 import { PageHeader } from "../components/ui";
 
 // Short beep: high for success, low for a problem.
-function beep(ok) {
+export function beep(ok) {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const o = ctx.createOscillator();
@@ -24,7 +24,7 @@ const NATIVE_FORMATS = ["code_128", "code_39", "code_93", "codabar", "itf", "ean
 
 // Camera scanner. Uses the phone's built-in barcode detector when there is one (Chrome on Android:
 // fast and good with long courier barcodes), otherwise ZXing (iPhone / other browsers).
-function Camera({ onCodes, onClose, last, busy }) {
+export function Camera({ onCodes, onClose, last, busy }) {
   const video = useRef();
   const [err, setErr] = useState("");
   const [engine, setEngine] = useState("");

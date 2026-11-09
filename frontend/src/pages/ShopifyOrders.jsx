@@ -14,6 +14,7 @@ const TABS = [
   ["new", "New"],
   ["packed", "Packed"],
   ["ready_to_ship", "Ready to Ship"],
+  ["awb_scanned", "AWB Scanned"],
   ["shipped", "Shipped"],
   ["delivered", "Delivered"],
   ["rto", "RTO"],
@@ -780,6 +781,13 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
                 )}
               </div>
               {sh.trackStatus && <div className="muted small">{TRACK_LABEL[sh.trackStatus] || sh.trackStatus}{sh.trackedAt ? ` · checked ${new Date(sh.trackedAt).toLocaleString("en-IN")}` : ""}</div>}
+              {sh.bookedAt && <div className="muted small">Booked {new Date(sh.bookedAt).toLocaleString("en-IN")}</div>}
+              {o.awbScannedAt ? (
+                <div className="small text-paid">AWB scanned (handed to courier) {new Date(o.awbScannedAt).toLocaleString("en-IN")}</div>
+              ) : (
+                ["ready_to_ship", "shipped", "delivered"].includes(o.status) && <div className="small text-amber">AWB not scanned before handover</div>
+              )}
+              {(o.awbScans || []).length > 1 && <div className="muted small">Earlier scans: {o.awbScans.slice(0, -1).map((x) => `${x.awb} ${new Date(x.at).toLocaleString("en-IN")}`).join(" · ")}</div>}
               {sh.shopifyFulfilled && <div className="muted small">Marked fulfilled in Shopify</div>}
               {sh.error && <div className="text-red small">{sh.error}</div>}
             </>
@@ -1102,6 +1110,9 @@ export function ShopifyOrders() {
         }}>
           Export
         </a>
+        <Link className="btn" to="/awb-scan">
+          Scan AWB
+        </Link>
         <Link className="btn" to="/returns-scan">
           Scan Returns
         </Link>
@@ -1243,7 +1254,7 @@ export function ShopifyOrders() {
                 Mark Packed
               </button>
             )}
-            {["ready_to_ship", "shipped", "delivered", "rto", "all"].includes(tab) && (
+            {["ready_to_ship", "awb_scanned", "shipped", "delivered", "rto", "all"].includes(tab) && (
               <>
                 <button className="btn btn-sm" disabled={busy} onClick={() => openPdf("/shopify/orders/labels", { ids, format: "4x6" })}>
                   Labels 4x6
@@ -1253,7 +1264,7 @@ export function ShopifyOrders() {
                 </button>
               </>
             )}
-            {["ready_to_ship", "shipped", "all"].includes(tab) && (
+            {["ready_to_ship", "awb_scanned", "shipped", "all"].includes(tab) && (
               <>
                 <button className="btn btn-sm" disabled={busy} onClick={() => bulk("/shopify/orders/track", { ids }, "Tracking")}>
                   Refresh Tracking
@@ -1375,6 +1386,7 @@ export function ShopifyOrders() {
                             <div>{sh.awb}</div>
                           )}
                           {sh.trackStatus && <div className="muted">{TRACK_LABEL[sh.trackStatus] || sh.trackStatus}</div>}
+                          {o.awbScannedAt && <div className="muted small">Scanned {new Date(o.awbScannedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>}
                           {sh.error && /cancelled in Shopify/.test(sh.error) && <div className="text-red small">Fulfilment cancelled in Shopify</div>}
                         </>
                       ) : (

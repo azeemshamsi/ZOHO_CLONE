@@ -34,6 +34,7 @@ import { PackageTypes } from "./pages/PackageTypes";
 import { ShippingCalculator } from "./pages/ShippingCalculator";
 import { Inventory } from "./pages/Inventory";
 import { ReturnScan } from "./pages/ReturnScan";
+import { AwbScan } from "./pages/AwbScan";
 import { GstCompliance } from "./pages/GstCompliance";
 import { GstReturns } from "./pages/GstReturns";
 import { GstReconcile } from "./pages/GstReconcile";
@@ -113,6 +114,7 @@ export default function App() {
           <Route path="shipping-calculator" element={<ShippingCalculator />} />
           <Route path="inventory" element={<Inventory />} />
           <Route path="returns-scan" element={<ReturnScan />} />
+          <Route path="awb-scan" element={<AwbScan />} />
           <Route path="no-access" element={<div className="card center no-access"><h3>No pages to show</h3><p className="muted">Your role doesn't include any part of the app yet. Ask an admin.</p></div>} />
           <Route path="gst" element={<GstReturns />} />
           <Route path="gst/reconcile" element={<GstReconcile />} />
