@@ -33,10 +33,16 @@ function normStatus(text) {
   if (/cancel/.test(t)) return "cancelled";
   if (/^delivered|delivered$|\bdelivered\b/.test(t) && !/not delivered|undelivered/.test(t)) return "delivered";
   if (/out for delivery|ofd/.test(t)) return "out_for_delivery";
-  if (/picked|in transit|transit|dispatched|shipped|reached|arrived|connected|bagged|in-transit|manifested at hub/.test(t)) return "in_transit";
-  if (/pickup (scheduled|generated|pending)|manifest|booked|not picked|pending|awb assigned|ready/.test(t)) return "pending";
-  return "in_transit";
+  // Booked but not yet with the courier — checked before the "picked / transit" words ("Not Picked", "Out for pickup").
+  if (/not picked|pick ?up (scheduled|generated|pending|rescheduled|exception|error|failed|on hold|cancelled|queued)|out for pick ?up|assigned[ _]for[ _]pick ?up|pick ?up[ _]on[ _]hold|pending pick ?up|ready (to ship|for pick ?up)|awb assigned|label generated|shipment (created|booked)|order (placed|created)|softdata|^manifest(ed)?$|^booked|^new$|^open$|^created$|^not yet picked/.test(t)) return "pending";
+  if (/picked|in transit|transit|dispatched|shipped|reached|arrived|connected|bagged|in-transit|manifested at hub|received at|departed|forwarded/.test(t)) return "in_transit";
+  // Anything else isn't proof the parcel left: keep it ready to ship until a pickup / transit scan.
+  return "pending";
 }
+
+// A pickup or transit scan in the history means the courier has the parcel, whatever the latest status says.
+const HANDED_OVER = /picked up|pickup done|picked|in transit|in-transit|dispatched|received at|bagged|departed|forwarded|reached|arrived/i;
+const handedOver = (events) => (events || []).some((e) => HANDED_OVER.test(String(e.status || "")) && !/not picked|not yet picked|out for pick ?up/i.test(String(e.status || "")));
 
 /* ---------------- Shiprocket ---------------- */
 const shiprocket = {
@@ -471,4 +477,4 @@ function checkShipment(s) {
   if (miss.length) throw new Error(`Shipping address is missing: ${miss.join(", ")} — fix it in Shopify and sync again`);
 }
 
-module.exports = { CARRIERS, shipmentFrom, checkShipment, normStatus, stateName, codOf };
+module.exports = { handedOver, CARRIERS, shipmentFrom, checkShipment, normStatus, stateName, codOf };

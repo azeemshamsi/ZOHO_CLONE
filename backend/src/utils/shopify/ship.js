@@ -108,6 +108,7 @@ async function trackOrder(order) {
   const acc = await CourierAccount.findById(sh.account);
   if (!acc) return null;
   const t = await CARRIERS[acc.carrier].track(acc, sh);
+  if (t.status === "pending" && require("../couriers").handedOver(t.events)) t.status = "in_transit";
   sh.trackStatus = t.status;
   sh.trackedAt = new Date();
   if (t.events?.length) sh.events = t.events.filter((e) => e.at && !isNaN(e.at)).slice(0, 50);
@@ -121,6 +122,10 @@ async function trackOrder(order) {
     order.statusChangedAt = new Date();
   } else if (next === "rto" && order.status === "delivered") {
     order.status = "rto";
+  } else if (t.status === "pending" && order.status === "shipped" && sh.account) {
+    // Marked shipped too early (booked, but the courier hasn't picked it up): back to Ready to Ship.
+    order.status = "ready_to_ship";
+    order.statusChangedAt = new Date();
   }
   order.markModified("shipment");
   await order.save();

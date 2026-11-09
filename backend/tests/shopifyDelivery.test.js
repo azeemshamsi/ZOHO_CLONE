@@ -31,3 +31,12 @@ test("other statuses are left alone", () => {
     assert.equal(o.status, status);
   }
 });
+
+test("courier statuses: booked / awaiting pickup stay Ready to Ship; a pickup or transit scan means Shipped", () => {
+  const { normStatus, handedOver } = require("../src/utils/couriers");
+  for (const t of ["Manifested", "Not Picked", "PICKUP SCHEDULED", "OUT FOR PICKUP", "AWB ASSIGNED", "Booked", "new", "assigned_for_pickup", "Softdata Upload", "Something unknown"]) assert.equal(normStatus(t), "pending", t);
+  for (const t of ["In Transit", "Picked Up", "Shipment Picked Up", "Dispatched", "Manifested at Hub", "Received at origin"]) assert.equal(normStatus(t), "in_transit", t);
+  assert.equal(normStatus("Out For Delivery"), "out_for_delivery");
+  assert.equal(handedOver([{ status: "Manifested" }, { status: "Shipment Picked Up" }]), true);
+  assert.equal(handedOver([{ status: "Manifested" }, { status: "Not Picked" }]), false);
+});
