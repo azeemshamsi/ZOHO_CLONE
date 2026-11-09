@@ -40,3 +40,33 @@ test("courier statuses: booked / awaiting pickup stay Ready to Ship; a pickup or
   assert.equal(handedOver([{ status: "Manifested" }, { status: "Shipment Picked Up" }]), true);
   assert.equal(handedOver([{ status: "Manifested" }, { status: "Not Picked" }]), false);
 });
+
+test("Shopify returns: requested → Returns; declined → back to Delivered; closed → to be closed (Returned)", async () => {
+  const ShopifyOrder = require("../src/models/ShopifyOrder");
+  const { upsert } = require("../src/utils/shopify/sync");
+  const doc = new ShopifyOrder({ organization: "64b000000000000000000001", shopifyId: "gid://shopify/Order/1", name: "#1", status: "delivered", deliveredAt: new Date(), returnStatus: "NO_RETURN", shopifyUpdatedAt: new Date(0) });
+  doc.save = async () => doc;
+  const orig = ShopifyOrder.findOne;
+  ShopifyOrder.findOne = async () => doc;
+  let t = 1;
+  const n = (returnStatus) => ({ shopifyId: "gid://shopify/Order/1", returnStatus, shopifyUpdatedAt: new Date(t++ * 1000), shopifyFulfillments: [], fulfillmentStatus: "FULFILLED" });
+  try {
+    await upsert(doc.organization, n("RETURN_REQUESTED"));
+    assert.equal(doc.status, "return_created");
+    await upsert(doc.organization, n("NO_RETURN"));
+    assert.equal(doc.status, "delivered", "declined: back to Delivered");
+    await upsert(doc.organization, n("RETURN_REQUESTED"));
+    await upsert(doc.organization, n("IN_PROGRESS"));
+    const toClose = [];
+    await upsert(doc.organization, n("RETURNED"), toClose);
+    assert.deepEqual(toClose.map(String), [String(doc._id)], "closed in Shopify: closed here too");
+    // A return made in OrdexaGo that Shopify never had isn't undone by NO_RETURN.
+    doc.status = "return_created";
+    doc.returnStatus = "NO_RETURN";
+    doc.shopifyReturnId = undefined;
+    await upsert(doc.organization, n("NO_RETURN"));
+    assert.equal(doc.status, "return_created");
+  } finally {
+    ShopifyOrder.findOne = orig;
+  }
+});

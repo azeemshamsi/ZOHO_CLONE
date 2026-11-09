@@ -60,6 +60,7 @@ async function markReturnCreated(ctx, order, store, note = "") {
     } catch (e) {
       warning = `Not created in Shopify: ${e.message}`;
     }
+  order.returnFrom = order.status;
   order.status = "return_created";
   order.statusChangedAt = new Date();
   if (note) order.returnNote = note;
@@ -96,9 +97,9 @@ async function creditNoteFor(ctx, order, store) {
 }
 
 // The part that talks to Shopify and makes the credit note (slow: several network calls).
-async function finishReturn(ctx, order, store, was) {
+async function finishReturn(ctx, order, store, was, { shopifyDone = false } = {}) {
   const out = { warning: "" };
-  if (order.channel !== "amazon" && store?.connected && was !== "ready_to_ship")
+  if (!shopifyDone && order.channel !== "amazon" && store?.connected && was !== "ready_to_ship")
     try {
       const id = order.shopifyReturnId || (await createInShopify(store, order, was === "rto" ? "RTO — returned by courier" : "Returned"));
       order.shopifyReturnId = id;
@@ -125,7 +126,7 @@ async function finishReturn(ctx, order, store, was) {
  * Close a return. With { background: true } the order is marked returned straight away and the
  * Shopify return + credit note are finished afterwards (result saved in order.returnSync).
  */
-async function markReturnClosed(ctx, order, store, { background = false } = {}) {
+async function markReturnClosed(ctx, order, store, { background = false, shopifyDone = false } = {}) {
   const retry = order.status === "returned" && order.returnSync?.state === "error";
   if (order.status === "returned" && !retry) return { already: true };
   if (!retry && !["shipped", "delivered", "rto", "return_created", "ready_to_ship"].includes(order.status)) throw new Error(`Order is ${order.status.replace(/_/g, " ")}, not out for delivery or returned`);
@@ -134,7 +135,7 @@ async function markReturnClosed(ctx, order, store, { background = false } = {}) 
   if (!retry) order.returnedAt = new Date();
   order.statusChangedAt = new Date();
   const run = async () => {
-    const r = await finishReturn(ctx, order, store, was);
+    const r = await finishReturn(ctx, order, store, was, { shopifyDone });
     order.returnSync = { state: r.error ? "error" : "done", message: [r.warning, r.error].filter(Boolean).join(" · "), creditNoteNumber: r.creditNote || order.returnSync?.creditNoteNumber || "", at: new Date(), was };
     order.markModified("returnSync");
     await order.save();
