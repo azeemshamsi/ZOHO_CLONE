@@ -928,7 +928,7 @@ export function ShopifyOrders() {
   const companyName = (id) => (organizations || []).find((c) => String(c._id) === String(id))?.name || "other company";
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") || "new";
-  const [filters, setFilters] = useState(() => ({ ...EMPTY_FILTERS, seller: params.get("seller") || "" }));
+  const [filters, setFilters] = useState(() => ({ ...EMPTY_FILTERS, seller: params.get("seller") || "", q: params.get("q") || "" }));
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);

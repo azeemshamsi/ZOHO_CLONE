@@ -323,7 +323,14 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
             });
           }
           target = r2(target + amt);
-          perOrder.push({ id: o._id, amount: amt });
+          perOrder.push({
+            id: o._id,
+            amount: amt,
+            name: o.name,
+            deliveredAt: deliveredOn(o),
+            sale: r2(lines.reduce((t, l) => t + lineValue(l), 0)),
+            items: lines.map((l) => ({ title: `${l.title}${l.variantTitle ? ` - ${l.variantTitle}` : ""}`, sku: l.sku || "", quantity: l.quantity, sale: lineValue(l), purchase: linePurchase(seller, l) })),
+          });
         }
         // Deductions: those for this company's orders, then any others, while the PO stays above zero.
         const mine = penaltiesLeft.filter((p) => !p.order || rows.some((r) => String(r.o._id) === String(p.order)) || byOrg.size === 1);
@@ -336,7 +343,22 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
         }
         penaltiesLeft = penaltiesLeft.filter((p) => !applied.includes(p));
         if (dryRun) {
-          results.push({ seller: seller.name, sellerId: seller._id, company: org.name, organization: orgId, orders: perOrder.length, lines: lineItems.length, amount: target, penalties: pen, total: r2(target - pen), waiting });
+          results.push({
+            seller: seller.name,
+            sellerId: seller._id,
+            rate: seller.rate,
+            company: org.name,
+            organization: orgId,
+            orders: perOrder.length,
+            lines: lineItems.length,
+            amount: target,
+            penalties: pen,
+            total: r2(target - pen),
+            waiting,
+            // The orders and deductions that would go on this PO.
+            orderList: [...perOrder].sort((a, b) => a.deliveredAt - b.deliveredAt),
+            deductionList: applied.map((p) => ({ id: p._id, amount: p.amount, reason: p.reason || p.note || "", order: p.orderName || "" })),
+          });
           continue;
         }
         const vendor = await vendorIn(seller, orgId);

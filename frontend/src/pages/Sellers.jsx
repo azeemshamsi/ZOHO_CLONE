@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { STATES, stateName } from "../lib/constants";
@@ -561,6 +561,84 @@ function SellerDetail({ id, onClose, onEdit, onChanged }) {
 }
 
 // What goes on this seller's next purchase order, and orders excluded for good (paid outside OrdexaGo).
+// The orders (and deductions) that would go on one seller's purchase order, with a way to leave one out.
+function PoOrders({ r, onExcluded }) {
+  const [busy, setBusy] = useState(null);
+  const exclude = async (o) => {
+    const reason = window.prompt(`Leave ${o.name} off ${r.seller}'s purchase orders for good? Reason (e.g. paid in the old software):`, "");
+    if (reason === null) return;
+    setBusy(o.id);
+    try {
+      await api.post(`/sellers/${r.sellerId}/exclude`, { ids: [o.id], reason });
+      toast(`${o.name} excluded`);
+      onExcluded();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(null);
+  };
+  return (
+    <>
+      <div className="small muted" style={{ marginBottom: 6 }}>
+        {r.orderList.length} order{r.orderList.length === 1 ? "" : "s"} at {r.rate}% of the sale price (incl. GST, before discounts)
+        {r.waiting ? ` · ${r.waiting} more delivered less than 7 days ago wait for the next PO` : ""}
+      </div>
+      <table className="table" style={{ margin: 0 }}>
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Delivered</th>
+            <th>Items</th>
+            <th className="num">Sale value</th>
+            <th className="num">Purchase value</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {r.orderList.map((o) => (
+            <tr key={o.id}>
+              <td>
+                <Link to={`/shopify-orders?tab=all&q=${encodeURIComponent(o.name)}`}>{o.name}</Link>
+              </td>
+              <td className="small">{o.deliveredAt ? date(o.deliveredAt) : ""}</td>
+              <td className="small">
+                {o.items.map((it, k) => (
+                  <div key={k}>
+                    {it.quantity} × {it.title}
+                    {it.sku ? <span className="muted"> · {it.sku}</span> : ""}
+                  </div>
+                ))}
+              </td>
+              <td className="num">{money(o.sale)}</td>
+              <td className="num">{money(o.amount)}</td>
+              <td className="num">
+                <button className="btn btn-sm btn-ghost" disabled={busy === o.id} onClick={() => exclude(o)} title="Never put this order on a purchase order (e.g. already paid)">
+                  Exclude
+                </button>
+              </td>
+            </tr>
+          ))}
+          {r.deductionList?.map((p) => (
+            <tr key={p.id}>
+              <td colSpan={4} className="small">
+                Deduction{p.order ? ` (${p.order})` : ""}
+                {p.reason ? ` — ${p.reason}` : ""}
+              </td>
+              <td className="num">− {money(p.amount)}</td>
+              <td />
+            </tr>
+          ))}
+          <tr className="row-total">
+            <td colSpan={4}>PO total</td>
+            <td className="num">{money(r.total)}</td>
+            <td />
+          </tr>
+        </tbody>
+      </table>
+    </>
+  );
+}
+
 function PendingOrders({ seller, onClose, onChanged }) {
   const [month, setMonth] = useState(prevMonth());
   const [data, setData] = useState(null);
@@ -1013,6 +1091,7 @@ function MonthlyPos({ sellers }) {
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [openRow, setOpenRow] = useState(null);
   const look = async () => {
     setBusy(true);
     setResult(null);
@@ -1094,8 +1173,12 @@ function MonthlyPos({ sellers }) {
                 </thead>
                 <tbody>
                   {rows.map((r, i) => (
-                    <tr key={i}>
-                      <td>{r.seller}</td>
+                    <Fragment key={i}>
+                    <tr style={r.orderList?.length ? { cursor: "pointer" } : undefined} onClick={r.orderList?.length ? () => setOpenRow(openRow === i ? null : i) : undefined} title={r.orderList?.length ? "Click to see the orders on this PO" : ""}>
+                      <td>
+                        {r.orderList?.length > 0 && <span style={{ display: "inline-block", width: 14 }}>{openRow === i ? "▾" : "▸"}</span>}
+                        {r.seller}
+                      </td>
                       <td colSpan={r.skipped || r.error ? 6 : 1} className={r.skipped ? "muted small" : r.error ? "small" : ""} style={r.error ? { color: "var(--red)" } : undefined}>
                         {r.skipped || r.error || r.company}
                       </td>
@@ -1109,6 +1192,14 @@ function MonthlyPos({ sellers }) {
                         </>
                       )}
                     </tr>
+                    {openRow === i && r.orderList && (
+                      <tr>
+                        <td colSpan={7} style={{ background: "var(--bg)", padding: "8px 12px 12px 26px" }}>
+                          <PoOrders r={r} onExcluded={look} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                   <tr className="row-total">
                     <td colSpan={6}>Total</td>
