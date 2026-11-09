@@ -101,6 +101,8 @@ function startScheduler() {
   setInterval(() => require("./shopify/inventory").pushAll().catch((e) => console.error("Inventory sync failed:", e.message)), 30 * 60 * 1000).unref();
   setInterval(() => require("./shopify/ship").trackAll().catch((e) => console.error("Courier tracking failed:", e.message)), 2 * 60 * 60 * 1000).unref();
   setInterval(() => require("./shopify/sync").refreshAllDeliveries().catch((e) => console.error("Shopify delivery check failed:", e.message)), 2 * 60 * 60 * 1000).unref();
+  // Inbox & marketing: WhatsApp order updates, Gmail polling, campaigns, consent sync, retention.
+  require("./marketing/scheduler").start();
   // Encrypted off-site backup, nightly at 02:00 IST (only when the OCI_BACKUP_* / BACKUP_KEY settings exist).
   require("./backup").startSchedule();
   // Once shortly after start: orders delivered in Shopify but still "shipped" here catch up.

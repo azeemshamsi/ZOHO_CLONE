@@ -53,7 +53,7 @@ async function postJson(url, headers, body) {
   }
 }
 
-// Send one message with an account. msg: { to, cc, replyTo, subject, text, attachments:[{filename, content}] }
+// Send one message with an account. msg: { to, cc, replyTo, subject, text, html, headers, attachments:[{filename, content}] }
 async function deliver(acc, msg) {
   const to = list(msg.to);
   const cc = list(msg.cc);
@@ -66,6 +66,8 @@ async function deliver(acc, msg) {
       ...(msg.replyTo ? { replyTo: { email: msg.replyTo } } : {}),
       subject: msg.subject,
       textContent: msg.text,
+      ...(msg.html ? { htmlContent: msg.html } : {}),
+      ...(msg.headers ? { headers: msg.headers } : {}),
       ...(attachments.length ? { attachment: attachments.map((a) => ({ name: a.filename, content: b64(a.content) })) } : {}),
     });
   }
@@ -77,11 +79,13 @@ async function deliver(acc, msg) {
       ...(msg.replyTo ? { reply_to: msg.replyTo } : {}),
       subject: msg.subject,
       text: msg.text,
+      ...(msg.html ? { html: msg.html } : {}),
+      ...(msg.headers ? { headers: msg.headers } : {}),
       ...(attachments.length ? { attachments: attachments.map((a) => ({ filename: a.filename, content: b64(a.content) })) } : {}),
     });
   }
   const t = nodemailer.createTransport({ host: acc.host, port: acc.port, secure: acc.secure, auth: { user: acc.user, pass: acc.pass }, connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 30000 });
-  return t.sendMail({ from: `"${acc.name}" <${acc.email}>`, to, cc: cc.length ? cc : undefined, replyTo: msg.replyTo || undefined, subject: msg.subject, text: msg.text, attachments });
+  return t.sendMail({ from: `"${acc.name}" <${acc.email}>`, to, cc: cc.length ? cc : undefined, replyTo: msg.replyTo || undefined, subject: msg.subject, text: msg.text, html: msg.html || undefined, headers: msg.headers || undefined, attachments });
 }
 
 // Turn provider errors into something a user can act on.

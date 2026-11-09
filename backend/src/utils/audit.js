@@ -138,7 +138,7 @@ async function amazonAccess(req, action, target = "", meta = {}) {
 }
 
 /* ---------------- automatic trail ---------------- */
-const SETTINGS_PATHS = [/^\/api\/organization(\/|$)/, /^\/api\/amazon-orders\/account$/, /^\/api\/shopify\/(store|couriers|rules|locations)(\/|$)/, /^\/api\/gst\/(gsp|settings)(\/|$)/, /^\/api\/(branches|warehouses|currencies)(\/|$)/, /^\/api\/companies\/?$/, /^\/api\/superadmin(\/|$)/];
+const SETTINGS_PATHS = [/^\/api\/organization(\/|$)/, /^\/api\/amazon-orders\/account$/, /^\/api\/shopify\/(store|couriers|rules|locations)(\/|$)/, /^\/api\/gst\/(gsp|settings)(\/|$)/, /^\/api\/(branches|warehouses|currencies)(\/|$)/, /^\/api\/companies\/?$/, /^\/api\/superadmin(\/|$)/, /^\/api\/integrations(\/|$)/];
 const SECRET_KEY = /secret|token|pass(word)?$|^pass|api_?key|geminikey|credentials/i;
 // Names of the secret fields that were filled in (values never logged).
 function secretFields(body, prefix = "", out = []) {

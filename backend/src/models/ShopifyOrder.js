@@ -125,6 +125,9 @@ const shopifyOrderSchema = new mongoose.Schema(
     awbScannedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     awbScans: [{ _id: false, awb: String, courier: String, at: Date, by: mongoose.Schema.Types.ObjectId, byName: String }],
     returnFrom: String, // status before the return was opened (to go back to if it's declined)
+    // COD order confirmed / cancel requested by the buyer with the WhatsApp buttons (Marketing → Automations).
+    // A cancel request only flags the order for staff; it is never cancelled automatically.
+    codConfirm: { state: String, at: Date, via: String },
   },
   { timestamps: true }
 );
@@ -146,6 +149,26 @@ shopifyOrderSchema.pre("save", async function () {
     const ev = (this.shipment?.events || []).filter((e) => /deliver/i.test(e.status || "") && !/undeliver|not deliver/i.test(e.status || "") && e.at && !isNaN(e.at)).sort((a, b) => b.at - a.at)[0];
     // Best guess until Shopify's own delivery time is read (refreshDeliveries sets it and deliveredChecked).
     this.deliveredAt = ev?.at || (this.isModified("status") ? new Date() : this.statusChangedAt || new Date());
+  }
+});
+
+// Status changes → utils/marketing/orderEvents (WhatsApp order updates). Listeners run after the save, in the
+// background: they can never block or fail the change itself.
+shopifyOrderSchema.post("init", function () {
+  this.$locals.orig = { status: this.status, track: this.shipment?.trackStatus || "", awb: this.shipment?.awb || "" };
+});
+shopifyOrderSchema.pre("save", function () {
+  const o = this.$locals.orig || {};
+  this.$locals.change = { isNew: this.isNew, prevStatus: this.isNew ? "" : o.status || "", status: this.status, prevTrack: this.isNew ? "" : o.track || "", track: this.shipment?.trackStatus || "", awb: this.shipment?.awb || "" };
+});
+shopifyOrderSchema.post("save", function (doc) {
+  const ch = doc.$locals.change;
+  doc.$locals.orig = { status: doc.status, track: doc.shipment?.trackStatus || "", awb: doc.shipment?.awb || "" };
+  if (!ch || (!ch.isNew && ch.prevStatus === ch.status && ch.prevTrack === ch.track)) return;
+  try {
+    require("../utils/marketing/orderEvents").emitChange(doc, ch);
+  } catch (e) {
+    console.error(`[order events] ${e.message}`);
   }
 });
 

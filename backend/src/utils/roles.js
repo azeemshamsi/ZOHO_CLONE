@@ -16,6 +16,8 @@ const MODULES = [
   ["store_returns", "Store: Returns", "Mark returns and scan returned parcels"],
   ["store_settings", "Store: Settings", "Shopify connection, couriers, GST rules"],
   ["store_sellers", "Store: Sellers", "Marketplace sellers, their logins and pickups, deductions, monthly purchase orders"],
+  ["inbox", "Inbox", "Read and reply to WhatsApp, Instagram, Messenger, comments and email; see the customer's orders"],
+  ["marketing", "Marketing", "Integrations, WhatsApp order updates, campaigns, auto-replies, opt-outs"],
   ["settings", "Settings & Users", "Company settings, users, roles, currencies, branches"],
 ];
 const KEYS = MODULES.map((m) => m[0]);
@@ -23,14 +25,16 @@ const all = (level) => Object.fromEntries(KEYS.map((k) => [k, level]));
 
 const ROLES = {
   admin: { label: "Admin", desc: "Full access, including settings and users.", perms: all("full") },
-  accountant: { label: "Accountant", desc: "Everything except company settings and users.", perms: { ...all("full"), settings: "none", store_settings: "view", store_sellers: "view" } },
-  staff: { label: "Staff", desc: "Sales, purchases, items, inventory, GST documents and the store. Can view reports.", perms: { ...all("full"), banking: "none", accountant: "none", reports: "view", settings: "none", store_settings: "none", store_sellers: "none" } },
-  sales: { label: "Sales Staff", desc: "Customers, quotes, sales orders, invoices, payments and store orders.", perms: { ...all("none"), sales: "full", items: "view", store_orders: "full" } },
+  accountant: { label: "Accountant", desc: "Everything except company settings and users.", perms: { ...all("full"), settings: "none", store_settings: "view", store_sellers: "view", inbox: "none", marketing: "none" } },
+  staff: { label: "Staff", desc: "Sales, purchases, items, inventory, GST documents, the store and the Inbox. Can view reports.", perms: { ...all("full"), banking: "none", accountant: "none", reports: "view", settings: "none", store_settings: "none", store_sellers: "none", marketing: "none" } },
+  sales: { label: "Sales Staff", desc: "Customers, quotes, sales orders, invoices, payments, store orders and the Inbox.", perms: { ...all("none"), sales: "full", items: "view", store_orders: "full", inbox: "full" } },
+  support: { label: "Support", desc: "Only the Inbox: reads and replies to customers' messages and sees their orders there.", perms: { ...all("none"), inbox: "full" }, home: "/inbox" },
+  marketer: { label: "Marketing", desc: "Inbox and Marketing: campaigns, WhatsApp order updates, auto-replies and integrations.", perms: { ...all("none"), inbox: "full", marketing: "full" }, home: "/inbox" },
   warehouse: { label: "Warehouse", desc: "Store orders, shipping, returns and inventory. No accounts.", perms: { ...all("none"), items: "view", inventory: "full", store_orders: "full", store_shipping: "full", store_returns: "full" } },
   seller_manager: { label: "Seller Manager", desc: "Adds and manages marketplace sellers: their logins, pickup addresses, deductions and monthly purchase orders. Sees store orders.", perms: { ...all("none"), store_sellers: "full", store_orders: "view", items: "view" }, home: "/sellers" },
   returns: { label: "Returns Desk", desc: "Only scans and closes returned parcels.", perms: { ...all("none"), store_returns: "full" }, home: "/returns-scan" },
   seller: { label: "Seller", desc: "A marketplace seller: only their own orders, labels, stock and purchase orders (Store → Sellers).", perms: all("none"), home: "/seller", hidden: true },
-  viewer: { label: "View Only", desc: "Can see everything except settings, can't change anything.", perms: { ...all("view"), settings: "none", store_settings: "none" } },
+  viewer: { label: "View Only", desc: "Can see everything except settings, can't change anything.", perms: { ...all("view"), settings: "none", store_settings: "none", marketing: "none" } },
 };
 
 const permsOf = (role) => (ROLES[role] || ROLES.viewer).perms;

@@ -87,6 +87,7 @@ test("start-up pass encrypts plain values and moves derived-key values to CREDEN
   const mongoose = require("mongoose");
   require("../src/models/ShopifyStore");
   require("../src/models/User");
+  require("../src/models/Integration");
   S.resetKeys();
   const derivedValue = S.encrypt("old-derived");
   const rows = {
@@ -96,6 +97,7 @@ test("start-up pass encrypts plain values and moves derived-key values to CREDEN
     GspAccount: [],
     Organization: [{ _id: 3, smtp: { pass: "", apiKey: "xk" }, ai: {} }],
     User: [{ _id: 4, totp: { secret: "", pendingSecret: "" } }],
+    Integration: [],
   };
   const updates = [];
   for (const name of Object.keys(rows)) {

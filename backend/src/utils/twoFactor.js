@@ -1,8 +1,9 @@
 /**
  * Who must use two-step login: the superadmin, company admins, and anyone whose role can open store orders or
- * shipping (Amazon / Shopify buyer data).
+ * shipping (Amazon / Shopify buyer data), or the Inbox / Marketing.
  */
-const STORE = ["store_orders", "store_shipping"];
+// Inbox and Marketing show buyers' messages, phones and orders too.
+const STORE = ["store_orders", "store_shipping", "inbox", "marketing"];
 
 // For one company: the membership and its resolved permissions.
 const requiredIn = (user, role, perms = {}) => !!user?.superadmin || role === "admin" || STORE.some((k) => (perms[k] || "none") !== "none");

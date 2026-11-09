@@ -49,6 +49,9 @@ app.use((req, res, next) => {
   next();
 });
 app.use("/api/shopify-webhook", express.raw({ type: "*/*", limit: "5mb" }), require("./routes/shopifyWebhook"));
+// Meta (WhatsApp / Messenger / Instagram / Page comments) webhooks: the raw body is needed for the signature check.
+app.use("/api/webhooks/meta", express.raw({ type: "*/*", limit: "5mb" }), require("./routes/metaWebhook"));
+app.use("/api/inbox/conversations", express.json({ limit: "25mb" }));
 app.use("/api/import", express.json({ limit: "80mb" }));
 app.use(["/api/attachments", "/api/bill-scan", "/api/gst/returns/2b", "/api/seller-portal"], express.json({ limit: "15mb" }));
 app.use("/api/amazon", express.json({ limit: "60mb" }));
@@ -57,6 +60,13 @@ app.use(express.json({ limit: "1mb" }));
 app.get("/api/health", (req, res) => res.send({ ok: true }));
 app.use("/api", require("./utils/audit").trail);
 app.use("/api/auth", require("./routes/auth"));
+// Public: Google OAuth redirect, email unsubscribe pages, signed media links for Meta.
+app.use("/api/integrations", require("./routes/integrations").publicRouter);
+app.use("/api/unsubscribe", express.urlencoded({ extended: false, limit: "10kb" }));
+app.use("/api", require("./routes/publicMarketing"));
+app.use("/api/integrations", auth, permit("marketing"), require("./routes/integrations"));
+app.use("/api/inbox", auth, permit("inbox"), require("./routes/inbox"));
+app.use("/api/marketing", auth, permit((req) => require("./routes/marketing").moduleOf(req)), require("./routes/marketing"));
 app.use("/api/organization", auth, permit("settings", { readAll: true }), require("./routes/organization"));
 app.use("/api/customers", auth, permit("sales"), require("./routes/customers"));
 app.use("/api/items", auth, permit("items", { readAll: true }), require("./routes/items"));
