@@ -19,7 +19,7 @@ const P = require("./pepperfry");
 // Marketplaces whose monthly tax reports this import posts (same documents, ledgers and party logic).
 const SRC = {
   amazon: { key: "amazon", label: "Amazon", b2c: "Amazon B2C", ledger: "Amazon Sales", party: /^amazon[\s_-]*sre$/i, report: "Amazon's Merchant Tax Report" },
-  pepperfry: { key: "pepperfry", label: "Pepperfry", b2c: "Pepperfry B2C", ledger: "Pepperfry Sales", party: /^pepperfry[\s_-]*sre$/i, report: "Pepperfry's GSTR-1 report" },
+  pepperfry: { key: "pepperfry", label: "Pepperfry", b2c: "Pepperfry B2C", ledger: "Pepperfry Sales", party: /^pepperfry([\s_-]*sre)?$/i, report: "Pepperfry's GSTR-1 report" },
   flipkart: { key: "flipkart", label: "Flipkart", b2c: "Flipkart B2C", ledger: "Flipkart Sales", party: /^flipkart[\s_-]*sre$/i, report: "Flipkart's Sales Report" },
 };
 const srcOf = (k) => SRC[k] || SRC.amazon;

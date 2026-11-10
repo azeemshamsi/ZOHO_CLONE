@@ -462,7 +462,7 @@ function ImportBox({ S, onImported }) {
           <strong>GSTR-1 report</strong> for the month and the{" "}
           <strong>TCS report</strong> (to check against and for TCS). Upload the
           zips as they are. Each Pepperfry order becomes an invoice with
-          Pepperfry's order number (B2C to "Pepperfry SRE" or "Pepperfry B2C",
+          Pepperfry's order number (B2C to your "Pepperfry" party or "Pepperfry B2C",
           B2B to the buyer); each return a credit note "PFCN" + order number,
           dated on the return date. Importing the same month again only adds
           what's new.
