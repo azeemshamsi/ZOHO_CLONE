@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import Icon from "./Icon";
 
@@ -171,13 +171,33 @@ export function Confirm({ open, title, text, confirmLabel = "Delete", onConfirm,
   );
 }
 
+// Close a dropdown on a click/tap outside it or on Esc (not when the mouse merely moves away).
+export function useClickAway(open, close) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const down = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) close();
+    };
+    const key = (e) => e.key === "Escape" && close();
+    document.addEventListener("pointerdown", down);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("pointerdown", down);
+      document.removeEventListener("keydown", key);
+    };
+  }, [open]);
+  return ref;
+}
+
 /* "More" button with a small dropdown of actions: items = [{ label, onClick, danger }] */
 export function MoreMenu({ items }) {
   const [open, setOpen] = useState(false);
+  const ref = useClickAway(open, () => setOpen(false));
   const shown = items.filter(Boolean);
   if (!shown.length) return null;
   return (
-    <div className="menu-wrap" onMouseLeave={() => setOpen(false)}>
+    <div className="menu-wrap" ref={ref}>
       <button className="btn" onClick={() => setOpen(!open)}>
         More <Icon name="down" size={14} />
       </button>

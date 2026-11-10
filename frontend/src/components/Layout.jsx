@@ -5,6 +5,7 @@ import Logo from "./Logo";
 import Icon from "./Icon";
 import { useAuth } from "../lib/auth";
 import TallyKeys from "./TallyKeys";
+import { useClickAway } from "./ui";
 import DeviceGate from "./DeviceGate";
 
 const NAV = [
@@ -229,6 +230,7 @@ export default function Layout() {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useClickAway(profileOpen, () => setProfileOpen(false));
   const close = () => setMenuOpen(false);
   const location = useLocation();
   const mod = location.pathname === "/" ? HOME_MODS : moduleOf(location.pathname);
@@ -311,12 +313,12 @@ export default function Layout() {
                 <Icon name="plus" size={16} /> <span className="hide-sm">New Invoice</span>
               </button>
             )}
-            <div className="profile">
+            <div className="profile" ref={profileRef}>
               <button className="avatar" onClick={() => setProfileOpen(!profileOpen)} aria-label="Account">
                 {(user?.name || "?").slice(0, 1).toUpperCase()}
               </button>
               {profileOpen && (
-                <div className="profile-menu" onMouseLeave={() => setProfileOpen(false)}>
+                <div className="profile-menu">
                   <div className="profile-head">
                     <strong>{user?.name}</strong>
                     <span className="muted">{user?.email}</span>

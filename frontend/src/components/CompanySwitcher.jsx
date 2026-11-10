@@ -2,13 +2,14 @@ import { useState } from "react";
 import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { STATES } from "../lib/constants";
-import { Modal, Field, toast } from "./ui";
+import { Modal, Field, toast, useClickAway } from "./ui";
 import Icon from "./Icon";
 
 // Top bar: current company, with a menu to switch to (or add) another company.
 export default function CompanySwitcher() {
   const { organization, organizations, switchCompany } = useAuth();
   const [open, setOpen] = useState(false);
+  const away = useClickAway(open, () => setOpen(false));
   const [adding, setAdding] = useState(false);
   const [f, setF] = useState({ name: "", state: organization?.state || "", gstin: "" });
   const [busy, setBusy] = useState(false);
@@ -24,13 +25,13 @@ export default function CompanySwitcher() {
     }
   };
   return (
-    <div className="company-switch">
+    <div className="company-switch" ref={away}>
       <button className="company-btn" onClick={() => setOpen(!open)}>
         <span className="company-name">{organization?.name}</span>
         <Icon name="down" size={14} />
       </button>
       {open && (
-        <div className="company-menu" onMouseLeave={() => setOpen(false)}>
+        <div className="company-menu">
           <div className="label-sm" style={{ padding: "8px 12px 4px" }}>
             Your companies
           </div>
