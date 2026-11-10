@@ -105,6 +105,15 @@ function marketplaceRouter(source, reconcile) {
     }),
   );
 
+  // Undo one month's import (e.g. to import it again with other numbers).
+  router.post(
+    "/remove-month",
+    ah(async (req, res) => {
+      const d = validate(Joi.object({ month: Joi.string().pattern(/^\d{4}-\d{2}$/).required() }), req.body);
+      res.send(await AI.removeMonth({ org: req.org, user: req.user }, source, d.month, req));
+    }),
+  );
+
   return router;
 }
 

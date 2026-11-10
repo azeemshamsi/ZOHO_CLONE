@@ -690,6 +690,35 @@ async function reconcile(org, month, files) {
   };
 }
 
+/* ---------------- remove a month's import ---------------- */
+// Deletes the invoices and credit notes one month's marketplace import created (credit notes first), through the
+// normal delete, so stock and ledgers are reversed. Documents with payments, applied credits or an IRN stay (listed).
+async function removeMonth(ctx, source, month, req) {
+  const { call } = require("./commit");
+  const o = await Organization.findById(ctx.org);
+  const gstin = String(o.gstin || "").toUpperCase();
+  const { invoices, creditNotes } = await imported(ctx.org, gstin, month, source);
+  const out = { invoices: 0, creditNotes: 0, kept: [] };
+  for (const c of creditNotes) {
+    try {
+      await call(require("../../routes/creditNotes"), "DELETE", `/${c._id}`, ctx);
+      out.creditNotes++;
+    } catch (e) {
+      out.kept.push({ number: c.number, message: e.message });
+    }
+  }
+  for (const i of invoices) {
+    try {
+      await call(require("../../routes/invoices"), "DELETE", `/${i._id}`, ctx);
+      out.invoices++;
+    } catch (e) {
+      out.kept.push({ number: i.invoiceNumber, message: e.message });
+    }
+  }
+  if (req) await require("../audit").log(req, "marketplace_import_removed", { target: `${source} ${month}`, meta: { invoices: out.invoices, creditNotes: out.creditNotes, kept: out.kept.length } });
+  return out;
+}
+
 /* ---------------- check against Pepperfry's TCS summary ---------------- */
 async function reconcilePepperfry(org, month, files) {
   const o = await Organization.findById(org);
@@ -807,4 +836,4 @@ async function months(org, source = "amazon") {
   return { gstin: o?.gstin || "", months: [...by.values()].sort((a, b) => b.month.localeCompare(a.month)) };
 }
 
-module.exports = { reconcilePepperfry, reconcileFlipkart, b2bOnParty, moveB2b, preview, startImport, jobOf, reconcile, months, monthOfName, salesLedger, skuMatcher, ledgerName, keyFor, norm };
+module.exports = { removeMonth, reconcilePepperfry, reconcileFlipkart, b2bOnParty, moveB2b, preview, startImport, jobOf, reconcile, months, monthOfName, salesLedger, skuMatcher, ledgerName, keyFor, norm };

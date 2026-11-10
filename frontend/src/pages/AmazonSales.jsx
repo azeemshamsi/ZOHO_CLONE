@@ -147,6 +147,22 @@ function MarketplaceSales({ S }) {
                       }}
                     >
                       <CheckButton S={S} month={m.month} onResult={setCheck} />
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        title={`Delete the invoices and credit notes this ${S.label} import created for the month`}
+                        onClick={async () => {
+                          if (!window.confirm(`Remove the ${S.label} import of ${monthLabel(m.month)}?\n\n${m.invoices} invoices and ${m.creditNotes} credit notes it created will be deleted (stock and ledgers reversed). Documents with a payment or an IRN are kept. You can import the month again afterwards.`)) return;
+                          try {
+                            const { data } = await api.post(`${S.api}/remove-month`, { month: m.month });
+                            toast(`Removed ${data.invoices} invoices and ${data.creditNotes} credit notes${data.kept.length ? ` · ${data.kept.length} kept: ${data.kept.slice(0, 3).map((k) => `${k.number} (${k.message})`).join("; ")}` : ""}`, data.kept.length ? "error" : undefined);
+                            loadMonths();
+                          } catch (e) {
+                            toast(errMsg(e), "error");
+                          }
+                        }}
+                      >
+                        Remove import
+                      </button>
                       {m.b2b > 0 && S.key === "amazon" && (
                         <button
                           className="btn btn-sm"

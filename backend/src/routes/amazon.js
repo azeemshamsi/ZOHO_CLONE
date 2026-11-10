@@ -80,4 +80,13 @@ router.post(
   })
 );
 
+// Undo one month's Amazon import.
+router.post(
+  "/remove-month",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ month: Joi.string().pattern(/^\d{4}-\d{2}$/).required() }), req.body);
+    res.send(await AI.removeMonth({ org: req.org, user: req.user }, "amazon", d.month, req));
+  })
+);
+
 module.exports = router;
