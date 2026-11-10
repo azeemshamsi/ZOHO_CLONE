@@ -112,6 +112,8 @@ router.delete(
     const po = await findPO(req);
     if (po.bill) throw new HttpError(400, `Delete bill ${po.billNumber} first`);
     await po.deleteOne();
+    // Seller orders and deductions on it are due again on the next PO.
+    await require("../utils/sellers").releasePo(po._id);
     res.send({ message: "Purchase order deleted" });
   })
 );

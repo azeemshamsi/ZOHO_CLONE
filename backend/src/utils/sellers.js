@@ -308,6 +308,7 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
   const { computeTotals } = require("./gst");
   const { to, label } = monthRange(month);
   const ripe = new Date(Date.now() - HOLD_DAYS * 86400000); // delivered on or before this
+  await releaseDeletedPos(storeOrg).catch((e) => console.error(`[sellers] release deleted POs: ${e.message}`));
   const sellers = (await Seller.find({ organization: storeOrg, ...(sellerId ? { _id: sellerId } : { active: true }) })).filter((x) => !createdBefore || x.createdAt < createdBefore);
   const results = [];
   for (const seller of sellers) {
@@ -476,6 +477,34 @@ async function orderForPo(orgId, vendorId, q) {
   return { seller: { id: seller._id, name: seller.name, rate: seller.rate }, order: { id: order._id, name: order.name, status: order.status, deliveredAt: d }, amount: r2(lines.reduce((t, l) => t + linePurchase(seller, l, costs), 0)), lineItems, warnings };
 }
 
+// A purchase order was deleted: its orders go back to "due on the next PO" and its deductions are due again.
+async function releasePo(poId) {
+  const ShopifyOrder = require("../models/ShopifyOrder");
+  const SellerPenalty = require("../models/SellerPenalty");
+  let n = 0;
+  for (const o of await ShopifyOrder.find({ "sellerSettled.purchaseOrder": poId }, { sellerSettled: 1 }).lean()) {
+    await ShopifyOrder.updateOne({ _id: o._id }, { $set: { sellerSettled: o.sellerSettled.filter((x) => String(x.purchaseOrder || "") !== String(poId)) } });
+    n++;
+  }
+  await SellerPenalty.updateMany({ purchaseOrder: poId }, { $unset: { purchaseOrder: 1, purchaseOrderNumber: 1, purchaseOrderOrg: 1 } });
+  return n;
+}
+
+// Orders still marked as on purchase orders that no longer exist (deleted before releasePo existed): release them.
+async function releaseDeletedPos(storeOrg) {
+  const ShopifyOrder = require("../models/ShopifyOrder");
+  const SellerPenalty = require("../models/SellerPenalty");
+  const PurchaseOrder = require("../models/PurchaseOrder");
+  const rows = await ShopifyOrder.find({ organization: storeOrg, "sellerSettled.purchaseOrder": { $exists: true } }, { sellerSettled: 1 }).lean();
+  const pen = await SellerPenalty.find({ organization: storeOrg, purchaseOrder: { $exists: true } }, { purchaseOrder: 1 }).lean();
+  const ids = [...new Set([...rows.flatMap((o) => o.sellerSettled.map((x) => x.purchaseOrder)), ...pen.map((p) => p.purchaseOrder)].filter(Boolean).map(String))];
+  if (!ids.length) return 0;
+  const live = new Set((await PurchaseOrder.find({ _id: { $in: ids } }, { _id: 1 }).lean()).map((p) => String(p._id)));
+  let n = 0;
+  for (const id of ids.filter((x) => !live.has(x))) n += await releasePo(id);
+  return n;
+}
+
 // After saving a PO with hand-added seller orders: mark them as on this PO so the monthly run skips them.
 async function settleOnPo(po, orgId, entries) {
   const ShopifyOrder = require("../models/ShopifyOrder");
@@ -537,4 +566,4 @@ async function pendingOrders(seller, month) {
     .sort((a, b) => new Date(a.deliveredAt) - new Date(b.deliveredAt));
 }
 
-module.exports = { orderForPo, settleOnPo, pendingOrders, HOLD_DAYS, norm, brandMap, clearCache, sellerOfLine, sellersOfLines, assignAll, pickupFor, withPickup, pickupProblems, registerPickup, sellerProducts, setSellerStock, runMonthly, monthlyTick, monthRange, prevMonth, linePurchase, unitPurchase, priceNote, costsFor, lineValue, deliveredOn };
+module.exports = { releasePo, releaseDeletedPos, orderForPo, settleOnPo, pendingOrders, HOLD_DAYS, norm, brandMap, clearCache, sellerOfLine, sellersOfLines, assignAll, pickupFor, withPickup, pickupProblems, registerPickup, sellerProducts, setSellerStock, runMonthly, monthlyTick, monthRange, prevMonth, linePurchase, unitPurchase, priceNote, costsFor, lineValue, deliveredOn };

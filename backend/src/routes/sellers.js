@@ -169,6 +169,7 @@ router.delete(
   ah(async (req, res) => {
     const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
     if (!s) throw new HttpError(404, "Seller not found");
+    await S.releaseDeletedPos(req.storeOrg);
     const withPo = (await ShopifyOrder.find({ organization: req.storeOrg, "sellerSettled.seller": s._id }, { sellerSettled: 1 }).lean()).some((o) => o.sellerSettled.some((x) => String(x.seller) === String(s._id) && x.purchaseOrder));
     if (withPo) throw new HttpError(400, "This seller has purchase orders. Mark them inactive instead.");
     await Membership.deleteMany({ organization: req.storeOrg, seller: s._id, role: "seller" });
@@ -186,6 +187,7 @@ router.get(
     const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
     if (!s) throw new HttpError(404, "Seller not found");
     const month = /^\d{4}-\d{2}$/.test(req.query.month || "") ? req.query.month : S.prevMonth();
+    await S.releaseDeletedPos(req.storeOrg);
     const rows = await S.pendingOrders(s, month);
     const excluded = (await ShopifyOrder.find({ organization: req.storeOrg, "sellerSettled.seller": s._id }, { name: 1, orderDate: 1, deliveredAt: 1, sellerSettled: 1 }).lean())
       .map((o) => ({ o, x: o.sellerSettled.find((y) => String(y.seller) === String(s._id) && y.excluded) }))
