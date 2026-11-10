@@ -531,6 +531,35 @@ router.put(
   })
 );
 
+// B2B: the buyer's GSTIN (blank = back to B2C). Not invoiced yet → the invoice goes to the registered customer.
+// Already invoiced → the invoice is moved to that customer (GSTR-1 moves it from B2C to B2B, or back).
+router.put(
+  "/orders/:id/b2b",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ gstin: Joi.string().trim().uppercase().allow(""), name: Joi.string().trim().max(200).allow("") }), req.body);
+    const { gstinOk, customerFor } = require("../utils/shopify/invoice");
+    if (d.gstin && !gstinOk(d.gstin)) throw new HttpError(400, `${d.gstin} isn't a valid GSTIN (check the 15 characters)`);
+    if (d.gstin && !d.name) throw new HttpError(400, "Enter the buyer's registered business name");
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
+    if (!o) throw new HttpError(404, "Order not found");
+    o.b2b = d.gstin ? { gstin: d.gstin, name: d.name, at: new Date(), by: req.user._id } : undefined;
+    let moved = null;
+    if (o.invoice) {
+      const invOrg = o.invoiceOrg || req.storeOrg;
+      const Organization = require("../models/Organization");
+      const org = await Organization.findById(invOrg);
+      const c = await customerFor(invOrg, o, org);
+      try {
+        moved = await require("../utils/cashSale").changeCustomer({ org: invOrg, user: req.user }, o.invoice, c._id);
+      } catch (e) {
+        throw new HttpError(400, `GSTIN not saved: invoice ${o.invoiceNumber} couldn't be moved to ${c.displayName} — ${e.message}`);
+      }
+    }
+    await o.save();
+    res.send({ ok: true, b2b: o.b2b || null, invoiceNumber: o.invoiceNumber || "", movedTo: moved ? moved.invoice.customerName : "" });
+  })
+);
+
 // Labels: the courier's own label when there is one (single order), otherwise OrdexaGo's 4x6 label (any number of orders).
 router.get(
   "/orders/:id/label",

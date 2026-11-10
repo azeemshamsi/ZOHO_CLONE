@@ -120,6 +120,8 @@ const shopifyOrderSchema = new mongoose.Schema(
     invoiceOrg: { type: mongoose.Schema.Types.ObjectId, ref: "Organization" }, // the company the invoice is in
     invoiceError: String,
     remarks: String,
+    // B2B: the buyer's GSTIN and registered name, entered on the order; its invoice goes to that registered customer.
+    b2b: { gstin: String, name: String, at: Date, by: { type: mongoose.Schema.Types.ObjectId, ref: "User" } },
     // AWB scanned by us before handing the parcel to the courier (internal record): latest scan + every scan.
     awbScannedAt: Date,
     awbScannedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },

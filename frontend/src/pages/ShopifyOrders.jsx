@@ -631,6 +631,64 @@ function EasyShipModal({ order, onClose, onDone }) {
   );
 }
 
+// B2B invoice: the buyer's GSTIN and registered name. Already invoiced → the invoice moves to that customer.
+function B2bBox({ o, onSaved }) {
+  const [edit, setEdit] = useState(false);
+  const [gstin, setGstin] = useState(o.b2b?.gstin || "");
+  const [name, setName] = useState(o.b2b?.name || o.billingAddress?.company || o.shippingAddress?.company || "");
+  const [busy, setBusy] = useState(false);
+  const save = async (clear) => {
+    const g = clear ? "" : gstin.trim().toUpperCase();
+    if (o.invoice && !window.confirm(g ? `Invoice ${o.invoiceNumber} will be moved to ${name || g} (GSTIN ${g}). In GSTR-1 it moves from B2C to B2B. Continue?` : `Invoice ${o.invoiceNumber} will go back to the B2C (consumer) customer. Continue?`)) return;
+    setBusy(true);
+    try {
+      const { data } = await api.put(`/shopify/orders/${o._id}/b2b`, { gstin: g, name: clear ? "" : name.trim() });
+      toast(data.movedTo ? `Invoice ${data.invoiceNumber} moved to ${data.movedTo}` : g ? "GSTIN saved — the invoice will be B2B" : "Back to B2C");
+      setEdit(false);
+      onSaved();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  if (!edit)
+    return (
+      <div className="small" style={{ marginTop: 6 }}>
+        {o.b2b?.gstin ? (
+          <>
+            <span className="badge">B2B</span> {o.b2b.name} · GSTIN {o.b2b.gstin}{" "}
+            <button type="button" className="link-btn" onClick={() => setEdit(true)}>
+              Change
+            </button>
+          </>
+        ) : (
+          <button type="button" className="link-btn" onClick={() => setEdit(true)}>
+            + Add customer GSTIN (B2B invoice)
+          </button>
+        )}
+      </div>
+    );
+  return (
+    <div className="card pad" style={{ marginTop: 8, display: "grid", gap: 6 }}>
+      <input placeholder="Customer GSTIN, e.g. 09ABCDE1234F1Z5" value={gstin} maxLength={15} onChange={(e) => setGstin(e.target.value.toUpperCase())} autoFocus />
+      <input placeholder="Registered business name" value={name} onChange={(e) => setName(e.target.value)} />
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <button type="button" className="btn btn-primary btn-sm" disabled={busy || gstin.trim().length !== 15 || !name.trim()} onClick={() => save(false)}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+        {o.b2b?.gstin && (
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => save(true)}>
+            Remove GSTIN (B2C)
+          </button>
+        )}
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setEdit(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
   const [o, setO] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -762,6 +820,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
         <div>
           <div className="label-sm">Invoice</div>
           {o.invoice ? <Link to={`/invoices/${o.invoice}`}>{o.invoiceNumber}</Link> : <span className="muted">Not invoiced{o.invoiceError ? ` — ${o.invoiceError}` : ""}</span>}
+          <B2bBox o={o} onSaved={() => (load(), onChanged())} />
           <div className="label-sm" style={{ marginTop: 10 }}>
             Shipment
           </div>

@@ -14,7 +14,48 @@ const r4 = (n) => Math.round((Number(n) + Number.EPSILON) * 10000) / 10000;
 const digits = (p) => String(p || "").replace(/\D/g, "").slice(-10);
 const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// GSTIN check digit (GSTN's mod-36 checksum).
+function gstinOk(g) {
+  const s = String(g || "").toUpperCase();
+  if (!/^[0-9]{2}[A-Z0-9]{10}[0-9A-Z]Z[0-9A-Z]$/.test(s)) return false;
+  const cs = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  let sum = 0;
+  for (let i = 0; i < 14; i++) {
+    const p = cs.indexOf(s[i]) * (i % 2 ? 2 : 1);
+    sum += Math.floor(p / 36) + (p % 36);
+  }
+  return cs[(36 - (sum % 36)) % 36] === s[14];
+}
+
+// The registered (B2B) customer for an order with a GSTIN: found by GSTIN, else created.
+async function b2bCustomer(orgId, order) {
+  const gstin = order.b2b.gstin.toUpperCase();
+  const ship = order.shippingAddress || {};
+  const bill = order.billingAddress?.address1 ? order.billingAddress : ship;
+  const addrOf = (a) => ({ street: [a.address1, a.address2].filter(Boolean).join(", "), city: a.city || "", state: a.state || "", pincode: a.zip || "", country: a.country || "India" });
+  const found = (await Customer.find({ organization: orgId, gstin }).lean())[0];
+  if (found) return Customer.findById(found._id);
+  let name = (order.b2b.name || bill.company || ship.company || order.customer?.name || gstin).trim();
+  if (await Customer.exists({ organization: orgId, displayName: name })) name = `${name} (${gstin})`;
+  return Customer.create({
+    organization: orgId,
+    customerType: "business",
+    displayName: name,
+    companyName: order.b2b.name || name,
+    email: (order.customer?.email || "").toLowerCase(),
+    phone: digits(order.customer?.phone || ship.phone) || "",
+    gstTreatment: "registered",
+    gstin,
+    placeOfSupply: gstin.slice(0, 2),
+    billingAddress: addrOf(bill),
+    shippingAddress: addrOf(ship),
+    paymentTerms: 0,
+    notes: "Created from Shopify (B2B)",
+  });
+}
+
 async function customerFor(orgId, order, org) {
+  if (order.b2b?.gstin) return b2bCustomer(orgId, order);
   const ship = order.shippingAddress || {};
   const bill = order.billingAddress?.address1 ? order.billingAddress : ship;
   const phone = digits(order.customer?.phone || ship.phone);
@@ -132,5 +173,5 @@ async function ensureItems(orgId, order, store, cache) {
   return n;
 }
 
-module.exports = { invoiceOrder, customerFor, ensureItems };
+module.exports = { invoiceOrder, customerFor, ensureItems, gstinOk };
 void Invoice;
