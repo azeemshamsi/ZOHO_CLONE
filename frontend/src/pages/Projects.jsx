@@ -8,6 +8,7 @@ import { PERIODS, periodRange } from "../lib/period";
 import { PageHeader, Spinner, Empty, Field, Modal, Confirm, toast } from "../components/ui";
 import Icon from "../components/Icon";
 import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
+import { useBack } from "../lib/backNav";
 
 const METHODS = [
   ["project_hours", "Based on Project Hours", "One hourly rate for the whole project"],
@@ -26,6 +27,7 @@ export function ProjectList() {
   const [rows, setRows] = useState(null);
   const [status, setStatus] = useState("active");
   const navigate = useNavigate();
+  const goBack = useBack();
   useEffect(() => {
     setRows(null);
     api.get("/projects", { params: { status: status || undefined } }).then((r) => setRows(r.data));
@@ -96,6 +98,7 @@ export function ProjectForm() {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const [customers, setCustomers] = useState([]);
   const [users, setUsers] = useState([]);
   const [form, setForm] = useState(null);
@@ -330,7 +333,7 @@ export function ProjectForm() {
           <button className="btn btn-primary" disabled={busy}>
             Save
           </button>
-          <button type="button" className="btn" onClick={() => navigate(-1)}>
+          <button type="button" className="btn" onClick={goBack}>
             Cancel
           </button>
         </div>
@@ -342,6 +345,7 @@ export function ProjectForm() {
 export function ProjectView() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const [p, setP] = useState(null);
   const [entries, setEntries] = useState([]);
   const [logOpen, setLogOpen] = useState(false);
@@ -473,6 +477,7 @@ export function ProjectView() {
 
 function InvoiceProjectModal({ project: p, onClose }) {
   const navigate = useNavigate();
+  const goBack = useBack();
   const [rows, setRows] = useState(null);
   const [picked, setPicked] = useState(new Set());
   const [groupBy, setGroupBy] = useState("task");

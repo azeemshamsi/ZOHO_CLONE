@@ -8,10 +8,12 @@ import Icon from "../components/Icon";
 import { useLocations } from "../lib/locations";
 import NameCustomer from "../components/NameCustomer";
 import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
+import { useBack } from "../lib/backNav";
 
 export function JournalList() {
   const [rows, setRows] = useState(null);
   const navigate = useNavigate();
+  const goBack = useBack();
   useEffect(() => {
     api.get("/journals").then((r) => setRows(r.data));
   }, []);
@@ -72,6 +74,7 @@ export function JournalForm() {
   const { branches } = useLocations();
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const [accounts, setAccounts] = useState([]);
   const [parties, setParties] = useState({ customers: [], vendors: [] });
   const [form, setForm] = useState(null);
@@ -252,7 +255,7 @@ export function JournalForm() {
           <button className="btn btn-primary" disabled={busy || diff !== 0 || dr === 0}>
             Save
           </button>
-          <button type="button" className="btn" onClick={() => navigate(-1)}>
+          <button type="button" className="btn" onClick={goBack}>
             Cancel
           </button>
         </div>
@@ -264,6 +267,7 @@ export function JournalForm() {
 export function JournalView() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const [j, setJ] = useState(null);
   const [confirm, setConfirm] = useState(false);
   const [sale, setSale] = useState(null); // cash sale from Tally that can be given a customer

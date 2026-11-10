@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Modal, toast } from "./ui";
 import api from "../lib/api";
+import { useBack, markJump } from "../lib/backNav";
 
 /**
  * Tally keyboard shortcuts across OrdexaGo.
@@ -95,9 +96,16 @@ export default function TallyKeys({ nav = [] }) {
   const [help, setHelp] = useState(false);
   const locRef = useRef(loc);
   locRef.current = loc;
+  const backFn = useBack();
+  const backRef = useRef(backFn);
+  backRef.current = backFn;
+  const back = () => backRef.current();
 
   useEffect(() => {
-    const go = (to) => navigate(to);
+    const go = (to) => {
+      markJump();
+      navigate(to);
+    };
     const onKey = (e) => {
       if (e.defaultPrevented) return;
       const key = e.key;
@@ -120,8 +128,7 @@ export default function TallyKeys({ nav = [] }) {
         if (path === "/") return;
         if (/\/(new|edit)$/.test(path) && !window.confirm("Quit without saving?")) return;
         e.preventDefault();
-        if (window.history.length > 1) navigate(-1);
-        else navigate("/");
+        back();
         return;
       }
 

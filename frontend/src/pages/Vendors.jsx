@@ -6,6 +6,7 @@ import { money, date } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Status, Confirm } from "../components/ui";
 import { AddressFields, fmtAddress } from "./Customers";
 import Icon from "../components/Icon";
+import { useBack } from "../lib/backNav";
 
 const emptyAddress = { street: "", city: "", state: "", pincode: "", country: "India" };
 
@@ -15,6 +16,7 @@ export function VendorList() {
   const [status, setStatus] = useState("active");
   const dq = useDebounced(q);
   const navigate = useNavigate();
+  const goBack = useBack();
 
   useEffect(() => {
     api.get("/vendors", { params: { q: dq, status } }).then((r) => setRows(r.data));
@@ -85,6 +87,7 @@ export function VendorForm() {
   }, []);
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const [form, setForm] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -264,7 +267,7 @@ export function VendorForm() {
           <button className="btn btn-primary" disabled={busy}>
             Save
           </button>
-          <button type="button" className="btn" onClick={() => navigate(-1)}>
+          <button type="button" className="btn" onClick={goBack}>
             Cancel
           </button>
         </div>
@@ -276,6 +279,7 @@ export function VendorForm() {
 export function VendorDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const [v, setV] = useState(null);
   const [tab, setTab] = useState("overview");
   const [confirm, setConfirm] = useState(false);

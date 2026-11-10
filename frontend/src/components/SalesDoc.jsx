@@ -11,6 +11,7 @@ import Icon from "./Icon";
 import { useLocations } from "../lib/locations";
 import { QrImage } from "./GstPanel";
 import SearchSelect, { partyOptions, itemOptions } from "./SearchSelect";
+import { useBack } from "../lib/backNav";
 
 /* ======================= List ======================= */
 export function DocList({ kind, filters, columns, emptyText, summary, headerExtra }) {
@@ -19,6 +20,7 @@ export function DocList({ kind, filters, columns, emptyText, summary, headerExtr
   const [status, setStatus] = useState("all");
   const dq = useDebounced(q);
   const navigate = useNavigate();
+  const goBack = useBack();
 
   useEffect(() => {
     setRows(null);
@@ -176,6 +178,7 @@ export function DocForm({ kind, recurring = false }) {
   const { id } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const { organization } = useAuth();
   const [customers, setCustomers] = useState([]);
   const [items, setItems] = useState([]);
@@ -941,7 +944,7 @@ export function DocForm({ kind, recurring = false }) {
               Save
             </button>
           )}
-          <button type="button" className="btn btn-ghost" onClick={() => navigate(-1)}>
+          <button type="button" className="btn btn-ghost" onClick={goBack}>
             Cancel
           </button>
         </div>

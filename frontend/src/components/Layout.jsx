@@ -6,6 +6,7 @@ import Icon from "./Icon";
 import { useAuth } from "../lib/auth";
 import TallyKeys from "./TallyKeys";
 import { useClickAway } from "./ui";
+import { BackMemory, markJump } from "../lib/backNav";
 import DeviceGate from "./DeviceGate";
 
 const NAV = [
@@ -231,7 +232,11 @@ export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useClickAway(profileOpen, () => setProfileOpen(false));
-  const close = () => setMenuOpen(false);
+  // Sidebar links are jumps (Back from the page they open goes up its own hierarchy).
+  const close = () => {
+    markJump();
+    setMenuOpen(false);
+  };
   const location = useLocation();
   const mod = location.pathname === "/" ? HOME_MODS : moduleOf(location.pathname);
   const isSuper = SUPER_PATHS.some((p) => location.pathname.startsWith(p));
@@ -309,7 +314,7 @@ export default function Layout() {
           <CompanySwitcher />
           <div className="topbar-right">
             {can(user, "sales.invoices", "full") && (
-              <button className="btn btn-primary btn-sm keep" onClick={() => navigate("/invoices/new")}>
+              <button className="btn btn-primary btn-sm keep" onClick={() => (markJump(), navigate("/invoices/new"))}>
                 <Icon name="plus" size={16} /> <span className="hide-sm">New Invoice</span>
               </button>
             )}
@@ -353,6 +358,7 @@ export default function Layout() {
           </div>
         </header>
         <TallyKeys nav={nav} />
+        <BackMemory />
         <DeviceGate />
         <main className={`content ${level === "view" ? "readonly" : ""}`}>
           {level === "none" ? (

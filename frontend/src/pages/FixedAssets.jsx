@@ -4,6 +4,7 @@ import api, { errMsg } from "../lib/api";
 import { money, date, isoDate } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, Modal, Confirm, toast } from "../components/ui";
 import Icon from "../components/Icon";
+import { useBack } from "../lib/backNav";
 
 const methodLabel = (a) => (a.method === "slm" ? `Straight Line · ${a.usefulLifeYears} yrs` : a.method === "wdv" ? `Written Down Value · ${a.rate}% p.a.` : "No depreciation");
 
@@ -11,6 +12,7 @@ export function AssetList() {
   const [rows, setRows] = useState(null);
   const [status, setStatus] = useState("active");
   const navigate = useNavigate();
+  const goBack = useBack();
   useEffect(() => {
     setRows(null);
     api.get("/fixed-assets", { params: { status: status || undefined } }).then((r) => setRows(r.data));
@@ -91,6 +93,7 @@ export function AssetList() {
 export function AssetForm() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const [types, setTypes] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [form, setForm] = useState(null);
@@ -229,7 +232,7 @@ export function AssetForm() {
           <button className="btn btn-primary" disabled={busy}>
             Save
           </button>
-          <button type="button" className="btn" onClick={() => navigate(-1)}>
+          <button type="button" className="btn" onClick={goBack}>
             Cancel
           </button>
         </div>
@@ -241,6 +244,7 @@ export function AssetForm() {
 export function AssetView() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const [a, setA] = useState(null);
   const [dispose, setDispose] = useState(false);
   const [confirm, setConfirm] = useState(null);

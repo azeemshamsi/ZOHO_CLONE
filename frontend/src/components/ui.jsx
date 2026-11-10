@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import { backTarget, useBack } from "../lib/backNav";
 import Icon from "./Icon";
 
 /* ---------- Toasts ---------- */
@@ -29,14 +30,25 @@ export function Toaster() {
 }
 
 /* ---------- Layout bits ---------- */
-export function PageHeader({ title, subtitle, children, back }) {
+// ← Back goes one level up (as Esc does), whatever `back` a page passes.
+export function PageHeader({ title, subtitle, children }) {
+  const loc = useLocation();
+  const goBack = useBack();
+  const target = backTarget(loc);
   return (
     <div className="page-header">
       <div>
-        {back && (
-          <Link to={back} className="back-link">
+        {target && (
+          <a
+            href={target}
+            className="back-link"
+            onClick={(e) => {
+              e.preventDefault();
+              goBack();
+            }}
+          >
             ← Back
-          </Link>
+          </a>
         )}
         <h1>{title}</h1>
         {subtitle && <p className="muted">{subtitle}</p>}

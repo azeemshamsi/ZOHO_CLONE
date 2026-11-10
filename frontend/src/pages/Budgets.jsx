@@ -4,6 +4,7 @@ import api, { errMsg } from "../lib/api";
 import { money, amount } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, Confirm, toast } from "../components/ui";
 import Icon from "../components/Icon";
+import { useBack } from "../lib/backNav";
 
 const COUNT = { monthly: 12, quarterly: 4, yearly: 1 };
 const MONTHS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
@@ -18,6 +19,7 @@ const fyLabel = (y) => `FY ${y}-${String(y + 1).slice(2)} (Apr ${y} – Mar ${y 
 export function BudgetList() {
   const [rows, setRows] = useState(null);
   const navigate = useNavigate();
+  const goBack = useBack();
   useEffect(() => {
     api.get("/budgets").then((r) => setRows(r.data));
   }, []);
@@ -72,6 +74,7 @@ export function BudgetList() {
 export function BudgetForm() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const [accounts, setAccounts] = useState(null);
   const [form, setForm] = useState(null);
   const [showAll, setShowAll] = useState(false);
@@ -202,7 +205,7 @@ export function BudgetForm() {
           <button className="btn btn-primary" disabled={busy || !form.name} onClick={save}>
             Save
           </button>
-          <button className="btn" onClick={() => navigate(-1)}>
+          <button className="btn" onClick={goBack}>
             Cancel
           </button>
         </div>
@@ -214,6 +217,7 @@ export function BudgetForm() {
 export function BudgetView() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const [d, setD] = useState(null);
   const [view, setView] = useState("periods");
   const [confirm, setConfirm] = useState(false);

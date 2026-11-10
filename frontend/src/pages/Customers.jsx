@@ -6,6 +6,7 @@ import { STATES, GST_TREATMENTS, PAYMENT_TERMS, stateName, modeName } from "../l
 import { money, date } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Status, invoiceStatus, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
+import { useBack } from "../lib/backNav";
 
 export function CustomerList() {
   const [rows, setRows] = useState(null);
@@ -13,6 +14,7 @@ export function CustomerList() {
   const [status, setStatus] = useState("active");
   const dq = useDebounced(q);
   const navigate = useNavigate();
+  const goBack = useBack();
 
   useEffect(() => {
     api.get("/customers", { params: { q: dq, status } }).then((r) => setRows(r.data));
@@ -119,6 +121,7 @@ export function CustomerForm() {
   }, []);
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const { organization } = useAuth();
   const [form, setForm] = useState(null);
   const [error, setError] = useState("");
@@ -321,7 +324,7 @@ export function CustomerForm() {
           <button className="btn btn-primary" disabled={busy}>
             Save
           </button>
-          <button type="button" className="btn" onClick={() => navigate(-1)}>
+          <button type="button" className="btn" onClick={goBack}>
             Cancel
           </button>
         </div>
@@ -337,6 +340,7 @@ export function fmtAddress(a = {}) {
 export function CustomerDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const [c, setC] = useState(null);
   const [tab, setTab] = useState("overview");
   const [confirm, setConfirm] = useState(false);

@@ -10,6 +10,7 @@ import Icon from "../components/Icon";
 import { DocEmail } from "../components/EmailDoc";
 import BankAccountSelect from "../components/BankAccountSelect";
 import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
+import { useBack } from "../lib/backNav";
 
 
 export function VendorPaymentList() {
@@ -17,6 +18,7 @@ export function VendorPaymentList() {
   const [q, setQ] = useState("");
   const dq = useDebounced(q);
   const navigate = useNavigate();
+  const goBack = useBack();
 
   useEffect(() => {
     api.get("/vendor-payments", { params: { q: dq } }).then((r) => setRows(r.data));
@@ -86,6 +88,7 @@ export function VendorPaymentForm() {
   }, []);
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const [vendors, setVendors] = useState([]);
   const [bills, setBills] = useState([]);
   const [form, setForm] = useState({
@@ -287,7 +290,7 @@ export function VendorPaymentForm() {
           <button className="btn btn-primary" disabled={busy}>
             Save
           </button>
-          <button type="button" className="btn" onClick={() => navigate(-1)}>
+          <button type="button" className="btn" onClick={goBack}>
             Cancel
           </button>
         </div>
@@ -299,6 +302,7 @@ export function VendorPaymentForm() {
 export function VendorPaymentView() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useBack();
   const { organization } = useAuth();
   const [p, setP] = useState(null);
   const [confirm, setConfirm] = useState(false);
