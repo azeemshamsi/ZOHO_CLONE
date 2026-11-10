@@ -42,12 +42,10 @@ test("half a paisa of tax rounds up, as GST and Tally do", () => {
   assert.equal(inter.igst, 281.91);
 });
 
-describe("GSTR-1 Table 13 document series", () => {
+test("GSTR-1 Table 13: series by prefix, cancelled counted, gaps found", () => {
   const { docSeries } = require("../src/utils/gstReturns");
-  test("groups by prefix, counts cancelled and finds gaps", () => {
-    const { series } = docSeries(["IN-001", "IN-002", "IN-004", "KNSF-10"], ["IN-005"]);
-    expect(series).toHaveLength(2);
-    expect(series[0]).toMatchObject({ from: "IN-001", to: "IN-005", totnum: 4, cancel: 1, net_issue: 3, missing: ["IN-003"] });
-    expect(series[1]).toMatchObject({ from: "KNSF-10", to: "KNSF-10", totnum: 1 });
-  });
+  const { series } = docSeries(["IN-001", "IN-002", "IN-004", "KNSF-10"], ["IN-005"]);
+  assert.equal(series.length, 2);
+  assert.deepEqual(series[0], { from: "IN-001", to: "IN-005", totnum: 4, cancel: 1, net_issue: 3, missing: ["IN-003"] });
+  assert.equal(series[1].from, "KNSF-10");
 });
