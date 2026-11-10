@@ -840,7 +840,7 @@ export function DocForm({ kind, recurring = false }) {
         </button>
         {kind.key === "purchaseOrder" && !recurring && (
           <SellerOrderAdder
-            vendor={form.vendor}
+            vendor={form.customer}
             onAdd={(r) =>
               setForm((f) => ({
                 ...f,
