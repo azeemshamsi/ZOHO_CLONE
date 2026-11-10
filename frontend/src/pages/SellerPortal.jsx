@@ -80,7 +80,7 @@ export default function SellerPortal() {
             <dt>GSTIN</dt>
             <dd>{s.gstin || "—"}</dd>
             <dt>Purchase rate</dt>
-            <dd>{s.rate}% of the sale price (GST included, before the marketplace's discounts)</dd>
+            <dd>The cost price agreed for each product; where a product has none, {s.rate}% of the sale price (GST included, before the marketplace's discounts)</dd>
           </dl>
           <p className="small muted">To change your pickup address or details, contact the marketplace.</p>
         </div>

@@ -28,7 +28,7 @@ const OPEN = ["new", "packed", "ready_to_ship", "shipped"];
 const STATUSES = ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "return_created", "returned", "cancelled"];
 
 // What the seller may see of an order.
-function view(o, s) {
+function view(o, s, costs) {
   const brands = new Set(s.brands.map(S.norm));
   const lines = (o.lines || []).filter((l) => brands.has(S.norm(l.vendor)));
   const sh = o.shipment || {};
@@ -42,10 +42,10 @@ function view(o, s) {
     status: o.status,
     paymentMode: o.paymentMode,
     shipTo: { name: o.shippingAddress?.name || o.customer?.name || "", city: o.shippingAddress?.city || "", state: o.shippingAddress?.province || "", pincode: o.shippingAddress?.zip || "" },
-    lines: lines.map((l) => ({ title: l.title, variantTitle: l.variantTitle, sku: l.sku, quantity: l.quantity, unitPrice: l.unitPrice, image: l.image, payout: S.linePurchase(s, l) })),
+    lines: lines.map((l) => ({ title: l.title, variantTitle: l.variantTitle, sku: l.sku, quantity: l.quantity, unitPrice: l.unitPrice, image: l.image, payout: S.linePurchase(s, l, costs) })),
     otherItems: (o.lines || []).filter((l) => l.quantity > 0).length - lines.filter((l) => l.quantity > 0).length,
     value: Math.round(value * 100) / 100,
-    payout: Math.round(lines.reduce((t, l) => t + S.linePurchase(s, l), 0) * 100) / 100,
+    payout: Math.round(lines.reduce((t, l) => t + S.linePurchase(s, l, costs), 0) * 100) / 100,
     shipment: sh.awb ? { courierName: sh.courierName, awb: sh.awb, trackStatus: sh.trackStatus, trackingUrl: sh.trackingUrl, bookedAt: sh.bookedAt, fromYou: !!mine, events: (sh.events || []).slice(0, 10) } : null,
     deliveredAt: o.deliveredAt || null,
     settled: settled ? (settled.excluded ? { excluded: true } : { number: settled.number, amount: settled.amount, at: settled.at }) : null,
@@ -80,7 +80,9 @@ router.get(
     else if (q.status && q.status !== "all") list = list.filter((o) => o.status === q.status);
     if (q.from) list = list.filter((o) => new Date(o.orderDate) >= new Date(`${q.from}T00:00:00+05:30`));
     if (q.to) list = list.filter((o) => new Date(o.orderDate) <= new Date(`${q.to}T23:59:59+05:30`));
-    let rows = list.map((o) => view(o, s));
+    const brands = new Set(s.brands.map(S.norm));
+    const costs = await S.costsFor(s.organization, list.flatMap((o) => (o.lines || []).filter((l) => brands.has(S.norm(l.vendor)))));
+    let rows = list.map((o) => view(o, s, costs));
     const words = String(q.q || "").trim().toLowerCase().replace(/^#/, "").split(/\s+/).filter(Boolean);
     if (words.length) rows = rows.filter((r) => words.every((w) => [r.name, r.shipTo.name, r.shipTo.city, r.shipTo.pincode, r.shipment?.awb, ...r.lines.flatMap((l) => [l.title, l.sku])].filter(Boolean).join(" ").toLowerCase().includes(w)));
     res.send({ rows: rows.slice((page - 1) * limit, page * limit), total: rows.length, page, limit });

@@ -25,3 +25,13 @@ test("pages follow their module unless set", () => {
   assert.equal(e["sales.invoices"], "view");
   assert.equal(expand({})["purchases.bills"], "none");
 });
+
+test("seller purchase price: Shopify cost first, else rate% of the sale price", () => {
+  const S = require("../src/utils/sellers");
+  const seller = { rate: 50 };
+  const l = { variantId: "gid://shopify/ProductVariant/1", unitPrice: 4910, quantity: 2 };
+  assert.equal(S.linePurchase(seller, l, new Map([["gid://shopify/ProductVariant/1", 1800]])), 3600);
+  assert.equal(S.linePurchase(seller, l, new Map()), 4910);
+  assert.equal(S.linePurchase(seller, l), 4910);
+  assert.match(S.priceNote(seller, l, new Map([[l.variantId, 1800]])), /Shopify cost ₹1800/);
+});

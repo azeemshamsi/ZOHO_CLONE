@@ -218,9 +218,47 @@ const prevMonth = (d = new Date()) => {
 };
 const deliveredOn = (o) => o.deliveredAt || o.statusChangedAt || null;
 
-// What we owe a seller for one order line: rate% of the sale price incl. GST, before our discounts.
+// What we owe a seller for one order line: the product's cost price in Shopify (Cost per item, our purchase price
+// from the seller, GST included) when it has one, else rate% of the sale price incl. GST, before our discounts.
+// `costs` = costsFor(...) — the Shopify costs of the lines' variants.
 const lineValue = (l) => r2((l.unitPrice || 0) * (l.quantity || 0));
-const linePurchase = (seller, l) => r2((lineValue(l) * seller.rate) / 100);
+const costOf = (l, costs) => (costs && l.variantId && costs.get(l.variantId)) || 0;
+const unitPurchase = (seller, l, costs) => costOf(l, costs) || r4(((l.unitPrice || 0) * seller.rate) / 100);
+const linePurchase = (seller, l, costs) => r2(unitPurchase(seller, l, costs) * (l.quantity || 0));
+const priceNote = (seller, l, costs) => (costOf(l, costs) ? `Shopify cost ₹${costOf(l, costs)}` : `${seller.rate}% of ₹${lineValue(l)}`);
+
+// Cost per item of Shopify variants (current value; cached for 30 minutes). Missing / failed → no cost (rate% is used).
+const costCache = new Map(); // variant id → { cost, at }
+async function costsFor(storeOrg, lines) {
+  const out = new Map();
+  const ids = [...new Set(lines.map((l) => l.variantId).filter((v) => /^gid:\/\/shopify\/ProductVariant\//.test(v || "")))];
+  const fresh = Date.now() - 30 * 60000;
+  const need = [];
+  for (const id of ids) {
+    const c = costCache.get(id);
+    if (c && c.at > fresh) c.cost && out.set(id, c.cost);
+    else need.push(id);
+  }
+  if (!need.length) return out;
+  try {
+    const store = await require("../models/ShopifyStore").findOne({ organization: storeOrg });
+    if (!store) return out;
+    const { gql } = require("./shopify/client");
+    for (let i = 0; i < need.length; i += 100) {
+      const chunk = need.slice(i, i + 100);
+      const d = await gql(store, `query($ids: [ID!]!) { nodes(ids: $ids) { ... on ProductVariant { id inventoryItem { unitCost { amount } } } } }`, { ids: chunk });
+      const got = new Map((d.nodes || []).filter(Boolean).map((n) => [n.id, Number(n.inventoryItem?.unitCost?.amount) || 0]));
+      for (const id of chunk) {
+        const cost = r4(got.get(id) || 0);
+        costCache.set(id, { cost, at: Date.now() });
+        if (cost > 0) out.set(id, cost);
+      }
+    }
+  } catch (e) {
+    console.error(`[sellers] Shopify cost prices: ${e.message}`);
+  }
+  return out;
+}
 
 // The seller's vendor record in a company (created the first time).
 async function vendorIn(seller, orgId) {
@@ -295,6 +333,7 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
       continue;
     }
     let penaltiesLeft = penalties;
+    const costs = await costsFor(storeOrg, [...byOrg.values()].flatMap((rows) => rows.flatMap((r) => r.lines)));
     for (const [orgId, rows] of byOrg) {
       try {
         const org = await Organization.findById(orgId);
@@ -308,12 +347,12 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
           for (const l of lines) {
             const it = items.get(String(l.item));
             const gst = seller.gstin ? Number(it?.taxRate ?? l.shopifyTaxRate ?? 0) : 0;
-            const unit = r4((l.unitPrice * seller.rate) / 100);
-            const value = linePurchase(seller, l);
+            const unit = unitPurchase(seller, l, costs);
+            const value = linePurchase(seller, l, costs);
             amt = r2(amt + value);
             lineItems.push({
               name: `${o.name} · ${l.title}${l.variantTitle ? ` - ${l.variantTitle}` : ""}`.slice(0, 200),
-              description: `${l.sku ? `SKU ${l.sku} · ` : ""}delivered ${new Date(deliveredOn(o).getTime() + IST).toISOString().slice(0, 10)} · ${seller.rate}% of ₹${lineValue(l)}`,
+              description: `${l.sku ? `SKU ${l.sku} · ` : ""}delivered ${new Date(deliveredOn(o).getTime() + IST).toISOString().slice(0, 10)} · ${priceNote(seller, l, costs)}`,
               hsnSac: it?.hsnSac || l.hsn || "",
               unit: "pcs",
               quantity: l.quantity,
@@ -329,7 +368,7 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
             name: o.name,
             deliveredAt: deliveredOn(o),
             sale: r2(lines.reduce((t, l) => t + lineValue(l), 0)),
-            items: lines.map((l) => ({ title: `${l.title}${l.variantTitle ? ` - ${l.variantTitle}` : ""}`, sku: l.sku || "", quantity: l.quantity, sale: lineValue(l), purchase: linePurchase(seller, l) })),
+            items: lines.map((l) => ({ title: `${l.title}${l.variantTitle ? ` - ${l.variantTitle}` : ""}`, sku: l.sku || "", quantity: l.quantity, sale: lineValue(l), purchase: linePurchase(seller, l, costs), basis: priceNote(seller, l, costs) })),
           });
         }
         // Deductions: those for this company's orders, then any others, while the PO stays above zero.
@@ -374,7 +413,7 @@ async function runMonthly(storeOrg, month, user, { sellerId, dryRun = false, cre
           lineItems,
           adjustment,
           ...(adjustment ? { adjustmentAccount: "ledger" } : {}),
-          customerNotes: `Orders delivered up to ${label} (at least ${HOLD_DAYS} days before this PO, not returned), at ${seller.rate}% of the sale price (GST included, before discounts).${applied.length ? `\nDeductions: ${applied.map((p) => `${p.reason}${p.orderName ? ` (${p.orderName})` : ""} ₹${p.amount}`).join("; ")}.` : ""}\nPlease send your invoice against this purchase order.`,
+          customerNotes: `Orders delivered up to ${label} (at least ${HOLD_DAYS} days before this PO, not returned), at the cost price set in Shopify, or ${seller.rate}% of the sale price where a product has none (GST included, before discounts).${applied.length ? `\nDeductions: ${applied.map((p) => `${p.reason}${p.orderName ? ` (${p.orderName})` : ""} ₹${p.amount}`).join("; ")}.` : ""}\nPlease send your invoice against this purchase order.`,
           status: "issued",
         });
         for (const r of perOrder) await ShopifyOrder.updateOne({ _id: r.id }, { $push: { sellerSettled: { seller: seller._id, purchaseOrder: po._id, number: po.number, organization: orgId, amount: r.amount, at: new Date() } } });
@@ -413,14 +452,15 @@ async function orderForPo(orgId, vendorId, q) {
   if (!lines.length) throw new Error(`${order.name} has no products of ${seller.name}`);
   const items = new Map((await Item.find({ _id: { $in: lines.map((l) => l.item).filter(Boolean) } }, { taxRate: 1, hsnSac: 1 }).lean()).map((i) => [String(i._id), i]));
   const d = deliveredOn(order);
+  const costs = await costsFor(seller.organization, lines);
   const lineItems = lines.map((l) => {
     const it = items.get(String(l.item));
     const gst = seller.gstin ? Number(it?.taxRate ?? l.shopifyTaxRate ?? 0) : 0;
-    const unit = r4((l.unitPrice * seller.rate) / 100);
+    const unit = unitPurchase(seller, l, costs);
     return {
       item: "",
       name: `${order.name} · ${l.title}${l.variantTitle ? ` - ${l.variantTitle}` : ""}`.slice(0, 200),
-      description: `${l.sku ? `SKU ${l.sku} · ` : ""}${d ? `delivered ${new Date(d.getTime() + IST).toISOString().slice(0, 10)}` : order.status.replace(/_/g, " ")} · ${seller.rate}% of ₹${lineValue(l)}`,
+      description: `${l.sku ? `SKU ${l.sku} · ` : ""}${d ? `delivered ${new Date(d.getTime() + IST).toISOString().slice(0, 10)}` : order.status.replace(/_/g, " ")} · ${priceNote(seller, l, costs)}`,
       hsnSac: it?.hsnSac || l.hsn || "",
       unit: "pcs",
       quantity: l.quantity,
@@ -433,7 +473,7 @@ async function orderForPo(orgId, vendorId, q) {
   for (const x of order.sellerSettled || [])
     if (String(x.seller) === String(seller._id)) warnings.push(x.excluded ? `It's marked excluded from purchase orders${x.reason ? ` (${x.reason})` : ""}` : `It's already on purchase order ${x.number || ""}`);
   if (order.status !== "delivered") warnings.push(`Its status is ${order.status.replace(/_/g, " ")}, not delivered`);
-  return { seller: { id: seller._id, name: seller.name, rate: seller.rate }, order: { id: order._id, name: order.name, status: order.status, deliveredAt: d }, amount: r2(lines.reduce((t, l) => t + linePurchase(seller, l), 0)), lineItems, warnings };
+  return { seller: { id: seller._id, name: seller.name, rate: seller.rate }, order: { id: order._id, name: order.name, status: order.status, deliveredAt: d }, amount: r2(lines.reduce((t, l) => t + linePurchase(seller, l, costs), 0)), lineItems, warnings };
 }
 
 // After saving a PO with hand-added seller orders: mark them as on this PO so the monthly run skips them.
@@ -484,16 +524,17 @@ async function pendingOrders(seller, month) {
   const { to } = monthRange(month);
   const ripe = new Date(Date.now() - HOLD_DAYS * 86400000);
   const brands = new Set(seller.brands.map(norm));
-  return (await ShopifyOrder.find({ organization: seller.organization, sellers: seller._id, status: "delivered" }).lean())
-    .filter((o) => {
-      const d = deliveredOn(o);
-      return d && d <= to && (!seller.poFrom || d >= seller.poFrom) && !(o.sellerSettled || []).some((x) => String(x.seller) === String(seller._id));
-    })
+  const list = (await ShopifyOrder.find({ organization: seller.organization, sellers: seller._id, status: "delivered" }).lean()).filter((o) => {
+    const d = deliveredOn(o);
+    return d && d <= to && (!seller.poFrom || d >= seller.poFrom) && !(o.sellerSettled || []).some((x) => String(x.seller) === String(seller._id));
+  });
+  const costs = await costsFor(seller.organization, list.flatMap((o) => o.lines || []));
+  return list
     .map((o) => {
       const lines = o.lines.filter((l) => l.quantity > 0 && brands.has(norm(l.vendor)));
-      return { _id: o._id, name: o.name, orderDate: o.orderDate, deliveredAt: deliveredOn(o), ready: deliveredOn(o) <= ripe, items: lines.map((l) => `${l.quantity} × ${l.title}${l.sku ? ` (${l.sku})` : ""}`), value: r2(lines.reduce((t, l) => t + lineValue(l), 0)), amount: r2(lines.reduce((t, l) => t + linePurchase(seller, l), 0)) };
+      return { _id: o._id, name: o.name, orderDate: o.orderDate, deliveredAt: deliveredOn(o), ready: deliveredOn(o) <= ripe, items: lines.map((l) => `${l.quantity} × ${l.title}${l.sku ? ` (${l.sku})` : ""}`), value: r2(lines.reduce((t, l) => t + lineValue(l), 0)), amount: r2(lines.reduce((t, l) => t + linePurchase(seller, l, costs), 0)) };
     })
     .sort((a, b) => new Date(a.deliveredAt) - new Date(b.deliveredAt));
 }
 
-module.exports = { orderForPo, settleOnPo, pendingOrders, HOLD_DAYS, norm, brandMap, clearCache, sellerOfLine, sellersOfLines, assignAll, pickupFor, withPickup, pickupProblems, registerPickup, sellerProducts, setSellerStock, runMonthly, monthlyTick, monthRange, prevMonth, linePurchase, lineValue, deliveredOn };
+module.exports = { orderForPo, settleOnPo, pendingOrders, HOLD_DAYS, norm, brandMap, clearCache, sellerOfLine, sellersOfLines, assignAll, pickupFor, withPickup, pickupProblems, registerPickup, sellerProducts, setSellerStock, runMonthly, monthlyTick, monthRange, prevMonth, linePurchase, unitPurchase, priceNote, costsFor, lineValue, deliveredOn };

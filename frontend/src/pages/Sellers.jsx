@@ -580,7 +580,7 @@ function PoOrders({ r, onExcluded }) {
   return (
     <>
       <div className="small muted" style={{ marginBottom: 6 }}>
-        {r.orderList.length} order{r.orderList.length === 1 ? "" : "s"} at {r.rate}% of the sale price (incl. GST, before discounts)
+        {r.orderList.length} order{r.orderList.length === 1 ? "" : "s"} at the product's cost price in Shopify, or {r.rate}% of the sale price where it has none (incl. GST, before discounts)
         {r.waiting ? ` · ${r.waiting} more delivered less than 7 days ago wait for the next PO` : ""}
       </div>
       <table className="table" style={{ margin: 0 }}>
@@ -606,6 +606,7 @@ function PoOrders({ r, onExcluded }) {
                   <div key={k}>
                     {it.quantity} × {it.title}
                     {it.sku ? <span className="muted"> · {it.sku}</span> : ""}
+                    {it.basis ? <span className="muted"> · {it.basis}</span> : ""}
                   </div>
                 ))}
               </td>
