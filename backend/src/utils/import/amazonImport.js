@@ -13,6 +13,14 @@ const Organization = require("../../models/Organization");
 const { computeTotals } = require("../gst");
 const { round2 } = require("./common");
 const A = require("./amazon");
+const F = require("./flipkart");
+
+// Marketplaces whose monthly tax reports this import posts (same documents, ledgers and party logic).
+const SRC = {
+  amazon: { key: "amazon", label: "Amazon", b2c: "Amazon B2C", ledger: "Amazon Sales", party: /^amazon[\s_-]*sre$/i, report: "Amazon's Merchant Tax Report" },
+  flipkart: { key: "flipkart", label: "Flipkart", b2c: "Flipkart B2C", ledger: "Flipkart Sales", party: /^flipkart(?!\s*b2c)/i, report: "Flipkart's Sales Report" },
+};
+const srcOf = (k) => SRC[k] || SRC.amazon;
 
 const r4 = (n) => Math.round((Number(n) + Number.EPSILON) * 10000) / 10000;
 const MONTHS = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"];
@@ -60,7 +68,7 @@ async function keepMonth(org, gstin, month, p) {
 // the "Online Sale" master by type and rate — "Local B2B @ 5%", "OutState B2C @ 18%" … (local = seller's state).
 const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const ledgerName = (local, b2b, rate) => `${local ? "Local" : "Outstate"} ${b2b ? "B2B" : "B2C"} @ ${Number(rate) || 0}%`;
-const isAmazonParty = (c) => /^amazon[\s_-]*sre$/i.test(String(c.displayName || "").trim());
+const isParty = (S) => (c) => S.party.test(String(c.displayName || "").trim());
 
 async function onlineMaster(org) {
   const LedgerGroup = require("../../models/LedgerGroup");
@@ -82,20 +90,20 @@ const keyFor = (local, b2b, rate) => norm(ledgerName(local, b2b, rate));
 const docLines = (d, orgState) => d.lines.map((l) => ({ local: (d.pos || orgState) === orgState, b2b: !!d.b2b, rate: Number(l.rate) || 0 }));
 
 // The ledgers a plan needs: which exist, which will be created (inside the master).
-async function postingInfo(org, o, docs) {
+async function postingInfo(org, o, docs, S = SRC.amazon) {
   const group = await onlineMaster(org);
   const book = await ledgerBook(org, group);
   const need = new Map();
   for (const d of docs) for (const x of docLines(d, o.state)) need.set(keyFor(x.local, x.b2b, x.rate), ledgerName(x.local, x.b2b, x.rate));
   const ledgers = [...need.entries()].map(([k, name]) => ({ name, exists: book.has(k) })).sort((a, b) => a.name.localeCompare(b.name));
-  const party = (await Customer.find({ organization: org }, { displayName: 1, gstin: 1 }).lean()).find(isAmazonParty) || null;
+  const party = (await Customer.find({ organization: org }, { displayName: 1, gstin: 1 }).lean()).find(isParty(S)) || null;
   return { group: group ? group.name : "", ledgers, party: party ? { _id: String(party._id), name: party.displayName } : null };
 }
 
-async function resolveLedger(org, group, book, local, b2b, rate) {
+async function resolveLedger(org, group, book, local, b2b, rate, S = SRC.amazon) {
   const k = keyFor(local, b2b, rate);
   if (book.has(k)) return book.get(k);
-  const a = await Account.create({ organization: org, name: ledgerName(local, b2b, rate), group: "Income", ledgerKind: "sales", description: "Amazon sales (created by the Amazon import)" });
+  const a = await Account.create({ organization: org, name: ledgerName(local, b2b, rate), group: "Income", ledgerKind: "sales", description: `${S.label} sales (created by the ${S.label} import)` });
   const code = String(a._id);
   book.set(k, code);
   if (group) {
@@ -106,24 +114,33 @@ async function resolveLedger(org, group, book, local, b2b, rate) {
 }
 
 // Invoices already on the Amazon party in the report month that didn't come from this import (e.g. from Tally).
-async function existingOnParty(org, partyId, month) {
+async function existingOnParty(org, partyId, month, S = SRC.amazon) {
   if (!partyId || !month) return null;
   const [y, m] = month.split("-").map(Number);
   const from = new Date(Date.UTC(y, m - 1, 1));
   const to = new Date(Date.UTC(y, m, 1));
-  const rows = (await Invoice.find({ organization: org, customer: partyId, date: { $gte: from, $lt: to } }, { total: 1, importRef: 1 }).lean()).filter((x) => !String(x.importRef || "").startsWith("amazon:"));
+  const rows = (await Invoice.find({ organization: org, customer: partyId, date: { $gte: from, $lt: to } }, { total: 1, importRef: 1 }).lean()).filter((x) => !String(x.importRef || "").startsWith(`${S.key}:`));
   return rows.length ? { count: rows.length, total: round2(rows.reduce((t, x) => t + (x.total || 0), 0)) } : null;
 }
 
 /* ---------------- preview ---------------- */
-async function preview(org, files) {
+async function preview(org, files, source = "amazon") {
   sweep();
+  const S = srcOf(source);
   const o = await Organization.findById(org);
-  if (!o?.gstin) throw new Error("Add this company's GSTIN in Settings first: Amazon reports are matched by seller GSTIN");
-  const u = A.unpack(files);
-  if (!u.mtr.length) throw new Error(`No Amazon MTR (B2C / B2B) CSV found${u.unknown.length ? ` — not recognised: ${u.unknown.join(", ")}` : ""}`);
+  if (!o?.gstin) throw new Error(`Add this company's GSTIN in Settings first: ${S.label} reports are matched by seller GSTIN`);
   const gstin = o.gstin.toUpperCase();
-  const p = A.plan(u.mtr, gstin);
+  let u;
+  let p;
+  if (S.key === "flipkart") {
+    u = F.unpack(files);
+    if (!u.sales.length) throw new Error(`No Flipkart Sales Report found${u.unknown.length ? ` — not recognised: ${u.unknown.join(", ")}` : ""}. Download it from Seller Hub → Reports → Tax reports.`);
+    p = F.plan(u.sales, u.cashback, gstin);
+  } else {
+    u = A.unpack(files);
+    if (!u.mtr.length) throw new Error(`No Amazon MTR (B2C / B2B) CSV found${u.unknown.length ? ` — not recognised: ${u.unknown.join(", ")}` : ""}`);
+    p = A.plan(u.mtr, gstin);
+  }
   const docs = [...p.invoices, ...p.creditNotes];
   // Report month: from the file name ("…OCTOBER-2026…"), else the month most documents fall in.
   const counts = {};
@@ -140,7 +157,7 @@ async function preview(org, files) {
   // Orders OrdexaGo already invoiced from the Amazon connection (and their return credit notes): not imported again.
   const ShopifyOrder = require("../../models/ShopifyOrder");
   const orderIds = [...new Set(docs.flatMap((d) => [...d.orders]))].filter(Boolean);
-  const apiOrders = orderIds.length ? (await ShopifyOrder.find({ channel: "amazon", shopifyId: { $in: orderIds.map((x) => `amazon:${x}`) } }, { shopifyId: 1, invoice: 1, invoiceOrg: 1, returnCreditNote: 1 }).lean()).filter((x) => String(x.invoiceOrg) === String(org)) : [];
+  const apiOrders = orderIds.length && S.key === "amazon" ? (await ShopifyOrder.find({ channel: "amazon", shopifyId: { $in: orderIds.map((x) => `amazon:${x}`) } }, { shopifyId: 1, invoice: 1, invoiceOrg: 1, returnCreditNote: 1 }).lean()).filter((x) => String(x.invoiceOrg) === String(org)) : [];
   const byOrder = new Map(apiOrders.map((x) => [x.shopifyId.slice(7), x]));
   const fromApi = (d) => {
     const os = [...d.orders].filter(Boolean);
@@ -152,7 +169,7 @@ async function preview(org, files) {
   const unmatched = new Map();
   for (const d of docs) {
     const h = have.get(`${d.kind === "invoice" ? "i" : "c"}|${d.number}`);
-    d.state = !h ? "new" : String(h.importRef || "").startsWith("amazon:") ? "imported" : "conflict";
+    d.state = !h ? "new" : String(h.importRef || "").startsWith(`${S.key}:`) ? "imported" : "conflict";
     const api = d.state === "new" ? fromApi(d) : null;
     if (api) {
       d.state = "ordexago";
@@ -163,17 +180,18 @@ async function preview(org, files) {
   const newBuyers = [...new Set(docs.filter((d) => d.b2b && !buyers.some((b) => b.gstin === d.buyerGstin)).map((d) => `${d.buyerName || d.buyerGstin} (${d.buyerGstin})`))];
   const sum = (xs, f) => round2(xs.reduce((t, x) => t + f(x), 0));
   const part = (xs) => ({ count: xs.length, taxable: sum(xs, (d) => d.taxable), tax: sum(xs, (d) => d.amazon.tax), value: sum(xs, (d) => d.amazon.value), tcs: sum(xs, (d) => d.tcs) });
-  const posting = await postingInfo(org, o, docs.filter((d) => d.state === "new"));
-  posting.onParty = posting.party ? await existingOnParty(org, posting.party._id, month) : null;
+  const posting = await postingInfo(org, o, docs.filter((d) => d.state === "new"), S);
+  posting.onParty = posting.party ? await existingOnParty(org, posting.party._id, month, S) : null;
   const id = crypto.randomUUID();
-  plans.set(id, { org: String(org), gstin, month, plan: p, at: Date.now() });
+  plans.set(id, { org: String(org), gstin, month, plan: p, at: Date.now(), src: S.key, gstr1: S.key === "flipkart" ? u.gstr1 : null });
   return {
     planId: id,
     gstin,
     month,
     files: u.names,
     unknownFiles: u.unknown,
-    hasGstr1: u.gstr1.some((g) => g.gstin === gstin),
+    source: S.key,
+    hasGstr1: S.key === "flipkart" ? u.gstr1.length > 0 : u.gstr1.some((g) => g.gstin === gstin),
     b2cInvoices: part(p.invoices.filter((d) => !d.b2b)),
     b2bInvoices: part(p.invoices.filter((d) => d.b2b)),
     creditNotes: part(p.creditNotes),
@@ -189,20 +207,20 @@ async function preview(org, files) {
 }
 
 /* ---------------- import ---------------- */
-async function salesLedger(org, code) {
+async function salesLedger(org, code, S = SRC.amazon) {
   if (code) return code;
-  let a = await Account.findOne({ organization: org, name: "Amazon Sales" });
-  if (!a) a = await Account.create({ organization: org, name: "Amazon Sales", group: "Income", ledgerKind: "sales", description: "Sales on Amazon (imported from Amazon's Merchant Tax Report)" });
+  let a = await Account.findOne({ organization: org, name: S.ledger });
+  if (!a) a = await Account.create({ organization: org, name: S.ledger, group: "Income", ledgerKind: "sales", description: `Sales on ${S.label} (imported from ${S.report})` });
   return String(a._id);
 }
 
-async function customerFor(org, d, cache) {
+async function customerFor(org, d, cache, S = SRC.amazon) {
   const key = d.b2b ? d.buyerGstin : "_b2c";
   if (cache.has(key)) return cache.get(key);
   let c;
   if (!d.b2b) {
-    c = await Customer.findOne({ organization: org, displayName: "Amazon B2C" });
-    if (!c) c = await Customer.create({ organization: org, displayName: "Amazon B2C", companyName: "Amazon B2C customers", customerType: "individual", gstTreatment: "consumer", notes: "Amazon sales to consumers (imported from Amazon's MTR B2C report)" });
+    c = await Customer.findOne({ organization: org, displayName: S.b2c });
+    if (!c) c = await Customer.create({ organization: org, displayName: S.b2c, companyName: `${S.b2c} customers`, customerType: "individual", gstTreatment: "consumer", notes: `${S.label} sales to consumers (imported from ${S.report})` });
   } else {
     c = (await Customer.find({ organization: org }, { gstin: 1 }).lean()).find((x) => String(x.gstin || "").toUpperCase() === d.buyerGstin);
     if (c) c = await Customer.findById(c._id);
@@ -219,7 +237,7 @@ async function customerFor(org, d, cache) {
         gstTreatment: "registered",
         placeOfSupply: d.buyerGstin.slice(0, 2),
         billingAddress: { city: d.billTo.city, state: d.billTo.state || d.buyerGstin.slice(0, 2), pincode: d.billTo.pincode, country: "India" },
-        notes: "Amazon business buyer (imported from Amazon's MTR B2B report)",
+        notes: `${S.label} business buyer (imported from ${S.report})`,
       });
   }
   cache.set(key, c);
@@ -230,12 +248,12 @@ function startImport(ctx, planId, { ledger, mode, party } = {}) {
   sweep();
   const pl = plans.get(planId);
   if (!pl || pl.org !== String(ctx.org)) throw new Error("This preview has expired. Upload the files again.");
-  for (const j of jobs.values()) if (j.org === String(ctx.org) && j.status === "running") throw new Error("An Amazon import is already running for this company");
+  for (const j of jobs.values()) if (j.org === String(ctx.org) && j.status === "running") throw new Error("A marketplace import is already running for this company");
   const id = crypto.randomUUID();
   const docs = [...pl.plan.invoices, ...pl.plan.creditNotes].filter((d) => d.state === "new" || d.state === "ordexago");
   const job = { id, org: String(ctx.org), status: "running", total: docs.length, done: 0, created: { invoices: 0, creditNotes: 0, linked: 0 }, errors: [], warnings: [], at: Date.now(), month: pl.month };
   jobs.set(id, job);
-  keepMonth(ctx.org, pl.gstin, pl.month, pl.plan);
+  if (pl.src !== "flipkart") keepMonth(ctx.org, pl.gstin, pl.month, pl.plan);
   run(ctx, pl, docs, { ledger, mode, party }, job).catch((e) => {
     job.status = "failed";
     job.errors.push({ number: "", message: e.message });
@@ -245,14 +263,15 @@ function startImport(ctx, planId, { ledger, mode, party } = {}) {
 
 async function run(ctx, pl, docs, opts, job) {
   const { call } = require("./commit");
+  const S = srcOf(pl.src);
   const org = await Organization.findById(ctx.org);
   // "online": a sales ledger per line by type and rate (Online Sale master); else one ledger for everything.
   const online = opts.mode === "online";
-  const ledger = online ? "" : await salesLedger(ctx.org, opts.ledger);
+  const ledger = online ? "" : await salesLedger(ctx.org, opts.ledger, S);
   const group = online ? await onlineMaster(ctx.org) : null;
   const book = online ? await ledgerBook(ctx.org, group) : null;
   const party = opts.party ? await Customer.findOne({ _id: opts.party, organization: ctx.org }) : null;
-  if (opts.party && !party) throw new Error("The party ledger chosen for Amazon wasn't found");
+  if (opts.party && !party) throw new Error(`The party ledger chosen for ${S.label} wasn't found`);
   const match = skuMatcher(await Item.find({ organization: ctx.org }, { sku: 1, name: 1, hsnSac: 1 }).lean());
   const cache = new Map();
   // Invoices first, so credit notes can link to them.
@@ -262,7 +281,7 @@ async function run(ctx, pl, docs, opts, job) {
       if (d.state === "ordexago") {
         // Already invoiced from the order: tag OrdexaGo's document with Amazon's number so the GSTR-1 check counts it.
         const Model = d.kind === "invoice" ? Invoice : CreditNote;
-        const ref = `amazon:${pl.gstin}:${pl.month}:${d.number}`;
+        const ref = `${S.key}:${pl.gstin}:${pl.month}:${d.number}`;
         let n = 0;
         for (const id of d.link || []) {
           await Model.updateOne({ _id: id, organization: ctx.org }, { $set: { importRef: n ? `${ref}#${n + 1}` : ref } });
@@ -273,7 +292,7 @@ async function run(ctx, pl, docs, opts, job) {
         continue;
       }
       // B2C → the Amazon party ledger (Amazon_SRE); B2B → the actual buyer by GSTIN (created if new).
-      const c = party && !d.b2b ? party : await customerFor(ctx.org, d, cache);
+      const c = party && !d.b2b ? party : await customerFor(ctx.org, d, cache, S);
       const sign = d.kind === "creditNote" ? -1 : 1;
       const lineItems = d.lines.map((l) => {
         const it = l.kind === "product" ? match(l.sku) : null;
@@ -281,7 +300,7 @@ async function run(ctx, pl, docs, opts, job) {
         return {
           item: it ? String(it._id) : "",
           name: l.name.slice(0, 250),
-          description: [l.kind === "product" && l.sku ? `SKU ${l.sku}` : "", l.orderId ? `Amazon order ${l.orderId}` : ""].filter(Boolean).join(" · "),
+          description: [l.kind === "product" && l.sku ? `SKU ${l.sku}` : "", l.orderId ? `${S.label} order ${l.orderId}` : ""].filter(Boolean).join(" · "),
           hsnSac: l.hsn || it?.hsnSac || "",
           unit: "pcs",
           quantity: l.quantity,
@@ -293,7 +312,7 @@ async function run(ctx, pl, docs, opts, job) {
       });
       if (online) {
         const local = (d.pos || org.state) === org.state;
-        for (let n = 0; n < lineItems.length; n++) lineItems[n].account = await resolveLedger(ctx.org, group, book, local, !!d.b2b, d.lines[n].rate);
+        for (let n = 0; n < lineItems.length; n++) lineItems[n].account = await resolveLedger(ctx.org, group, book, local, !!d.b2b, d.lines[n].rate, S);
       }
       if (lineItems.some((l) => l.rate < 0)) throw new Error("A line has a negative value (promotion larger than the item)");
       const pos = d.pos || org.state;
@@ -302,10 +321,10 @@ async function run(ctx, pl, docs, opts, job) {
       const want = sign * d.amazon.value;
       let adjustment = round2(want - t.total);
       if (Math.abs(adjustment) > 2) {
-        job.warnings.push({ number: d.number, message: `OrdexaGo's total ₹${t.total} differs from Amazon's ₹${want}; posted at OrdexaGo's GST` });
+        job.warnings.push({ number: d.number, message: `OrdexaGo's total ₹${t.total} differs from ${S.label}'s ₹${want}; posted at OrdexaGo's GST` });
         adjustment = 0;
       }
-      if ((t.igst > 0) !== (Math.abs(d.amazon.igst) > 0)) job.warnings.push({ number: d.number, message: `Amazon charged ${d.amazon.igst ? "IGST" : "CGST + SGST"}; place of supply ${pos} gives the other` });
+      if ((t.igst > 0) !== (Math.abs(d.amazon.igst) > 0)) job.warnings.push({ number: d.number, message: `${S.label} charged ${d.amazon.igst ? "IGST" : "CGST + SGST"}; place of supply ${pos} gives the other` });
       const iso = A.iso(d.date);
       const common = {
         customer: String(c._id),
@@ -317,18 +336,21 @@ async function run(ctx, pl, docs, opts, job) {
 
         ...(adjustment ? { adjustment } : {}),
         shipTo: { name: "", phone: "", street: "", city: d.shipTo.city, state: d.shipTo.state, pincode: d.shipTo.pincode, country: "India" },
-        customerNotes: `Amazon ${d.channel === "AFN" ? "FBA" : d.channel === "MFN" ? "self-ship" : ""} order${d.orders.length > 1 ? "s" : ""} ${d.orders.join(", ")}${d.payment ? ` · ${d.payment}` : ""}${d.tcs ? ` · TCS by Amazon ₹${Math.abs(d.tcs)}` : ""}`,
+        customerNotes:
+          S.key === "flipkart"
+            ? `Flipkart${d.shopsy ? " (Shopsy)" : ""} order${d.orders.length > 1 ? "s" : ""} ${d.orders.join(", ")}${d.events?.length ? ` · ${d.events.join(", ")}` : ""}${d.payment ? ` · ${d.payment}` : ""}${d.tcs ? ` · TCS by Flipkart ₹${Math.abs(d.tcs)}` : ""}${d.tds ? ` · TDS ₹${Math.abs(d.tds)}` : ""}${d.b2b && d.buyerName ? ` · Buyer: ${d.buyerName} (${d.buyerGstin})` : ""}`
+            : `Amazon ${d.channel === "AFN" ? "FBA" : d.channel === "MFN" ? "self-ship" : ""} order${d.orders.length > 1 ? "s" : ""} ${d.orders.join(", ")}${d.payment ? ` · ${d.payment}` : ""}${d.tcs ? ` · TCS by Amazon ₹${Math.abs(d.tcs)}` : ""}`,
       };
-      const ref = `amazon:${pl.gstin}:${pl.month}:${d.number}`;
+      const ref = `${S.key}:${pl.gstin}:${pl.month}:${d.number}`;
       if (d.kind === "invoice") {
         const inv = await call(require("../../routes/invoices"), "POST", "/", ctx, { ...common, invoiceNumber: d.number, dueDate: iso, status: "sent" });
         const set = { importRef: ref };
-        if (d.irn) Object.assign(set, { "einvoice.status": "generated", "einvoice.irn": d.irn, "einvoice.via": "amazon", ...(d.irnDate ? { "einvoice.ackDate": new Date(`${d.irnDate.replace(" ", "T")}+05:30`) } : {}) });
+        if (d.irn) Object.assign(set, { "einvoice.status": "generated", "einvoice.irn": d.irn, "einvoice.via": S.key, ...(d.irnDate ? { "einvoice.ackDate": new Date(`${d.irnDate.replace(" ", "T")}+05:30`) } : {}) });
         await Invoice.updateOne({ _id: inv._id }, { $set: set });
         job.created.invoices++;
       } else {
         const inv = d.invoiceNumber ? await Invoice.findOne({ organization: ctx.org, invoiceNumber: d.invoiceNumber, customer: c._id }, { _id: 1 }).lean() : null;
-        const cn = await call(require("../../routes/creditNotes"), "POST", "/", ctx, { ...common, number: d.number, reference: `Amazon refund against ${d.invoiceNumber}`, invoice: inv ? String(inv._id) : "", reason: "Sales return (Amazon refund)", status: "open" });
+        const cn = await call(require("../../routes/creditNotes"), "POST", "/", ctx, { ...common, number: d.number, reference: d.invoiceNumber ? `${S.label} refund against ${d.invoiceNumber}` : `${S.label} ${d.events?.join(", ") || "return"}`.slice(0, 100), invoice: inv ? String(inv._id) : "", reason: `Sales return (${S.label})`, status: "open" });
         await CreditNote.updateOne({ _id: cn._id }, { $set: { importRef: ref } });
         job.created.creditNotes++;
       }
@@ -413,11 +435,11 @@ async function moveB2b(ctx, month, req) {
 }
 
 /* ---------------- check against Amazon's GSTR-1 ---------------- */
-async function imported(org, gstin, month) {
+async function imported(org, gstin, month, source = "amazon") {
   const [y, m] = month.split("-").map(Number);
   const from = new Date(Date.UTC(y, m - 2, 1));
   const to = new Date(Date.UTC(y, m + 1, 1));
-  const prefix = `amazon:${gstin}:${month}:`;
+  const prefix = `${source}:${gstin}:${month}:`;
   const q = { organization: org, date: { $gte: from, $lt: to } };
   const [invs, cns] = await Promise.all([Invoice.find(q).lean(), CreditNote.find(q).lean()]);
   const mine = (x) => String(x.importRef || "").startsWith(prefix);
@@ -613,8 +635,75 @@ async function reconcile(org, month, files) {
   };
 }
 
+/* ---------------- check against Flipkart's GSTR-1 report ---------------- */
+// Imported Flipkart documents of the month vs Flipkart's GSTR-1 / GSTR-8 report: totals, B2C by place of supply
+// and rate (7A local, 7B outstate), and the HSN summary.
+async function reconcileFlipkart(org, month, files) {
+  const o = await Organization.findById(org);
+  const gstin = String(o.gstin || "").toUpperCase();
+  const u = F.unpack(files);
+  if (!u.gstr1.length) throw new Error("Select Flipkart's GSTR-1 report for the month (the workbook with Section 7(B)(2), 12, 13…)");
+  const g = F.readGstr1(u.gstr1[0].wb);
+  const { invoices, creditNotes } = await imported(org, gstin, month, "flipkart");
+  const docs = [...invoices.map((d) => ({ d, s: 1 })), ...creditNotes.map((d) => ({ d, s: -1 }))];
+  const mine = { taxable: 0, igst: 0, cgst: 0, sgst: 0 };
+  const b2cs = new Map();
+  const hsn = new Map();
+  for (const { d, s } of docs) {
+    mine.taxable += s * (d.subTotal || 0);
+    mine.igst += s * (d.igst || 0);
+    mine.cgst += s * (d.cgst || 0);
+    mine.sgst += s * (d.sgst || 0);
+    const local = (d.placeOfSupply || o.state) === o.state;
+    for (const l of d.lineItems || []) {
+      const k = `${local ? "" : d.placeOfSupply}|${Number(l.taxRate) || 0}`;
+      const x = b2cs.get(k) || { pos: local ? "" : d.placeOfSupply, rate: Number(l.taxRate) || 0, ordexago: 0 };
+      x.ordexago += s * (l.amount || 0);
+      b2cs.set(k, x);
+      const h = String(l.hsnSac || "").trim() || "(none)";
+      const y = hsn.get(h) || { hsn: h, ordexago: 0 };
+      y.ordexago += s * (l.amount || 0);
+      hsn.set(h, y);
+    }
+  }
+  const near = (a, b) => Math.abs(round2(a) - round2(b)) <= 1;
+  const rows = new Map([...b2cs.values()].map((x) => [`${x.pos}|${x.rate}`, { ...x, flipkart: 0 }]));
+  for (const r of [...g.b2csLocal, ...g.b2csOut, ...g.b2cl]) {
+    const k = `${r.pos === o.state ? "" : r.pos}|${r.rate}`;
+    const x = rows.get(k) || { pos: r.pos === o.state ? "" : r.pos, rate: r.rate, ordexago: 0, flipkart: 0 };
+    x.flipkart += r.taxable;
+    rows.set(k, x);
+  }
+  const b2csRows = [...rows.values()].map((x) => ({ ...x, ordexago: round2(x.ordexago), flipkart: round2(x.flipkart), ok: near(x.ordexago, x.flipkart) })).filter((x) => x.ordexago || x.flipkart).sort((a, b) => a.pos.localeCompare(b.pos) || a.rate - b.rate);
+  const hRows = new Map([...hsn.values()].map((x) => [x.hsn, { ...x, flipkart: 0 }]));
+  for (const r of g.hsn) {
+    const x = hRows.get(r.hsn) || { hsn: r.hsn, ordexago: 0, flipkart: 0 };
+    x.flipkart += r.taxable;
+    hRows.set(r.hsn, x);
+  }
+  const hsnRows = [...hRows.values()].map((x) => ({ ...x, ordexago: round2(x.ordexago), flipkart: round2(x.flipkart), ok: near(x.ordexago, x.flipkart) })).sort((a, b) => a.hsn.localeCompare(b.hsn));
+  const fk = g.tcs || { net: g.b2csLocal.concat(g.b2csOut).reduce((t, r) => t + r.taxable, 0), igst: 0, cgst: 0, sgst: 0, tcs: 0 };
+  const totals = [
+    { label: "Net taxable value", flipkart: round2(fk.net), ordexago: round2(mine.taxable) },
+    { label: "IGST", flipkart: round2(fk.igst), ordexago: round2(mine.igst) },
+    { label: "CGST", flipkart: round2(fk.cgst), ordexago: round2(mine.cgst) },
+    { label: "SGST", flipkart: round2(fk.sgst), ordexago: round2(mine.sgst) },
+  ].map((x) => ({ ...x, ok: near(x.flipkart, x.ordexago) }));
+  return {
+    month,
+    gstin,
+    documents: { invoices: invoices.length, creditNotes: creditNotes.length },
+    tcs: round2(fk.tcs || 0),
+    totals,
+    b2cs: { rows: b2csRows, ok: b2csRows.every((r) => r.ok) },
+    // Flipkart's HSN summary nets returns of earlier months by HSN; small differences per HSN can be that.
+    hsn: { rows: hsnRows, ok: hsnRows.every((r) => r.ok) },
+    ok: totals.every((x) => x.ok),
+  };
+}
+
 // Months imported so far, with counts and totals (for the Amazon page).
-async function months(org) {
+async function months(org, source = "amazon") {
   const o = await Organization.findById(org, { gstin: 1 });
   const since = new Date(Date.now() - 400 * 86400000);
   const [invs, cns] = await Promise.all([
@@ -623,7 +712,7 @@ async function months(org) {
   ]);
   const by = new Map();
   const take = (d, kind) => {
-    const m = String(d.importRef || "").match(/^amazon:([^:]+):(\d{4}-\d{2}):/);
+    const m = String(d.importRef || "").match(new RegExp(`^${source}:([^:]+):(\\d{4}-\\d{2}):`));
     if (!m) return;
     const k = `${m[1]}|${m[2]}`;
     const x = by.get(k) || { gstin: m[1], month: m[2], invoices: 0, b2b: 0, creditNotes: 0, taxable: 0, value: 0 };
@@ -644,4 +733,4 @@ async function months(org) {
   return { gstin: o?.gstin || "", months: [...by.values()].sort((a, b) => b.month.localeCompare(a.month)) };
 }
 
-module.exports = { b2bOnParty, moveB2b, preview, startImport, jobOf, reconcile, months, monthOfName, salesLedger, skuMatcher, ledgerName, keyFor, norm };
+module.exports = { reconcileFlipkart, b2bOnParty, moveB2b, preview, startImport, jobOf, reconcile, months, monthOfName, salesLedger, skuMatcher, ledgerName, keyFor, norm };

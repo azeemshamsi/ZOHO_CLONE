@@ -37,6 +37,7 @@ const NAV = [
       { to: "/credit-notes", label: "Credit Notes", mod: "sales.credit_notes" },
       { to: "/sales-ledgers", label: "Sales Ledgers", mod: "sales.ledgers" },
       { to: "/amazon", label: "Amazon Sales", mod: "sales.amazon" },
+      { to: "/flipkart-sales", label: "Flipkart Sales", mod: "sales.flipkart" },
     ],
   },
   {
@@ -144,6 +145,7 @@ const PATH_MODULES = [
   ["/inventory", "inventory"],
   ["/gst", "gst"],
   ["/itc", ["gst", "purchases", "accountant", "reports"]],
+  ["/flipkart-sales", "sales.flipkart"],
   ["/amazon", "sales.amazon"],
   ["/quotes", "sales.quotes"],
   ["/sales-orders", "sales.sales_orders"],

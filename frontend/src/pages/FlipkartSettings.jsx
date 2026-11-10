@@ -228,7 +228,7 @@ export default function FlipkartSettings() {
 
         <h4 className="section-title">Books</h4>
         <p className="small muted" style={{ marginTop: 0 }}>
-          Flipkart orders aren't invoiced one by one here: Flipkart's sales go into the books with the monthly Flipkart import (Sales → Flipkart Sales, coming next).
+          Flipkart orders aren't invoiced one by one here: Flipkart's sales go into the books with the monthly import in Sales → Flipkart Sales.
         </p>
 
         <div className="form-actions">

@@ -49,7 +49,7 @@ import Settings from "./pages/Settings";
 import ComingSoon from "./pages/ComingSoon";
 import Superadmin from "./pages/Superadmin";
 import Itc from "./pages/Itc";
-import AmazonSales from "./pages/AmazonSales";
+import AmazonSales, { FlipkartSales } from "./pages/AmazonSales";
 import AmazonSettings from "./pages/AmazonSettings";
 import FlipkartSettings from "./pages/FlipkartSettings";
 import Privacy from "./pages/Privacy";
@@ -123,6 +123,7 @@ export default function App() {
           <Route path="gst/reconcile" element={<GstReconcile />} />
           <Route path="itc" element={<Itc />} />
           <Route path="amazon" element={<AmazonSales />} />
+          <Route path="flipkart-sales" element={<FlipkartSales />} />
           <Route path="amazon-settings" element={<AmazonSettings />} />
           <Route path="flipkart-settings" element={<FlipkartSettings />} />
           <Route path="e-invoices" element={<GstCompliance tab="einvoice" />} />

@@ -16,13 +16,26 @@ const readFile = (file) =>
   });
 const monthLabel = (m) => (m ? new Date(`${m}-15T00:00:00Z`).toLocaleString("en-IN", { month: "long", year: "numeric", timeZone: "UTC" }) : "");
 
+// The marketplaces this page imports (same posting; Amazon also has the per-invoice GSTR-1 check and B2B move).
+const SOURCES = {
+  amazon: { key: "amazon", api: "/amazon", label: "Amazon", title: "Amazon Sales", subtitle: "Import Amazon's Merchant Tax Report and check it against Amazon's GSTR-1 report", b2c: "Amazon B2C", ledger: "Amazon Sales" },
+  flipkart: { key: "flipkart", api: "/flipkart-sales", label: "Flipkart", title: "Flipkart Sales", subtitle: "Import Flipkart's monthly Sales Report and check it against Flipkart's GSTR-1 report", b2c: "Flipkart B2C", ledger: "Flipkart Sales" },
+};
+
 export default function AmazonSales() {
+  return <MarketplaceSales S={SOURCES.amazon} />;
+}
+export function FlipkartSales() {
+  return <MarketplaceSales S={SOURCES.flipkart} />;
+}
+
+function MarketplaceSales({ S }) {
   const [list, setList] = useState(null);
   const [check, setCheck] = useState(null); // { month, result }
   const [moveFor, setMoveFor] = useState(null);
   const loadMonths = () =>
     api
-      .get("/amazon/months")
+      .get(`${S.api}/months`)
       .then((r) => setList(r.data))
       .catch((e) => toast(errMsg(e), "error"));
   useEffect(() => {
@@ -30,11 +43,12 @@ export default function AmazonSales() {
   }, []);
   return (
     <>
-      <PageHeader title="Amazon Sales" subtitle="Import Amazon's Merchant Tax Report and check it against Amazon's GSTR-1 report" />
+      <PageHeader title={S.title} subtitle={S.subtitle} />
       <ImportBox
+        S={S}
         onImported={(month, gstr1Files) => {
           loadMonths();
-          if (gstr1Files?.length) runCheck(month, gstr1Files, setCheck);
+          if (gstr1Files?.length) runCheck(S, month, gstr1Files, setCheck);
         }}
       />
       <div className="card" style={{ marginTop: 16, overflowX: "auto" }}>
@@ -44,12 +58,12 @@ export default function AmazonSales() {
         {!list ? (
           <Spinner />
         ) : !list.months.length ? (
-          <Empty title="Nothing imported yet" text="Upload Amazon's MTR B2C and B2B reports (the zips as downloaded are fine)." />
+          <Empty title="Nothing imported yet" text={S.key === "flipkart" ? "Upload Flipkart's Sales Report for a month (the Excel file as downloaded)." : "Upload Amazon's MTR B2C and B2B reports (the zips as downloaded are fine)."} />
         ) : (
           <table className="table">
             <thead>
               <tr>
-                <th>Month (Amazon report)</th>
+                <th>Month ({S.label} report)</th>
                 <th>GSTIN</th>
                 <th className="num">Invoices</th>
                 <th className="num">of which B2B</th>
@@ -71,8 +85,8 @@ export default function AmazonSales() {
                   <td className="num">{money(m.value)}</td>
                   <td className="num">
                     <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                      <CheckButton month={m.month} onResult={setCheck} />
-                      {m.b2b > 0 && (
+                      <CheckButton S={S} month={m.month} onResult={setCheck} />
+                      {m.b2b > 0 && S.key === "amazon" && (
                         <button className="btn btn-sm" onClick={() => setMoveFor(m.month)} title="B2B invoices recorded under the Amazon party ledger → their buyers">
                           Move B2B to buyers
                         </button>
@@ -85,15 +99,15 @@ export default function AmazonSales() {
           </table>
         )}
       </div>
-      {check && <CheckResult r={check} onClose={() => setCheck(null)} />}
+      {check && (S.key === "flipkart" ? <FlipkartCheck r={check} onClose={() => setCheck(null)} /> : <CheckResult r={check} onClose={() => setCheck(null)} />)}
       {moveFor && <MoveB2b month={moveFor} onClose={() => setMoveFor(null)} />}
     </>
   );
 }
 
-async function runCheck(month, files, setCheck) {
+async function runCheck(S, month, files, setCheck) {
   try {
-    const { data } = await api.post("/amazon/reconcile", { month, files });
+    const { data } = await api.post(`${S.api}/reconcile`, { month, files });
     setCheck(data);
   } catch (e) {
     toast(errMsg(e), "error");
@@ -195,7 +209,7 @@ function MoveB2b({ month, onClose }) {
   );
 }
 
-function CheckButton({ month, onResult }) {
+function CheckButton({ S, month, onResult }) {
   const ref = useRef(null);
   const [busy, setBusy] = useState(false);
   const pick = async (e) => {
@@ -203,20 +217,20 @@ function CheckButton({ month, onResult }) {
     e.target.value = "";
     if (!fs.length) return;
     setBusy(true);
-    await runCheck(month, await Promise.all(fs.map(readFile)), onResult);
+    await runCheck(S, month, await Promise.all(fs.map(readFile)), onResult);
     setBusy(false);
   };
   return (
     <>
       <input ref={ref} type="file" multiple accept=".xlsx,.zip,.csv" style={{ display: "none" }} onChange={pick} />
-      <button className="btn btn-sm" disabled={busy} onClick={() => ref.current?.click()} title="Select Amazon's GSTR-1 report for this month — add the MTR B2C and B2B files too to see each invoice">
-        {busy ? "Checking…" : "Check with Amazon GSTR-1"}
+      <button className="btn btn-sm" disabled={busy} onClick={() => ref.current?.click()} title={S.key === "flipkart" ? "Select Flipkart's GSTR-1 report for this month" : "Select Amazon's GSTR-1 report for this month — add the MTR B2C and B2B files too to see each invoice"}>
+        {busy ? "Checking…" : `Check with ${S.label} GSTR-1`}
       </button>
     </>
   );
 }
 
-function ImportBox({ onImported }) {
+function ImportBox({ S, onImported }) {
   const [files, setFiles] = useState([]);
   const [raw, setRaw] = useState([]);
   const [pv, setPv] = useState(null);
@@ -233,7 +247,7 @@ function ImportBox({ onImported }) {
       .catch(() => {});
   }, []);
   useEffect(() => {
-    const a = ledgers.find((l) => l.name === "Amazon Sales");
+    const a = ledgers.find((l) => l.name === S.ledger);
     if (a && !ledger) setLedger(a.code || a._id);
   }, [ledgers]);
 
@@ -247,7 +261,7 @@ function ImportBox({ onImported }) {
   const preview = async () => {
     setBusy(true);
     try {
-      const { data } = await api.post("/amazon/preview", { files: raw });
+      const { data } = await api.post(`${S.api}/preview`, { files: raw });
       setPv(data);
       // Tally-style posting when the company has an "Online Sale" master ledger and an Amazon_SRE party.
       setMode(data.posting?.group ? "online" : "single");
@@ -260,11 +274,11 @@ function ImportBox({ onImported }) {
   const start = async () => {
     setBusy(true);
     try {
-      const { data } = await api.post("/amazon/import", { planId: pv.planId, ledger, mode, party });
+      const { data } = await api.post(`${S.api}/import`, { planId: pv.planId, ledger, mode, party });
       setJob(data);
       const poll = setInterval(async () => {
         try {
-          const { data: j } = await api.get(`/amazon/jobs/${data.id}`);
+          const { data: j } = await api.get(`${S.api}/jobs/${data.id}`);
           setJob(j);
           if (j.status !== "running") {
             clearInterval(poll);
@@ -294,11 +308,17 @@ function ImportBox({ onImported }) {
   return (
     <div className="card">
       <div className="card-head">
-        <h3>Import from Amazon</h3>
+        <h3>Import from {S.label}</h3>
       </div>
+      {S.key === "flipkart" ? (
+        <p className="small muted" style={{ marginTop: 0 }}>
+          Seller Hub → Reports → Tax reports: download the <strong>Sales Report</strong> for the month (and the <strong>GSTR-1 report</strong> to check against). Upload the Excel files as they are. Each Flipkart invoice becomes an invoice (B2C to "Flipkart B2C" or your Flipkart party, B2B to the buyer), each return or cancellation a credit note; bank-offer cash back notes from the Cash Back sheet are included, so the month equals Flipkart's GSTR-8. Importing the same month again only adds what's new.
+        </p>
+      ) : (
       <p className="small muted" style={{ marginTop: 0 }}>
         Seller Central → Reports → Tax Document Library: download <strong>MTR B2C</strong> and <strong>MTR B2B</strong> for the month (and the <strong>GSTR-1 report</strong> to check against). Upload the zips as they are. Each Amazon invoice becomes an invoice (B2C to "Amazon B2C", B2B to the buyer), each refund a credit note; cancellations, free replacements and other GSTINs are skipped. Importing the same month again only adds what's new.
       </p>
+      )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <input type="file" multiple accept=".zip,.csv,.xlsx" onChange={choose} />
         <button className="btn btn-primary" disabled={!raw.length || busy} onClick={preview}>
@@ -315,18 +335,18 @@ function ImportBox({ onImported }) {
           <table className="table">
             <thead>
               <tr>
-                <th>From Amazon's MTR</th>
+                <th>From {S.key === "flipkart" ? "Flipkart's Sales Report" : "Amazon's MTR"}</th>
                 <th className="num">Documents</th>
                 <th className="num">Taxable</th>
                 <th className="num">GST</th>
                 <th className="num">Value</th>
-                <th className="num">TCS by Amazon</th>
+                <th className="num">TCS by {S.label}</th>
               </tr>
             </thead>
             <tbody>
               {row("B2C invoices", pv.b2cInvoices)}
               {row("B2B invoices", pv.b2bInvoices)}
-              {row("Refunds (credit notes)", pv.creditNotes)}
+              {row(S.key === "flipkart" ? "Returns & cancellations (credit notes)" : "Refunds (credit notes)", pv.creditNotes)}
               <tr className="row-total">
                 <td>Net sales</td>
                 <td />
@@ -342,28 +362,37 @@ function ImportBox({ onImported }) {
               <strong>{pv.toCreate}</strong> to create{pv.fromOrders ? ` · ${pv.fromOrders} already invoiced from Amazon orders (tagged with Amazon's number, not created again)` : ""}{pv.alreadyImported ? ` · ${pv.alreadyImported} already imported (left as they are)` : ""}
               {pv.conflicts.length > 0 && <span style={{ color: "var(--red)" }}> · {pv.conflicts.length} numbers already used by other documents, skipped: {pv.conflicts.slice(0, 8).join(", ")}{pv.conflicts.length > 8 ? "…" : ""}</span>}
             </li>
-            <li>
-              Skipped lines: {pv.skipped.cancel} cancelled, {pv.skipped.freeReplacement} free replacements
-              {Object.entries(pv.skipped.otherGstin).map(([g, n]) => ` · ${n} of GSTIN ${g}`)}
-            </li>
+            {S.key === "amazon" ? (
+              <li>
+                Skipped lines: {pv.skipped.cancel} cancelled, {pv.skipped.freeReplacement} free replacements
+                {Object.entries(pv.skipped.otherGstin).map(([g, n]) => ` · ${n} of GSTIN ${g}`)}
+              </li>
+            ) : (
+              (pv.skipped.other > 0 || Object.keys(pv.skipped.otherGstin).length > 0) && (
+                <li>
+                  Skipped rows: {pv.skipped.other} without a document number or value
+                  {Object.entries(pv.skipped.otherGstin).map(([g, n]) => ` · ${n} of GSTIN ${g}`)}
+                </li>
+              )
+            )}
             {pv.newBuyers.length > 0 && <li>{pv.newBuyers.length} new B2B customers will be created: {pv.newBuyers.slice(0, 5).join(", ")}{pv.newBuyers.length > 5 ? "…" : ""}</li>}
             {pv.unmatchedSkus.length > 0 && (
               <li>
-                {pv.unmatchedSkus.length} Amazon SKUs have no item in OrdexaGo — those lines are imported without stock movement:{" "}
+                {pv.unmatchedSkus.length} {S.label} SKUs have no item in OrdexaGo — those lines are imported without stock movement:{" "}
                 <span className="muted">{pv.unmatchedSkus.slice(0, 12).map((s) => s.sku).join(", ")}{pv.unmatchedSkus.length > 12 ? "…" : ""}</span>
               </li>
             )}
           </ul>
           {pv.posting?.onParty && party && (
             <div className="alert alert-error small" style={{ marginBottom: 10 }}>
-              {pv.posting.party.name} already has {pv.posting.onParty.count} invoices worth {money(pv.posting.onParty.total)} in {pv.month} that didn't come from this import (e.g. from Tally). If those are the same Amazon sales, importing would count them twice — skip this month.
+              {pv.posting.party.name} already has {pv.posting.onParty.count} invoices worth {money(pv.posting.onParty.total)} in {pv.month} that didn't come from this import (e.g. from Tally). If those are the same {S.label} sales, importing would count them twice — skip this month.
             </div>
           )}
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
             <Field label="Party (customer)">
               <select value={party} onChange={(e) => setParty(e.target.value)}>
                 {pv.posting?.party && <option value={pv.posting.party._id}>{pv.posting.party.name} for B2C · each business buyer (GSTIN) for B2B</option>}
-                <option value="">Amazon B2C + each business buyer separately</option>
+                <option value="">{S.b2c} + each business buyer separately</option>
               </select>
             </Field>
             <Field label="Sales ledgers">
@@ -375,7 +404,7 @@ function ImportBox({ onImported }) {
             {mode === "single" && (
             <Field label="Sales ledger">
               <select value={ledger} onChange={(e) => setLedger(e.target.value)}>
-                {!ledgers.some((l) => l.name === "Amazon Sales") && <option value="">Amazon Sales (new ledger)</option>}
+                {!ledgers.some((l) => l.name === S.ledger) && <option value="">{S.ledger} (new ledger)</option>}
                 {ledgers.map((l) => (
                   <option key={l.code || l._id} value={l.code || l._id}>
                     {l.name}
@@ -647,5 +676,83 @@ function CheckResult({ r, onClose }) {
         </table>
       )}
     </div>
+  );
+}
+
+// OrdexaGo's imported Flipkart month vs Flipkart's GSTR-1 / GSTR-8 report.
+function FlipkartCheck({ r, onClose }) {
+  const mark = (ok) => <span style={{ color: ok ? "var(--green, #15803d)" : "var(--red)" }}>{ok ? "✓" : "Differs"}</span>;
+  return (
+    <Modal open wide title={`${monthLabel(r.month)} · OrdexaGo vs Flipkart's GSTR-1 (${r.gstin})`} onClose={onClose}>
+      <p className="small">
+        {r.documents.invoices} invoices and {r.documents.creditNotes} credit notes imported for this month. {r.ok ? "Totals match Flipkart's report." : "Some totals differ — see below."}
+        {r.tcs ? ` TCS collected by Flipkart: ${money(r.tcs)}.` : ""}
+      </p>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Total</th>
+            <th className="num">Flipkart</th>
+            <th className="num">OrdexaGo</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {r.totals.map((x) => (
+            <tr key={x.label}>
+              <td>{x.label}</td>
+              <td className="num">{money(x.flipkart)}</td>
+              <td className="num">{money(x.ordexago)}</td>
+              <td className="small">{mark(x.ok)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <h4 className="section-title">B2C by place of supply and rate (GSTR-1 Table 7)</h4>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Place of supply</th>
+            <th className="num">Rate</th>
+            <th className="num">Flipkart taxable</th>
+            <th className="num">OrdexaGo taxable</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {r.b2cs.rows.map((x, i) => (
+            <tr key={i}>
+              <td>{x.pos || "Within the state (7A)"}</td>
+              <td className="num">{x.rate}%</td>
+              <td className="num">{money(x.flipkart)}</td>
+              <td className="num">{money(x.ordexago)}</td>
+              <td className="small">{mark(x.ok)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <h4 className="section-title">HSN summary (GSTR-1 Table 12)</h4>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>HSN</th>
+            <th className="num">Flipkart taxable</th>
+            <th className="num">OrdexaGo taxable</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {r.hsn.rows.map((x) => (
+            <tr key={x.hsn}>
+              <td>{x.hsn}</td>
+              <td className="num">{money(x.flipkart)}</td>
+              <td className="num">{money(x.ordexago)}</td>
+              <td className="small">{mark(x.ok)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="small muted">Flipkart's HSN summary shows returns of earlier months under each HSN the way Flipkart counts them; a small difference in one HSN with matching totals is usually that.</p>
+    </Modal>
   );
 }

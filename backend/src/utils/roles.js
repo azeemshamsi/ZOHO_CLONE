@@ -23,7 +23,7 @@ const MODULES = [
 // Pages inside a module that a custom role can set on their own ("purchases.purchase_orders"). A page with no
 // setting of its own follows its module.
 const FEATURES = {
-  sales: [["customers", "Customers"], ["quotes", "Quotes"], ["sales_orders", "Sales Orders"], ["invoices", "Invoices"], ["recurring", "Recurring Invoices"], ["payments", "Payments Received"], ["credit_notes", "Credit Notes"], ["ledgers", "Sales Ledgers"], ["amazon", "Amazon Sales"], ["projects", "Time Tracking (projects, timesheet)"]],
+  sales: [["customers", "Customers"], ["quotes", "Quotes"], ["sales_orders", "Sales Orders"], ["invoices", "Invoices"], ["recurring", "Recurring Invoices"], ["payments", "Payments Received"], ["credit_notes", "Credit Notes"], ["ledgers", "Sales Ledgers"], ["amazon", "Amazon Sales"], ["flipkart", "Flipkart Sales"], ["projects", "Time Tracking (projects, timesheet)"]],
   purchases: [["vendors", "Vendors"], ["expenses", "Expenses"], ["purchase_orders", "Purchase Orders"], ["bills", "Bills"], ["recurring", "Recurring Bills & Expenses"], ["payments_made", "Payments Made"], ["vendor_credits", "Vendor Credits"], ["ledgers", "Purchase Ledgers"]],
   items: [["items", "Items"], ["adjustments", "Inventory Adjustments"], ["transfer_orders", "Transfer Orders"]],
   accountant: [["journals", "Manual Journals"], ["accounts", "Chart of Accounts"], ["fixed_assets", "Fixed Assets"], ["budgets", "Budgets"]],
