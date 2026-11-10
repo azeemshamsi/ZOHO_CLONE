@@ -36,6 +36,7 @@ const opt = (n) => {
   }
   const folder = opt("backup") || folders[folders.length - 1];
   if (!folder) throw new Error("No backups found in the bucket");
+  if (!folders.includes(folder)) throw new Error(`No backup named ${folder}. Backups in the bucket:\n${folders.join("\n")}\n(or leave out --backup to check the latest)`);
   const manifest = JSON.parse((await B.getObject(client, c.bucket, `${B.ROOT}${folder}/manifest.json`)).toString("utf8"));
   const key = B.backupKey(c.key);
   const only = opt("only") ? opt("only").split(",").map((s) => s.trim()) : null;
