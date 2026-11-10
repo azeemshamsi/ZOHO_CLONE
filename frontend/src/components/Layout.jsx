@@ -38,6 +38,7 @@ const NAV = [
       { to: "/sales-ledgers", label: "Sales Ledgers", mod: "sales.ledgers" },
       { to: "/amazon", label: "Amazon Sales", mod: "sales.amazon" },
       { to: "/flipkart-sales", label: "Flipkart Sales", mod: "sales.flipkart" },
+      { to: "/pepperfry-sales", label: "Pepperfry Sales", mod: "sales.pepperfry" },
     ],
   },
   {
@@ -146,6 +147,7 @@ const PATH_MODULES = [
   ["/gst", "gst"],
   ["/itc", ["gst", "purchases", "accountant", "reports"]],
   ["/flipkart-sales", "sales.flipkart"],
+  ["/pepperfry-sales", "sales.pepperfry"],
   ["/amazon", "sales.amazon"],
   ["/quotes", "sales.quotes"],
   ["/sales-orders", "sales.sales_orders"],

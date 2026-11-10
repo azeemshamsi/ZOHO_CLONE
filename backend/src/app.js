@@ -55,7 +55,7 @@ app.use("/api/inbox/conversations", express.json({ limit: "25mb" }));
 app.use("/api/import", express.json({ limit: "80mb" }));
 app.use(["/api/attachments", "/api/bill-scan", "/api/gst/returns/2b", "/api/seller-portal"], express.json({ limit: "15mb" }));
 app.use("/api/amazon", express.json({ limit: "60mb" }));
-app.use("/api/flipkart-sales", express.json({ limit: "60mb" }));
+app.use(["/api/flipkart-sales", "/api/pepperfry-sales"], express.json({ limit: "60mb" }));
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/api/health", (req, res) => res.send({ ok: true }));
@@ -111,6 +111,7 @@ app.use("/api/sellers", auth, permit((req) => (req.method === "GET" && req.path 
 app.use("/api/seller-portal", auth, require("./routes/sellerPortal"));
 app.use("/api/flipkart-orders", auth, permit((req) => require("./routes/flipkartOrders").moduleOf(req)), require("./routes/flipkartOrders"));
 app.use("/api/amazon-orders", auth, permit((req) => require("./routes/amazonOrders").moduleOf(req)), require("./routes/amazonOrders"));
+app.use("/api/pepperfry-sales", auth, permit((req) => (req.method === "GET" ? ["sales.pepperfry", "gst"] : "sales.pepperfry")), require("./routes/flipkartSales").pepperfry);
 app.use("/api/flipkart-sales", auth, permit((req) => (req.method === "GET" ? ["sales.flipkart", "gst"] : "sales.flipkart")), require("./routes/flipkartSales"));
 app.use("/api/amazon", auth, permit((req) => (req.method === "GET" ? ["sales.amazon", "gst"] : "sales.amazon")), require("./routes/amazon"));
 app.use("/api/attachments", auth, require("./routes/attachments"));

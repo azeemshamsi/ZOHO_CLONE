@@ -14,10 +14,12 @@ const { computeTotals } = require("../gst");
 const { round2 } = require("./common");
 const A = require("./amazon");
 const F = require("./flipkart");
+const P = require("./pepperfry");
 
 // Marketplaces whose monthly tax reports this import posts (same documents, ledgers and party logic).
 const SRC = {
   amazon: { key: "amazon", label: "Amazon", b2c: "Amazon B2C", ledger: "Amazon Sales", party: /^amazon[\s_-]*sre$/i, report: "Amazon's Merchant Tax Report" },
+  pepperfry: { key: "pepperfry", label: "Pepperfry", b2c: "Pepperfry B2C", ledger: "Pepperfry Sales", party: /^pepperfry[\s_-]*sre$/i, report: "Pepperfry's GSTR-1 report" },
   flipkart: { key: "flipkart", label: "Flipkart", b2c: "Flipkart B2C", ledger: "Flipkart Sales", party: /^flipkart[\s_-]*sre$/i, report: "Flipkart's Sales Report" },
 };
 const srcOf = (k) => SRC[k] || SRC.amazon;
@@ -132,7 +134,12 @@ async function preview(org, files, source = "amazon") {
   const gstin = o.gstin.toUpperCase();
   let u;
   let p;
-  if (S.key === "flipkart") {
+  if (S.key === "pepperfry") {
+    u = P.unpack(files);
+    if (!u.sales && !u.refunds) throw new Error(`No Pepperfry GSTR-1 report found${u.unknown.length ? ` — not recognised: ${u.unknown.join(", ")}` : ""}. Download the GSTR-1 report (and the TCS report) for the month from the Pepperfry seller panel.`);
+    p = P.plan(u, gstin);
+    u.gstr1 = u.summary ? [u] : [];
+  } else if (S.key === "flipkart") {
     u = F.unpack(files);
     if (!u.sales.length) throw new Error(`No Flipkart Sales Report found${u.unknown.length ? ` — not recognised: ${u.unknown.join(", ")}` : ""}. Download it from Seller Hub → Reports → Tax reports.`);
     p = F.plan(u.sales, u.cashback, gstin);
@@ -183,7 +190,7 @@ async function preview(org, files, source = "amazon") {
   const posting = await postingInfo(org, o, docs.filter((d) => d.state === "new"), S);
   posting.onParty = posting.party ? await existingOnParty(org, posting.party._id, month, S) : null;
   const id = crypto.randomUUID();
-  plans.set(id, { org: String(org), gstin, month, plan: p, at: Date.now(), src: S.key, gstr1: S.key === "flipkart" ? u.gstr1 : null });
+  plans.set(id, { org: String(org), gstin, month, plan: p, at: Date.now(), src: S.key, gstr1: S.key !== "amazon" ? u.gstr1 : null });
   return {
     planId: id,
     gstin,
@@ -191,7 +198,7 @@ async function preview(org, files, source = "amazon") {
     files: u.names,
     unknownFiles: u.unknown,
     source: S.key,
-    hasGstr1: S.key === "flipkart" ? u.gstr1.length > 0 : u.gstr1.some((g) => g.gstin === gstin),
+    hasGstr1: S.key !== "amazon" ? u.gstr1.length > 0 : u.gstr1.some((g) => g.gstin === gstin),
     b2cInvoices: part(p.invoices.filter((d) => !d.b2b)),
     b2bInvoices: part(p.invoices.filter((d) => d.b2b)),
     creditNotes: part(p.creditNotes),
@@ -253,7 +260,7 @@ function startImport(ctx, planId, { ledger, mode, party } = {}) {
   const docs = [...pl.plan.invoices, ...pl.plan.creditNotes].filter((d) => d.state === "new" || d.state === "ordexago");
   const job = { id, org: String(ctx.org), status: "running", total: docs.length, done: 0, created: { invoices: 0, creditNotes: 0, linked: 0 }, errors: [], warnings: [], at: Date.now(), month: pl.month };
   jobs.set(id, job);
-  if (pl.src !== "flipkart") keepMonth(ctx.org, pl.gstin, pl.month, pl.plan);
+  if (pl.src === "amazon") keepMonth(ctx.org, pl.gstin, pl.month, pl.plan);
   run(ctx, pl, docs, { ledger, mode, party }, job).catch((e) => {
     job.status = "failed";
     job.errors.push({ number: "", message: e.message });
@@ -337,7 +344,9 @@ async function run(ctx, pl, docs, opts, job) {
         ...(adjustment ? { adjustment } : {}),
         shipTo: { name: "", phone: "", street: "", city: d.shipTo.city, state: d.shipTo.state, pincode: d.shipTo.pincode, country: "India" },
         customerNotes:
-          S.key === "flipkart"
+          S.key === "pepperfry"
+            ? `Pepperfry order${d.orders.length > 1 ? "s" : ""} ${d.orders.join(", ")}${d.kind === "creditNote" && d.invoiceNumber ? ` · return of invoice ${d.invoiceNumber}` : ""}${d.tcs ? ` · TCS by Pepperfry ₹${Math.abs(d.tcs)}` : ""}${d.b2b && d.buyerName ? ` · Buyer: ${d.buyerName} (${d.buyerGstin})` : ""}`
+            : S.key === "flipkart"
             ? `Flipkart${d.shopsy ? " (Shopsy)" : ""} order${d.orders.length > 1 ? "s" : ""} ${d.orders.join(", ")}${d.events?.length ? ` · ${d.events.join(", ")}` : ""}${d.payment ? ` · ${d.payment}` : ""}${d.tcs ? ` · TCS by Flipkart ₹${Math.abs(d.tcs)}` : ""}${d.tds ? ` · TDS ₹${Math.abs(d.tds)}` : ""}${d.b2b && d.buyerName ? ` · Buyer: ${d.buyerName} (${d.buyerGstin})` : ""}`
             : `Amazon ${d.channel === "AFN" ? "FBA" : d.channel === "MFN" ? "self-ship" : ""} order${d.orders.length > 1 ? "s" : ""} ${d.orders.join(", ")}${d.payment ? ` · ${d.payment}` : ""}${d.tcs ? ` · TCS by Amazon ₹${Math.abs(d.tcs)}` : ""}`,
       };
@@ -635,6 +644,25 @@ async function reconcile(org, month, files) {
   };
 }
 
+/* ---------------- check against Pepperfry's TCS summary ---------------- */
+async function reconcilePepperfry(org, month, files) {
+  const o = await Organization.findById(org);
+  const gstin = String(o.gstin || "").toUpperCase();
+  const u = P.unpack(files);
+  const sm = P.summaryOf(u);
+  if (!sm) throw new Error("Select Pepperfry's TCS report for the month (the zip with summary_report…csv)");
+  const { invoices, creditNotes } = await imported(org, gstin, month, "pepperfry");
+  const sales = round2(invoices.reduce((t, d) => t + (d.subTotal || 0), 0));
+  const returns = round2(creditNotes.reduce((t, d) => t + (d.subTotal || 0), 0));
+  const near = (a, b) => Math.abs(round2(a) - round2(b)) <= 1;
+  const totals = [
+    { label: "Sales (taxable)", flipkart: round2(sm.b2c + sm.b2b), ordexago: sales },
+    { label: "Returns (taxable)", flipkart: round2(-(sm.b2cReturns + sm.b2bReturns)), ordexago: returns },
+    { label: "Net taxable value", flipkart: round2(sm.net), ordexago: round2(sales - returns) },
+  ].map((x) => ({ ...x, ok: near(x.flipkart, x.ordexago) }));
+  return { month, gstin, source: "pepperfry", documents: { invoices: invoices.length, creditNotes: creditNotes.length }, tcs: round2(sm.tcs), totals, b2cs: { rows: [], ok: true }, hsn: { rows: [], ok: true }, ok: totals.every((x) => x.ok) };
+}
+
 /* ---------------- check against Flipkart's GSTR-1 report ---------------- */
 // Imported Flipkart documents of the month vs Flipkart's GSTR-1 / GSTR-8 report: totals, B2C by place of supply
 // and rate (7A local, 7B outstate), and the HSN summary.
@@ -733,4 +761,4 @@ async function months(org, source = "amazon") {
   return { gstin: o?.gstin || "", months: [...by.values()].sort((a, b) => b.month.localeCompare(a.month)) };
 }
 
-module.exports = { reconcileFlipkart, b2bOnParty, moveB2b, preview, startImport, jobOf, reconcile, months, monthOfName, salesLedger, skuMatcher, ledgerName, keyFor, norm };
+module.exports = { reconcilePepperfry, reconcileFlipkart, b2bOnParty, moveB2b, preview, startImport, jobOf, reconcile, months, monthOfName, salesLedger, skuMatcher, ledgerName, keyFor, norm };

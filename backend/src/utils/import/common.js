@@ -79,6 +79,7 @@ function stateCode(v, gstin = "") {
   const hit = STATES.find(([, name]) => name.toLowerCase().replace(/&/g, "and").replace(/[^a-z]/g, "") === n);
   if (hit) return hit[0];
   if (/orissa/.test(n)) return "21";
+  if (n === "keralam") return "32"; // Kerala's official name since 2024 (Pepperfry uses it)
   if (/pondicherry/.test(n)) return "34";
   if (/delhi/.test(n)) return "07";
   if (gstin && /^\d{2}/.test(gstin)) return String(gstin).slice(0, 2);

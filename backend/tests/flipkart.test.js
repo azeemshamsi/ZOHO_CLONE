@@ -47,3 +47,19 @@ test("Flipkart sales report → documents: sale, return, cash back", () => {
   assert.equal(cb.lines[0].hsn, "44209090");
   assert.equal(cb.taxable, 4);
 });
+
+test("Pepperfry GSTR-1 csv → invoices by order number, returns as PFCN credit notes", () => {
+  const P = require("../src/utils/import/pepperfry");
+  const head = "OrderID-SKU,State,GSTIN,Document Type,Taxability,Supply Type,GSTIN of Recipient,Recipient State,Name of the Recipient,Invoice Number,Invoice Date,Invoice Value,Total Discount,GSTIN of E-Comm Operator,Item Code,Category,HSN/SAC,Product/Service Description,Invoiced Quantity,Sale Price(Before discount),Merchant Discount,Taxable Value,Total GST Rate,IGST (%),IGST Amount,CSGT (%),CGST Amount,SGST/UTGST (%),SGST/UTGST Amount,Ship from (State),Ship to (State),Way Bill No,Credit Note No,Credit Note Date,Credit Note Amount,Taxable Value,Total GST Rate,IGST (%),IGST Amount,CSGT (%),CGST Amount,SGST/UTGST (%),SGST/UTGST Amount,TCS Amount";
+  const row = "1-A-S-PM1,Uttar Pradesh,09ADVFS0745G1ZL,Invoice,Taxable,Inter-state,URD,Keralam,X,1,05/10/2026,1050,0,27AADCT9282F1Z0,A-S-PM1,G,4420,Shelf,1,1050,0,1000,5,5,50,0,0,0,0,Uttar Pradesh,Keralam,,,,0,0,0,5,0,0,0,0,0,5";
+  const sales = { name: "GSTR-1_1_Uttar Pradesh.csv", data: Buffer.from(`${head}\n${row}\n`) };
+  const refunds = { name: "GSTR-1_Refunds_1.csv", data: Buffer.from(`Return Date,Invoiced Qty,Return Qty,${head}\n2026-10-20 10:00:00,1,1.0000,${row}\n`) };
+  const u = P.unpack([sales, refunds]);
+  const p = P.plan(u, "09ADVFS0745G1ZL");
+  assert.equal(p.invoices[0].number, "1");
+  assert.equal(p.invoices[0].pos, "32");
+  assert.equal(p.invoices[0].taxable, 1000);
+  assert.equal(p.creditNotes[0].number, "PFCN1");
+  assert.equal(p.creditNotes[0].taxable, -1000);
+  assert.equal(p.creditNotes[0].amazon.value, -1050);
+});
