@@ -161,6 +161,11 @@ async function preview(org, files, source = "amazon") {
     Customer.find({ organization: org, gstin: { $in: [...new Set(p.invoices.concat(p.creditNotes).filter((d) => d.b2b).map((d) => d.buyerGstin))] } }, { gstin: 1, displayName: 1 }).lean(),
   ]);
   const have = new Map([...invs.map((x) => [`i|${x.invoiceNumber}`, x]), ...cns.map((x) => [`c|${x.number}`, x])]);
+  // Invoices numbered in the company's own series carry the marketplace number only in importRef.
+  if (S.key === "pepperfry") {
+    const pre = `${S.key}:${gstin}:${month}:`;
+    for (const x of await Invoice.find({ organization: org, importRef: { $in: p.invoices.map((d) => pre + d.number) } }, { invoiceNumber: 1, importRef: 1 }).lean()) have.set(`i|${x.importRef.slice(pre.length)}`, x);
+  }
   // Orders OrdexaGo already invoiced from the Amazon connection (and their return credit notes): not imported again.
   const ShopifyOrder = require("../../models/ShopifyOrder");
   const orderIds = [...new Set(docs.flatMap((d) => [...d.orders]))].filter(Boolean);
@@ -189,6 +194,7 @@ async function preview(org, files, source = "amazon") {
   const part = (xs) => ({ count: xs.length, taxable: sum(xs, (d) => d.taxable), tax: sum(xs, (d) => d.amazon.tax), value: sum(xs, (d) => d.amazon.value), tcs: sum(xs, (d) => d.tcs) });
   const posting = await postingInfo(org, o, docs.filter((d) => d.state === "new"), S);
   posting.onParty = posting.party ? await existingOnParty(org, posting.party._id, month, S) : null;
+  const series = S.key === "pepperfry" ? await seriesFor(org, posting.party?._id) : null;
   const id = crypto.randomUUID();
   plans.set(id, { org: String(org), gstin, month, plan: p, at: Date.now(), src: S.key, gstr1: S.key !== "amazon" ? u.gstr1 : null });
   return {
@@ -198,6 +204,7 @@ async function preview(org, files, source = "amazon") {
     files: u.names,
     unknownFiles: u.unknown,
     source: S.key,
+    series,
     hasGstr1: S.key !== "amazon" ? u.gstr1.length > 0 : u.gstr1.some((g) => g.gstin === gstin),
     b2cInvoices: part(p.invoices.filter((d) => !d.b2b)),
     b2bInvoices: part(p.invoices.filter((d) => d.b2b)),
@@ -211,6 +218,30 @@ async function preview(org, files, source = "amazon") {
     newBuyers,
     posting,
   };
+}
+
+/* ---------------- own invoice series (Pepperfry) ---------------- */
+// The company's own series for these invoices: the prefix most used on the party's invoices (e.g. "INV"), and the
+// next number after the highest one with that prefix anywhere in the company.
+const splitNo = (n) => {
+  const m = String(n || "").match(/^(.*?)(\d+)$/);
+  return m ? { prefix: m[1], n: Number(m[2]), width: m[2].length } : null;
+};
+async function seriesFor(org, partyId) {
+  const all = await Invoice.find({ organization: org }, { invoiceNumber: 1, customer: 1, importRef: 1 }).lean();
+  const counts = {};
+  for (const x of all) {
+    if (!partyId || String(x.customer) !== String(partyId)) continue;
+    const sp = splitNo(x.invoiceNumber);
+    if (sp && sp.prefix && !/^\d/.test(x.invoiceNumber)) counts[sp.prefix] = (counts[sp.prefix] || 0) + 1;
+  }
+  const prefix = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || "INV";
+  let last = null;
+  for (const x of all) {
+    const sp = splitNo(x.invoiceNumber);
+    if (sp && sp.prefix === prefix && (!last || sp.n > last.n)) last = { ...sp, number: x.invoiceNumber };
+  }
+  return { prefix, next: last ? last.n + 1 : 1, width: last?.width || 0, last: last?.number || "" };
 }
 
 /* ---------------- import ---------------- */
@@ -251,7 +282,7 @@ async function customerFor(org, d, cache, S = SRC.amazon) {
   return c;
 }
 
-function startImport(ctx, planId, { ledger, mode, party } = {}) {
+function startImport(ctx, planId, { ledger, mode, party, series } = {}) {
   sweep();
   const pl = plans.get(planId);
   if (!pl || pl.org !== String(ctx.org)) throw new Error("This preview has expired. Upload the files again.");
@@ -261,7 +292,7 @@ function startImport(ctx, planId, { ledger, mode, party } = {}) {
   const job = { id, org: String(ctx.org), status: "running", total: docs.length, done: 0, created: { invoices: 0, creditNotes: 0, linked: 0 }, errors: [], warnings: [], at: Date.now(), month: pl.month };
   jobs.set(id, job);
   if (pl.src === "amazon") keepMonth(ctx.org, pl.gstin, pl.month, pl.plan);
-  run(ctx, pl, docs, { ledger, mode, party }, job).catch((e) => {
+  run(ctx, pl, docs, { ledger, mode, party, series }, job).catch((e) => {
     job.status = "failed";
     job.errors.push({ number: "", message: e.message });
   });
@@ -282,7 +313,18 @@ async function run(ctx, pl, docs, opts, job) {
   const match = skuMatcher(await Item.find({ organization: ctx.org }, { sku: 1, name: 1, hsnSac: 1 }).lean());
   const cache = new Map();
   // Invoices first, so credit notes can link to them.
-  docs.sort((a, b) => (a.kind === b.kind ? a.date - b.date : a.kind === "invoice" ? -1 : 1));
+  docs.sort((a, b) => (a.kind === b.kind ? a.date - b.date || String(a.number).localeCompare(String(b.number)) : a.kind === "invoice" ? -1 : 1));
+  // Own series: invoices get the company's next numbers in date order (the marketplace number stays as Reference#).
+  const own = opts.series?.prefix != null && Number(opts.series?.next) > 0 ? { prefix: String(opts.series.prefix), n: Number(opts.series.next), width: Number(opts.series.width) || 0 } : null;
+  const used = own ? new Set((await Invoice.find({ organization: ctx.org }, { invoiceNumber: 1 }).lean()).map((x) => x.invoiceNumber)) : null;
+  const nextOwn = () => {
+    let no;
+    do no = `${own.prefix}${String(own.n++).padStart(own.width, "0")}`;
+    while (used.has(no));
+    used.add(no);
+    return no;
+  };
+  const ownOf = new Map(); // marketplace invoice number → our number (for credit notes of this import)
   for (const d of docs) {
     try {
       if (d.state === "ordexago") {
@@ -352,14 +394,18 @@ async function run(ctx, pl, docs, opts, job) {
       };
       const ref = `${S.key}:${pl.gstin}:${pl.month}:${d.number}`;
       if (d.kind === "invoice") {
-        const inv = await call(require("../../routes/invoices"), "POST", "/", ctx, { ...common, invoiceNumber: d.number, dueDate: iso, status: "sent" });
+        const number = own ? nextOwn() : d.number;
+        if (own) ownOf.set(d.number, number);
+        const inv = await call(require("../../routes/invoices"), "POST", "/", ctx, { ...common, invoiceNumber: number, ...(own ? { orderNumber: d.number, customerNotes: `${S.label} invoice ${d.number} · ${common.customerNotes}` } : {}), dueDate: iso, status: "sent" });
         const set = { importRef: ref };
         if (d.irn) Object.assign(set, { "einvoice.status": "generated", "einvoice.irn": d.irn, "einvoice.via": S.key, ...(d.irnDate ? { "einvoice.ackDate": new Date(`${d.irnDate.replace(" ", "T")}+05:30`) } : {}) });
         await Invoice.updateOne({ _id: inv._id }, { $set: set });
         job.created.invoices++;
       } else {
-        const inv = d.invoiceNumber ? await Invoice.findOne({ organization: ctx.org, invoiceNumber: d.invoiceNumber, customer: c._id }, { _id: 1 }).lean() : null;
-        const cn = await call(require("../../routes/creditNotes"), "POST", "/", ctx, { ...common, number: d.number, reference: d.invoiceNumber ? `${S.label} refund against ${d.invoiceNumber}` : `${S.label} ${d.events?.join(", ") || "return"}`.slice(0, 100), invoice: inv ? String(inv._id) : "", reason: `Sales return (${S.label})`, status: "open" });
+        let inv = d.invoiceNumber ? await Invoice.findOne({ organization: ctx.org, invoiceNumber: ownOf.get(d.invoiceNumber) || d.invoiceNumber, customer: c._id }, { _id: 1, invoiceNumber: 1 }).lean() : null;
+        // Invoice in our own series (imported earlier): found by the marketplace number kept as Reference#.
+        if (!inv && d.invoiceNumber) inv = (await Invoice.find({ organization: ctx.org, orderNumber: d.invoiceNumber, customer: c._id }, { _id: 1, invoiceNumber: 1, importRef: 1 }).lean()).find((x) => String(x.importRef || "").startsWith(`${S.key}:`)) || null;
+        const cn = await call(require("../../routes/creditNotes"), "POST", "/", ctx, { ...common, number: d.number, reference: d.invoiceNumber ? `${S.label} refund against ${inv && inv.invoiceNumber !== d.invoiceNumber ? `${inv.invoiceNumber} (${S.label} ${d.invoiceNumber})` : d.invoiceNumber}`.slice(0, 100) : `${S.label} ${d.events?.join(", ") || "return"}`.slice(0, 100), invoice: inv ? String(inv._id) : "", reason: `Sales return (${S.label})`, status: "open" });
         await CreditNote.updateOne({ _id: cn._id }, { $set: { importRef: ref } });
         job.created.creditNotes++;
       }

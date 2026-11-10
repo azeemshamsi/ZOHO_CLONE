@@ -54,6 +54,8 @@ function marketplaceRouter(source, reconcile) {
           ledger: Joi.string().allow(""),
           mode: Joi.string().valid("online", "single").default("single"),
           party: Joi.string().allow(""),
+          // Own invoice series (Pepperfry): { prefix: "INV", next: 1034, width }.
+          series: Joi.object({ prefix: Joi.string().allow("").max(12), next: Joi.number().integer().min(1), width: Joi.number().integer().min(0).max(10) }).allow(null),
         }),
         req.body,
       );
@@ -65,6 +67,7 @@ function marketplaceRouter(source, reconcile) {
               ledger: d.ledger,
               mode: d.mode,
               party: d.party,
+              series: d.series,
             }),
           );
       } catch (e) {

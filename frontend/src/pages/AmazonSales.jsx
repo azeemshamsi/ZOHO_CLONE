@@ -358,6 +358,7 @@ function ImportBox({ S, onImported }) {
   const [ledger, setLedger] = useState("");
   const [mode, setMode] = useState("single");
   const [party, setParty] = useState("");
+  const [series, setSeries] = useState(null); // { on, prefix, next, width } — own invoice numbers (Pepperfry)
   const [job, setJob] = useState(null);
   useEffect(() => {
     api
@@ -393,6 +394,7 @@ function ImportBox({ S, onImported }) {
       // Tally-style posting when the company has an "Online Sale" master ledger and an Amazon_SRE party.
       setMode(data.posting?.group ? "online" : "single");
       setParty(data.posting?.party?._id || "");
+      setSeries(data.series ? { on: true, ...data.series } : null);
     } catch (e) {
       toast(errMsg(e), "error");
     }
@@ -406,6 +408,7 @@ function ImportBox({ S, onImported }) {
         ledger,
         mode,
         party,
+        series: series?.on ? { prefix: series.prefix, next: Number(series.next), width: series.width || 0 } : null,
       });
       setJob(data);
       const poll = setInterval(async () => {
@@ -642,6 +645,22 @@ function ImportBox({ S, onImported }) {
               flexWrap: "wrap",
             }}
           >
+            {series && (
+              <Field label="Invoice numbers" hint={series.on ? `From ${series.prefix}${String(series.next).padStart(series.width || 0, "0")} in date order${series.last ? ` (last in your books: ${series.last})` : ""}; ${S.label}'s number stays as Reference#` : `${S.label}'s order numbers`}>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <select value={series.on ? "own" : "market"} onChange={(e) => setSeries({ ...series, on: e.target.value === "own" })}>
+                    <option value="own">My series</option>
+                    <option value="market">{S.label}'s numbers</option>
+                  </select>
+                  {series.on && (
+                    <>
+                      <input style={{ width: 70 }} value={series.prefix} onChange={(e) => setSeries({ ...series, prefix: e.target.value })} title="Prefix" />
+                      <input style={{ width: 90 }} type="number" min="1" value={series.next} onChange={(e) => setSeries({ ...series, next: e.target.value })} title="Next number" />
+                    </>
+                  )}
+                </div>
+              </Field>
+            )}
             <Field label="Party (customer)">
               <select value={party} onChange={(e) => setParty(e.target.value)}>
                 {pv.posting?.party && (
