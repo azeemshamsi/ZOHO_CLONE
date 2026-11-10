@@ -81,6 +81,34 @@ const isExport = (d) => d.placeOfSupply === OVERSEAS || (d.currency && d.currenc
 const inter = (d, org) => d.isInterState || (d.placeOfSupply && d.placeOfSupply !== org.state);
 
 /* ----------------------------- GSTR-1 ----------------------------- */
+// Group document numbers into series: "INV-0012" → prefix "INV-", running number 12. Cancelled (void) numbers
+// stay in the series and are counted as cancelled.
+function docSeries(issued, cancelled = []) {
+  const split = (no) => {
+    const m = String(no || "").match(/^(.*?)(\d+)(\D*)$/);
+    return m ? { key: `${m[1]}\u0000${m[3]}\u0000${m[2].length}`, seq: Number(m[2]), no } : { key: `${no}\u0000`, seq: null, no };
+  };
+  const all = [...issued.map((no) => ({ ...split(no), cancel: false })), ...cancelled.map((no) => ({ ...split(no), cancel: true }))].filter((d) => d.no);
+  const groups = {};
+  for (const d of all) (groups[d.key] ||= []).push(d);
+  const series = Object.values(groups).map((g) => {
+    g.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0) || String(a.no).localeCompare(String(b.no)));
+    const seen = new Set(g.map((d) => d.seq));
+    const missing = [];
+    const pad = (n) => {
+      const ref = g[0];
+      const m = String(ref.no).match(/^(.*?)(\d+)(\D*)$/);
+      return m ? `${m[1]}${String(n).padStart(m[2].length, "0")}${m[3]}` : String(n);
+    };
+    if (g[0].seq != null && g[g.length - 1].seq - g[0].seq < 5000)
+      for (let n = g[0].seq + 1; n < g[g.length - 1].seq; n++) if (!seen.has(n)) missing.push(pad(n));
+    const cancel = g.filter((d) => d.cancel).length;
+    return { from: g[0].no, to: g[g.length - 1].no, totnum: g.length, cancel, net_issue: g.length - cancel, missing };
+  });
+  series.sort((a, b) => String(a.from).localeCompare(String(b.from)));
+  return { series };
+}
+
 async function gstr1(org, period, freq) {
   const { from, to, fp, label: lbl } = periodRange(period, freq);
   const [invoices, credits] = await Promise.all([
@@ -194,12 +222,14 @@ async function gstr1(org, period, freq) {
   const hsn_b2c = hsnRows(hsnAll.filter((h) => !h.b2b));
   view.hsn = hsnRows(hsnAll.map((h) => ({ ...h })));
 
-  // Table 13: documents issued (series = invoice numbers in the period).
-  const nums = invoices.map((i) => i.invoiceNumber).concat(voided.map((v) => v.invoiceNumber)).sort();
-  const cnNums = credits.map((c) => c.number).sort();
-  const docs = [];
-  if (nums.length) docs.push({ doc_num: 1, docs: [{ num: 1, from: nums[0], to: nums[nums.length - 1], totnum: nums.length, cancel: voided.length, net_issue: nums.length - voided.length }] });
-  if (cnNums.length) docs.push({ doc_num: 5, docs: [{ num: 1, from: cnNums[0], to: cnNums[cnNums.length - 1], totnum: cnNums.length, cancel: 0, net_issue: cnNums.length }] });
+  // Table 13: documents issued, one row per number series (prefix + running number), like Tally's Document Summary.
+  const voidCn = await CreditNote.find({ organization: org._id, status: "void", opening: { $ne: true }, date: { $gte: from, $lte: to } }, { number: 1 }).lean();
+  const docSummary = [
+    { doc_num: 1, label: "Invoices for outward supply", ...docSeries(invoices.map((i) => i.invoiceNumber), voided.map((v) => v.invoiceNumber)) },
+    { doc_num: 5, label: "Credit notes", ...docSeries(credits.map((c) => c.number), voidCn.map((c) => c.number)) },
+  ].filter((d) => d.series.length);
+  for (const d of docSummary) for (const sr of d.series) if (sr.missing.length) issues.push({ problem: `${d.label}: ${sr.missing.length} number(s) missing in series ${sr.from} – ${sr.to} (${sr.missing.slice(0, 5).join(", ")}${sr.missing.length > 5 ? "…" : ""}). Gaps count as unexplained on the portal.` });
+  const docs = docSummary.map((d) => ({ doc_num: d.doc_num, docs: d.series.map((sr, n) => ({ num: n + 1, from: sr.from, to: sr.to, totnum: sr.totnum, cancel: sr.cancel, net_issue: sr.net_issue })) }));
 
   const json = {
     gstin: org.gstin,
@@ -228,6 +258,9 @@ async function gstr1(org, period, freq) {
     nil: { count: nilRows.length, txval: r2(nilRows.reduce((s, r) => s + r.nil_amt, 0)), iamt: 0, camt: 0, samt: 0 },
     hsn: { count: view.hsn.length, ...sum(view.hsn) },
   };
+  view.docs = docSummary.flatMap((d) => d.series.map((sr) => ({ nature: d.label, ...sr })));
+  const docTot = (k) => view.docs.reduce((t, r) => t + r[k], 0);
+  summary.docs = { count: view.docs.length, totnum: docTot("totnum"), cancel: docTot("cancel"), net_issue: docTot("net_issue") };
   const liability = add(add(add(add(zero(), summary.b2b), summary.b2cl), summary.b2cs), summary.exp);
   for (const k of ["txval", "iamt", "camt", "samt"]) liability[k] = r2(liability[k] - summary.cdnr[k] - summary.cdnur[k]);
   return { period: lbl, fp, from, to, json, view, summary, liability, issues: dedupe(issues), documents: { invoices: invoices.length, creditNotes: credits.length, cancelled: voided.length } };
@@ -706,4 +739,4 @@ function calendar(org, fy, filings = []) {
     });
 }
 
-module.exports = { periodRange, fyRange, gstr1, gstr3b, gstr9, setOff, parse2b, reconcile, calendar, dmy };
+module.exports = { docSeries, periodRange, fyRange, gstr1, gstr3b, gstr9, setOff, parse2b, reconcile, calendar, dmy };

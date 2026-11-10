@@ -203,6 +203,18 @@ function Gstr1({ period, canEdit }) {
                 </tr>
               );
             })}
+            {d.summary.docs && (
+              <tr className={d.summary.docs.count ? "clickable" : ""} onClick={() => d.summary.docs.count && setOpen(open === "docs" ? "" : "docs")}>
+                <td data-label="Section">
+                  <strong>13 · Documents issued</strong>
+                  <div className="muted small">
+                    {d.summary.docs.totnum} issued · {d.summary.docs.cancel} cancelled · {d.summary.docs.net_issue} net — by number series
+                  </div>
+                </td>
+                <td data-label="Count" className="num">{d.summary.docs.count}</td>
+                <td colSpan={4} />
+              </tr>
+            )}
             <tr className="total-row">
               <td>Tax liability (net of credit notes)</td>
               <td />
@@ -214,7 +226,45 @@ function Gstr1({ period, canEdit }) {
           </tbody>
         </table>
       </div>
-      {open && rows.length > 0 && (
+      {open === "docs" && rows.length > 0 && (
+        <div className="card flush" style={{ marginTop: 14 }}>
+          <div className="card-title pad">13 · Documents issued (Document Summary)</div>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Nature of document</th>
+                <th>From</th>
+                <th>To</th>
+                <th className="num">Total issued</th>
+                <th className="num">Cancelled</th>
+                <th className="num">Net issued</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, n) => (
+                <tr key={n}>
+                  <td data-label="Nature">
+                    {r.nature}
+                    {r.missing?.length > 0 && <div className="small" style={{ color: "var(--danger, #c0392b)" }}>{r.missing.length} number(s) missing in this range</div>}
+                  </td>
+                  <td data-label="From">{r.from}</td>
+                  <td data-label="To">{r.to}</td>
+                  <td data-label="Total" className="num">{r.totnum}</td>
+                  <td data-label="Cancelled" className="num">{r.cancel}</td>
+                  <td data-label="Net" className="num">{r.net_issue}</td>
+                </tr>
+              ))}
+              <tr className="total-row">
+                <td colSpan={3}>Total</td>
+                <td className="num">{d.summary.docs.totnum}</td>
+                <td className="num">{d.summary.docs.cancel}</td>
+                <td className="num">{d.summary.docs.net_issue}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      {open && open !== "docs" && rows.length > 0 && (
         <div className="card flush" style={{ marginTop: 14 }}>
           <div className="card-title pad">{SECTIONS.find((s) => s[0] === open)[1]}</div>
           <table className="table">
