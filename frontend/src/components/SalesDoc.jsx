@@ -18,9 +18,17 @@ export function DocList({ kind, filters, columns, emptyText, summary, headerExtr
   const [rows, setRows] = useState(null);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
+  const [party, setParty] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const dq = useDebounced(q);
   const navigate = useNavigate();
   const goBack = useBack();
+  const nameOf = (r) => r.customerName || r.vendorName || "";
+  const parties = useMemo(() => [...new Set((rows || []).map(nameOf).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [rows]);
+  const day = (d) => (d ? new Date(new Date(d).getTime() + 5.5 * 3600000).toISOString().slice(0, 10) : "");
+  const shown = (rows || []).filter((r) => (!party || nameOf(r) === party) && (!from || day(r.date) >= from) && (!to || day(r.date) <= to));
+  const narrowed = !!(party || from || to);
 
   useEffect(() => {
     setRows(null);
@@ -37,6 +45,21 @@ export function DocList({ kind, filters, columns, emptyText, summary, headerExtr
             </option>
           ))}
         </select>
+        <select className="select-inline" value={party} onChange={(e) => setParty(e.target.value)} style={{ maxWidth: 220 }} title={kind.party === "vendor" ? "Vendor" : "Customer"}>
+          <option value="">{kind.party === "vendor" ? "All vendors" : "All customers"}</option>
+          {parties.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+        <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} title="From date" />
+        <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} title="To date" />
+        {narrowed && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => (setParty(""), setFrom(""), setTo(""))}>
+            Clear
+          </button>
+        )}
         <SearchBox value={q} onChange={setQ} placeholder={`Search ${kind.plural.toLowerCase()}`} />
         {headerExtra}
         <Link to={`${kind.route}/new`} className="btn btn-primary">
@@ -45,10 +68,10 @@ export function DocList({ kind, filters, columns, emptyText, summary, headerExtr
       </PageHeader>
       {!rows ? (
         <Spinner />
-      ) : rows.length === 0 ? (
+      ) : shown.length === 0 ? (
         <Empty
           icon="doc"
-          title={q || status !== "all" ? `No ${kind.plural.toLowerCase()} found` : `Create your first ${kind.label.toLowerCase()}`}
+          title={q || status !== "all" || narrowed ? `No ${kind.plural.toLowerCase()} found` : `Create your first ${kind.label.toLowerCase()}`}
           text={emptyText}
           action={
             <Link to={`${kind.route}/new`} className="btn btn-primary">
@@ -58,7 +81,7 @@ export function DocList({ kind, filters, columns, emptyText, summary, headerExtr
         />
       ) : (
         <>
-          {summary && <div className="summary-strip">{summary(rows)}</div>}
+          {summary && <div className="summary-strip">{summary(shown)}</div>}
           <div className="card flush">
             <table className="table table-click">
               <thead>
@@ -71,7 +94,7 @@ export function DocList({ kind, filters, columns, emptyText, summary, headerExtr
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {shown.map((r) => (
                   <tr key={r._id} onClick={() => navigate(`${kind.route}/${r._id}`)}>
                     {columns.map((c) => (
                       <td key={c.label} className={`${c.num ? "num" : ""} ${c.cls || ""}`}>

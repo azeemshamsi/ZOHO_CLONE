@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PeriodPicker } from "./Reports";
 import { docLink } from "./Accounts";
@@ -59,6 +59,8 @@ function TransactionsView({ ledgers, groups }) {
   const [range, setRange] = useState(() => ({ key: "this_fy", ...periodRange("this_fy") }));
   const [scope, setScope] = useState("all");
   const [d, setD] = useState(null);
+  const [party, setParty] = useState("");
+  const [q, setQ] = useState("");
   const codes = scope === "all" ? ledgers.map((a) => a.code) : scope.startsWith("g:") ? groups.find((g) => g._id === scope.slice(2))?.members || [] : [scope];
   useEffect(() => {
     setD(null);
@@ -69,6 +71,11 @@ function TransactionsView({ ledgers, groups }) {
       .catch((e) => toast(errMsg(e), "error"));
   }, [scope, range.from, range.to, ledgers.length]);
   const tot = (k) => (d?.ledgers || []).reduce((t, x) => t + (Number(x[k]) || 0), 0);
+  const parties = useMemo(() => [...new Set((d?.rows || []).map((r) => r.party).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [d]);
+  const words = q.trim().toLowerCase();
+  const rows = (d?.rows || []).filter((r) => (!party || r.party === party) && (!words || [r.number, r.party, r.ledger].join(" ").toLowerCase().includes(words)));
+  const filtered = !!(party || words);
+  const sum = (k) => rows.reduce((t, r) => t + (Number(r[k]) || 0), 0);
   return (
     <div className="card flush">
       <div className="pad-row" style={{ padding: "10px 16px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -86,9 +93,18 @@ function TransactionsView({ ledgers, groups }) {
           ))}
         </select>
         <PeriodPicker value={range} onChange={setRange} />
+        <select value={party} onChange={(e) => setParty(e.target.value)} style={{ maxWidth: 260 }} title="Party">
+          <option value="">All parties</option>
+          {parties.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search no., party, ledger" style={{ maxWidth: 200 }} />
         {d && (
           <span className="muted small" style={{ marginLeft: "auto" }}>
-            {d.rows.length} vouchers · Opening {money(tot("opening"))} · Dr {money(tot("debit"))} · Cr {money(tot("credit"))} · Closing {money(tot("closing"))}
+            {filtered ? `${rows.length} of ${d.rows.length} vouchers · Dr ${money(sum("debit"))} · Cr ${money(sum("credit"))}` : `${d.rows.length} vouchers · Opening ${money(tot("opening"))} · Dr ${money(tot("debit"))} · Cr ${money(tot("credit"))} · Closing ${money(tot("closing"))}`}
           </span>
         )}
       </div>
@@ -108,7 +124,7 @@ function TransactionsView({ ledgers, groups }) {
             </tr>
           </thead>
           <tbody>
-            {d.rows.map((r, i) => (
+            {rows.map((r, i) => (
               <tr key={i}>
                 <td className="nowrap">{fmtDate(r.date)}</td>
                 <td>{vtype(r.type)}</td>
@@ -119,18 +135,18 @@ function TransactionsView({ ledgers, groups }) {
                 <td className="num">{r.credit ? money(r.credit) : ""}</td>
               </tr>
             ))}
-            {!d.rows.length && (
+            {!rows.length && (
               <tr>
                 <td colSpan={7} className="muted center">
-                  No transactions in this period
+                  {filtered ? "No vouchers match the filter" : "No transactions in this period"}
                 </td>
               </tr>
             )}
-            {d.rows.length > 0 && (
+            {rows.length > 0 && (
               <tr className="row-total">
                 <td colSpan={5}>Total</td>
-                <td className="num">{money(tot("debit"))}</td>
-                <td className="num">{money(tot("credit"))}</td>
+                <td className="num">{money(filtered ? sum("debit") : tot("debit"))}</td>
+                <td className="num">{money(filtered ? sum("credit") : tot("credit"))}</td>
               </tr>
             )}
           </tbody>
