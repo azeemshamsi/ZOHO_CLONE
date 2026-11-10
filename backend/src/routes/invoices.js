@@ -180,6 +180,8 @@ router.delete(
       ),
     ]);
     await invoice.deleteOne();
+    // A store order invoiced into this invoice can be invoiced again.
+    await require("../models/ShopifyOrder").updateMany({ invoice: invoice._id }, { $unset: { invoice: 1, invoiceNumber: 1, invoiceOrg: 1, invoiceError: 1 } });
     res.send({ message: "Invoice deleted" });
   })
 );

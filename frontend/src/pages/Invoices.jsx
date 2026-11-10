@@ -173,17 +173,32 @@ export function InvoiceView() {
     setBusy(false);
   };
 
+  const [loadError, setLoadError] = useState("");
   const load = () =>
-    api.get(`/invoices/${id}`).then((r) => {
-      setInv(r.data);
-      api
-        .get("/credit-notes", { params: { customer: r.data.customer, status: "open" } })
-        .then((c) => setCredits(round2(c.data.reduce((s, x) => s + x.balance, 0))));
-    });
+    api
+      .get(`/invoices/${id}`)
+      .then((r) => {
+        setLoadError("");
+        setInv(r.data);
+        api
+          .get("/credit-notes", { params: { customer: r.data.customer, status: "open" } })
+          .then((c) => setCredits(round2(c.data.reduce((s, x) => s + x.balance, 0))))
+          .catch(() => {});
+      })
+      .catch((e) => setLoadError(e.response?.status === 404 ? "This invoice doesn't exist any more — it may have been deleted." : errMsg(e)));
   useEffect(() => {
     load();
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  if (loadError)
+    return (
+      <div className="card pad" style={{ maxWidth: 560 }}>
+        <p>{loadError}</p>
+        <Link to="/invoices" className="btn">
+          ← Back to invoices
+        </Link>
+      </div>
+    );
   if (!inv || !organization) return <Spinner />;
 
   const act = async (fn, msg) => {
