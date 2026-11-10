@@ -3,7 +3,7 @@ const router = require("express").Router();
 const Joi = require("joi");
 const Role = require("../models/Role");
 const Membership = require("../models/Membership");
-const { KEYS, MODULES } = require("../utils/roles");
+const { ALL_KEYS, MODULES, FEATURES } = require("../utils/roles");
 const { ah, validate, HttpError } = require("../utils/http");
 const audit = require("../utils/audit");
 const roleAudit = (req, action, r) => {
@@ -14,16 +14,19 @@ const roleAudit = (req, action, r) => {
 const schema = Joi.object({
   name: Joi.string().trim().min(2).max(60).required().label("Role name"),
   desc: Joi.string().allow("").max(200),
-  perms: Joi.object(Object.fromEntries(KEYS.map((k) => [k, Joi.string().valid("none", "view", "full")]))).required(),
+  perms: Joi.object(Object.fromEntries(ALL_KEYS.map((k) => [k, Joi.string().valid("none", "view", "full", "")]))).required(),
   home: Joi.string().allow("").max(100),
 });
 
-router.get("/modules", (req, res) => res.send(MODULES.map(([key, label, desc]) => ({ key, label, desc }))));
+router.get("/modules", (req, res) => res.send(MODULES.map(([key, label, desc]) => ({ key, label, desc, features: (FEATURES[key] || []).map(([f, l]) => ({ key: `${key}.${f}`, label: l })) }))));
+// Page settings equal to their module's are dropped (they follow the module).
+const tidy = (perms) => Object.fromEntries(Object.entries(perms).filter(([k, v]) => v && !(k.includes(".") && v === perms[k.split(".")[0]])));
 
 router.post(
   "/",
   ah(async (req, res) => {
     const d = validate(schema, req.body);
+    d.perms = tidy(d.perms);
     if (await Role.exists({ organization: req.org, name: d.name })) throw new HttpError(409, "A role with this name exists");
     const r = await Role.create({ ...d, organization: req.org });
     roleAudit(req, "role_created", r);
@@ -34,6 +37,7 @@ router.put(
   "/:id",
   ah(async (req, res) => {
     const d = validate(schema, req.body);
+    d.perms = tidy(d.perms);
     const r = await Role.findOneAndUpdate({ _id: req.params.id, organization: req.org }, d, { new: true });
     if (!r) throw new HttpError(404, "Role not found");
     roleAudit(req, "role_updated", r);

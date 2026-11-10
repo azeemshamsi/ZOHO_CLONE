@@ -14,9 +14,9 @@ const { ah, validate, HttpError } = require("../utils/http");
 
 // Which permission each document type needs.
 const MODULE = {
-  invoice: "sales", quote: "sales", salesOrder: "sales", creditNote: "sales", payment: "sales", customer: "sales",
-  bill: "purchases", expense: "purchases", purchaseOrder: "purchases", vendorCredit: "purchases", vendorPayment: "purchases", vendor: "purchases",
-  journal: "accountant", fixedAsset: "accountant", item: "items", inventoryAdjustment: "items", bankTransaction: "banking",
+  invoice: "sales.invoices", quote: "sales.quotes", salesOrder: "sales.sales_orders", creditNote: "sales.credit_notes", payment: "sales.payments", customer: "sales.customers",
+  bill: "purchases.bills", expense: "purchases.expenses", purchaseOrder: "purchases.purchase_orders", vendorCredit: "purchases.vendor_credits", vendorPayment: "purchases.payments_made", vendor: "purchases.vendors",
+  journal: "accountant.journals", fixedAsset: "accountant.fixed_assets", item: "items.items", inventoryAdjustment: "items.adjustments", bankTransaction: "banking",
 };
 const MAX = 10 * 1024 * 1024;
 const bucket = () => new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: "attachments" });

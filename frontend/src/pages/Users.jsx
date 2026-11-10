@@ -142,8 +142,9 @@ export function UsersPage() {
                 <tr key={m.key}>
                   <td title={m.desc}>{m.label}</td>
                   {roles.map((r) => (
-                    <td key={r.key} className={(r.perms[m.key] || "none") === "none" ? "muted" : ""}>
+                    <td key={r.key} className={(r.perms[m.key] || "none") === "none" && !pageOverrides(r.perms, m).length ? "muted" : ""}>
                       {LEVEL[r.perms[m.key] || "none"]}
+                      {pageOverrides(r.perms, m).length > 0 && <div className="muted small">{pageOverrides(r.perms, m).map((f) => `${f.label}: ${LEVEL[r.perms[f.key]]}`).join(", ")}</div>}
                     </td>
                   ))}
                 </tr>
@@ -299,8 +300,36 @@ const HOMES = [
   ["/reports", "Reports"],
 ];
 
+// Pages whose level differs from their module's.
+const pageOverrides = (perms, m) => (m.features || []).filter((f) => perms[f.key] && perms[f.key] !== (perms[m.key] || "none"));
+
+const LEVELS = ["none", "view", "full"];
+function Seg({ value, onChange }) {
+  return (
+    <>
+      {LEVELS.map((l) => (
+        <label key={l} className={`seg-btn ${value === l ? "on" : ""}`}>
+          <input type="radio" checked={value === l} onChange={() => onChange(l)} />
+          {l === "none" ? "No access" : l === "view" ? "View" : "Full"}
+        </label>
+      ))}
+    </>
+  );
+}
+
 function RoleModal({ role, modules, onClose, onSaved }) {
   const [f, setF] = useState(role);
+  const [expanded, setExpanded] = useState(() => Object.fromEntries(modules.filter((m) => pageOverrides(role.perms, m).length).map((m) => [m.key, true])));
+  // Changing a module sets all its pages to the same level; pages can then be changed one by one.
+  const setModule = (m, l) => {
+    const perms = { ...f.perms, [m.key]: l };
+    for (const x of m.features || []) delete perms[x.key];
+    setF({ ...f, perms });
+  };
+  const pageLevel = (m, x) => f.perms[x.key] || f.perms[m.key] || "none";
+  const setPage = (m, x, l) => {
+    setF({ ...f, perms: { ...f.perms, [x.key]: l } });
+  };
   const [busy, setBusy] = useState(false);
   const save = async () => {
     setBusy(true);
@@ -325,6 +354,10 @@ function RoleModal({ role, modules, onClose, onSaved }) {
     }
   };
   const setAll = (lvl) => setF({ ...f, perms: Object.fromEntries(modules.map((m) => [m.key, lvl])) });
+  const pageNote = (m) => {
+    const o = pageOverrides(f.perms, m);
+    return o.length ? `${o.length} page${o.length > 1 ? "s" : ""} set separately` : "";
+  };
   return (
     <Modal
       open
@@ -375,22 +408,32 @@ function RoleModal({ role, modules, onClose, onSaved }) {
         </div>
         <table className="table compact perm-edit">
           <tbody>
-            {modules.map((m) => (
+            {modules.map((m) => [
               <tr key={m.key}>
                 <td>
                   <strong>{m.label}</strong>
                   <div className="muted small">{m.desc}</div>
+                  {m.features?.length > 0 && (
+                    <button type="button" className="link-btn small" onClick={() => setExpanded({ ...expanded, [m.key]: !expanded[m.key] })}>
+                      {expanded[m.key] ? "▾ Hide pages" : "▸ Set access page by page"}
+                      {pageNote(m) && ` · ${pageNote(m)}`}
+                    </button>
+                  )}
                 </td>
                 <td className="seg">
-                  {["none", "view", "full"].map((l) => (
-                    <label key={l} className={`seg-btn ${f.perms[m.key] === l ? "on" : ""}`}>
-                      <input type="radio" checked={f.perms[m.key] === l} onChange={() => setF({ ...f, perms: { ...f.perms, [m.key]: l } })} />
-                      {l === "none" ? "No access" : l === "view" ? "View" : "Full"}
-                    </label>
-                  ))}
+                  <Seg value={f.perms[m.key] || "none"} onChange={(l) => setModule(m, l)} />
                 </td>
-              </tr>
-            ))}
+              </tr>,
+              expanded[m.key] &&
+                (m.features || []).map((x) => (
+                  <tr key={x.key} className="perm-page">
+                    <td style={{ paddingLeft: 28 }}>{x.label}</td>
+                    <td className="seg">
+                      <Seg value={pageLevel(m, x)} onChange={(l) => setPage(m, x, l)} />
+                    </td>
+                  </tr>
+                )),
+            ])}
           </tbody>
         </table>
       </div>

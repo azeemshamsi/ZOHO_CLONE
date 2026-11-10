@@ -70,4 +70,8 @@ router.post(
 );
 
 module.exports = router;
-module.exports.moduleOf = (req) => (DOCS[req.path.split("/")[1]] || { module: "sales" }).module;
+const DOC_PAGE = { invoice: "sales.invoices", quote: "sales.quotes", salesOrder: "sales.sales_orders", creditNote: "sales.credit_notes", purchaseOrder: "purchases.purchase_orders", vendorCredit: "purchases.vendor_credits", payment: "sales.payments", vendorPayment: "purchases.payments_made" };
+module.exports.moduleOf = (req) => {
+  const kind = req.path.split("/")[1];
+  return DOC_PAGE[kind] || (DOCS[kind] || { module: "sales" }).module;
+};
