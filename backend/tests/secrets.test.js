@@ -88,6 +88,7 @@ test("start-up pass encrypts plain values and moves derived-key values to CREDEN
   require("../src/models/ShopifyStore");
   require("../src/models/User");
   require("../src/models/Integration");
+  require("../src/models/FlipkartAccount");
   S.resetKeys();
   const derivedValue = S.encrypt("old-derived");
   const rows = {
@@ -98,6 +99,7 @@ test("start-up pass encrypts plain values and moves derived-key values to CREDEN
     Organization: [{ _id: 3, smtp: { pass: "", apiKey: "xk" }, ai: {} }],
     User: [{ _id: 4, totp: { secret: "", pendingSecret: "" } }],
     Integration: [],
+    FlipkartAccount: [],
   };
   const updates = [];
   for (const name of Object.keys(rows)) {

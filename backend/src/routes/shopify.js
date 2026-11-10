@@ -197,7 +197,7 @@ router.post(
 );
 
 /* ---------------- orders ---------------- */
-const LIST_FIELDS = { awbScannedAt: 1, returnStatus: 1, "b2b.gstin": 1, channel: 1, "amazon.easyShip": 1, "amazon.confirmedAt": 1, "amazon.confirmError": 1, "amazon.shipBy": 1, "amazon.label": 1, "amazon.slot": 1, "amazon.gstin": 1, "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.vendor": 1, sellers: 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 };
+const LIST_FIELDS = { awbScannedAt: 1, "flipkart.selfShip": 1, "flipkart.dispatchBy": 1, "flipkart.state": 1, returnStatus: 1, "b2b.gstin": 1, channel: 1, "amazon.easyShip": 1, "amazon.confirmedAt": 1, "amazon.confirmError": 1, "amazon.shipBy": 1, "amazon.label": 1, "amazon.slot": 1, "amazon.gstin": 1, "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.vendor": 1, sellers: 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 };
 // The order list: filters, counts, sort and search from the in-memory index; only the page shown is read.
 router.get(
   "/orders",
@@ -307,6 +307,7 @@ router.post(
     for (const o of await ordersFor(req, d.ids)) {
       try {
         let r;
+        if (o.channel === "flipkart") throw new Error("Flipkart sales come into the books with the monthly Flipkart import, not order by order");
         if (o.channel === "amazon") {
           // Amazon orders are invoiced in the company whose Amazon account they came from (its GSTIN).
           const acc = await AmazonAccount.findById(o.amazon?.account);
@@ -405,7 +406,7 @@ router.post(
     const results = [];
     for (const o of await ordersFor(req, d.ids)) {
       try {
-        if (d.invoiceFirst && !o.invoice && store && o.channel !== "amazon") await invoiceOrder(ctxOf(req), o, store).catch(() => {});
+        if (d.invoiceFirst && !o.invoice && store && o.channel !== "amazon" && o.channel !== "flipkart") await invoiceOrder(ctxOf(req), o, store).catch(() => {});
         const r = await bookOrder(ctxOf(req), o, { accountId: d.account, pkg: d.pkg, manual: d.ids.length === 1 ? d.manual : {}, skipCheck: d.skipCheck, pickupFrom: d.ids.length === 1 ? d.pickupFrom : "" });
         results.push({ id: o._id, name: o.name, ok: true, ...r });
       } catch (e) {
@@ -577,6 +578,18 @@ router.get(
         throw new HttpError(400, e.message);
       }
       if (r.state !== "ready") throw new HttpError(409, r.message);
+    }
+    // Flipkart logistics: Flipkart's own label + invoice.
+    if (o.channel === "flipkart" && (!o.shipment?.account || o.shipment?.carrier === "flipkart")) {
+      let buf;
+      try {
+        buf = await require("../utils/flipkart/orders").label(o);
+      } catch (e) {
+        throw new HttpError(400, e.message);
+      }
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="flipkart-${o.name}.pdf"`);
+      return res.send(buf);
     }
     if (!o.shipment?.awb && o.shipment?.carrier !== "amazon_easyship") throw new HttpError(400, "Book a courier first");
     if (o.channel === "amazon") await devices.amazonData(req, "amazon_label_download", o.name, { orderId: String(o._id), carrier: o.shipment?.carrier || "" });

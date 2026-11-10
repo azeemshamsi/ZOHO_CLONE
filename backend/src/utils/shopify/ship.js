@@ -27,6 +27,7 @@ async function fulfillInShopify(store, order, sh) {
 async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {}, skipCheck = false, pickupFrom = "" }) {
   if (order.status === "cancelled") throw new Error("Order is cancelled");
   if (order.channel === "amazon" && order.amazon?.easyShip) throw new Error("Amazon Easy Ship order: Amazon picks it up — use Schedule Easy Ship pickup");
+  if (order.channel === "flipkart" && order.flipkart?.selfShip === false) throw new Error("Flipkart's courier picks this one up: use Pack & label, then Ready to Dispatch");
   if (order.shipment?.awb && order.status !== "new" && order.status !== "packed") throw new Error(`Already booked: ${order.shipment.courierName} ${order.shipment.awb}`);
   const realAcc = await CourierAccount.findOne({ _id: accountId, organization: ctx.storeOrg || ctx.org, active: true });
   if (!realAcc) throw new Error("Choose a courier");
@@ -88,6 +89,12 @@ async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {}, skipChe
     // Amazon order: tell Amazon the courier and AWB, and invoice it if OrdexaGo invoices Amazon orders.
     await order.save();
     warning = await require("../amazon/ship").afterBooked(order);
+  } else if (order.channel === "flipkart") {
+    // Flipkart self-ship: tell Flipkart the courier and AWB.
+    order.flipkart = { ...(order.flipkart || {}), selfShip: true };
+    order.markModified("flipkart");
+    await order.save();
+    warning = await require("../flipkart/orders").afterSelfShipBooked(order);
   } else if (store?.fulfillInShopify) {
     try {
       order.shipment.shopifyFulfilled = await fulfillInShopify(store, order, order.shipment);
@@ -129,6 +136,7 @@ async function trackOrder(order) {
   }
   order.markModified("shipment");
   await order.save();
+  if (order.channel === "flipkart" && order.status === "delivered") await require("../flipkart/orders").reportDelivered(order).catch((e) => console.error(`[flipkart] delivery of ${order.name}: ${e.message}`));
   return t;
 }
 
@@ -161,7 +169,7 @@ async function cancelShipment(order) {
   const was = `${sh.courierName || ""} ${sh.awb}`.trim();
   if (acc) await CARRIERS[acc.carrier].cancel(acc, sh);
   // Undo the Shopify fulfilment with this AWB too, so Shopify shows the order unfulfilled and it can be booked again.
-  const shopifyNote = order.channel === "amazon" ? "" : await cancelInShopify(order, sh.awb);
+  const shopifyNote = order.channel !== "shopify" && order.channel ? "" : await cancelInShopify(order, sh.awb);
   order.cancelledShipments = [...(order.cancelledShipments || []), { courier: sh.courierName || "", awb: sh.awb, at: new Date() }];
   order.shipment = {};
   order.awbScannedAt = undefined; // the scan belonged to the cancelled AWB (it stays in awbScans)

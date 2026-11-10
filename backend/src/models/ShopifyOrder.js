@@ -43,11 +43,14 @@ const shopifyOrderSchema = new mongoose.Schema(
   {
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true },
     shopifyId: { type: String, required: true }, // gid://shopify/Order/123, or "amazon:<order id>" for Amazon orders
-    channel: { type: String, enum: ["shopify", "amazon"], default: "shopify" },
+    channel: { type: String, enum: ["shopify", "amazon", "flipkart"], default: "shopify" },
     // Amazon order details: { account, orderId, marketplaceId, easyShip, programs, fulfillmentStatus, serviceLevel,
     // shipBy, deliverBy, gstin, buyerCompany, items [{orderItemId, sku, quantity}], confirmedAt, confirmError,
     // packageStatus, slot {slotId, start, end, method}, scheduledAt, label {feedId, state, error, at} }
     amazon: { type: mongoose.Schema.Types.Mixed },
+    // Flipkart shipment ("flipkart:<shipmentId>"): { account, shipmentId, orderId, state, selfShip, locationId, items
+    // [{orderItemId, orderId, sku, quantity, status}], subShipments, courier, packedAt, rtdAt, dispatchReportedAt… }
+    flipkart: { type: mongoose.Schema.Types.Mixed },
     name: String, // "#1001"
     orderNumber: Number,
     orderDate: Date,

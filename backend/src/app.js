@@ -108,6 +108,7 @@ app.use("/api/security", auth, require("./routes/security"));
 app.use("/api/superadmin", auth, require("./routes/superadmin"));
 app.use("/api/sellers", auth, permit((req) => (req.method === "GET" && req.path === "/" ? ["store_sellers", "store_orders", "store_shipping"] : "store_sellers")), require("./routes/sellers"));
 app.use("/api/seller-portal", auth, require("./routes/sellerPortal"));
+app.use("/api/flipkart-orders", auth, permit((req) => require("./routes/flipkartOrders").moduleOf(req)), require("./routes/flipkartOrders"));
 app.use("/api/amazon-orders", auth, permit((req) => require("./routes/amazonOrders").moduleOf(req)), require("./routes/amazonOrders"));
 app.use("/api/amazon", auth, permit((req) => (req.method === "GET" ? ["sales.amazon", "gst"] : "sales.amazon")), require("./routes/amazon"));
 app.use("/api/attachments", auth, require("./routes/attachments"));

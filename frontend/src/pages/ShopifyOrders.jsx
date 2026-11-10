@@ -526,10 +526,68 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
   );
 }
 
-const AmazonBadge = ({ o }) => (o.channel === "amazon" ? <span className="status status-sent" title="Amazon order">{o.amazon?.easyShip ? "Amazon · Easy Ship" : "Amazon"}</span> : null);
+const AmazonBadge = ({ o }) =>
+  o.channel === "amazon" ? (
+    <span className="status status-sent" title="Amazon order">{o.amazon?.easyShip ? "Amazon · Easy Ship" : "Amazon"}</span>
+  ) : o.channel === "flipkart" ? (
+    <span className="status status-sent" title="Flipkart order">{o.flipkart?.selfShip ? "Flipkart · Self-ship" : "Flipkart"}</span>
+  ) : null;
 const slotText = (s) => (s?.start ? `${new Date(s.start).toLocaleString("en-IN", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}${s.end ? ` – ${new Date(s.end).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}` : ""}` : "");
 
 // Amazon Easy Ship: Amazon picks the parcel up. Package → pickup slots → schedule → Amazon's label.
+// Flipkart logistics: box size and weight → Flipkart packs the shipment and makes its label + invoice.
+function FlipkartPackModal({ order, onClose, onDone }) {
+  const prev = order.flipkart?.pkg || {};
+  const [p, setP] = useState({ length: prev.length || "", breadth: prev.breadth || "", height: prev.height || "", weight: prev.weight || "" });
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setP({ ...p, [k]: e.target.value });
+  const go = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/flipkart-orders/orders/${order._id}/pack`, { length: Number(p.length), breadth: Number(p.breadth), height: Number(p.height), weight: Number(p.weight) });
+      toast("Packed on Flipkart — the label is ready in a few seconds");
+      onDone();
+      setTimeout(() => openPdf(`/shopify/orders/${order._id}/label`), 6000);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <Modal
+      open
+      title={`Pack ${order.name} on Flipkart`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" disabled={busy || !p.length || !p.breadth || !p.height || !p.weight} onClick={go}>
+            {busy ? "Packing…" : "Pack & get label"}
+          </button>
+        </>
+      }
+    >
+      <p className="small muted">Box size and weight as packed. The GST rate of each item is taken from OrdexaGo; Flipkart makes the invoice.</p>
+      <div className="grid-4">
+        <Field label="Length (cm)">
+          <input type="number" min="1" value={p.length} onChange={set("length")} />
+        </Field>
+        <Field label="Breadth (cm)">
+          <input type="number" min="1" value={p.breadth} onChange={set("breadth")} />
+        </Field>
+        <Field label="Height (cm)">
+          <input type="number" min="1" value={p.height} onChange={set("height")} />
+        </Field>
+        <Field label="Weight (kg)">
+          <input type="number" min="0.01" step="0.01" value={p.weight} onChange={set("weight")} />
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
 function EasyShipModal({ order, onClose, onDone }) {
   const [packages, setPackages] = useState([]);
   const [mode, setMode] = useState("auto");
@@ -694,6 +752,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
   const [busy, setBusy] = useState(false);
   const [remarks, setRemarks] = useState("");
   const [easyShip, setEasyShip] = useState(false);
+  const [packOpen, setPackOpen] = useState(false);
   const load = () =>
     api.get(`/shopify/orders/${id}`).then((r) => {
       setO(r.data);
@@ -723,9 +782,12 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
   const amz = o.channel === "amazon" ? o.amazon || {} : null;
   const isEasy = !!amz?.easyShip;
   const isEasyShipped = sh.carrier === "amazon_easyship";
+  const fk = o.channel === "flipkart" ? o.flipkart || {} : null;
+  const fkEkart = fk && fk.selfShip === false;
   return (
     <>
     {easyShip && <EasyShipModal order={o} onClose={() => setEasyShip(false)} onDone={() => (setEasyShip(false), load(), onChanged())} />}
+    {packOpen && <FlipkartPackModal order={o} onClose={() => setPackOpen(false)} onDone={() => (setPackOpen(false), load(), onChanged())} />}
     <Modal
       open
       wide
@@ -733,14 +795,41 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
       onClose={onClose}
       footer={
         <div className="order-actions">
-          {!o.invoice && o.status !== "cancelled" && (
+          {fk && !fkEkart && ["new", "packed"].includes(o.status) && fk.selfShip == null && (
+            <>
+              <button className="btn" disabled={busy} onClick={() => act(() => api.put(`/flipkart-orders/orders/${o._id}/self-ship`, { selfShip: false }), "Marked: Flipkart picks it up")}>
+                Flipkart picks up
+              </button>
+            </>
+          )}
+          {fk && !fk.selfShip && ["new", "packed"].includes(o.status) && (
+            <button className="btn btn-primary" disabled={busy} onClick={() => setPackOpen(true)}>
+              {fk.packedAt ? "Pack again" : "Pack & get label"}
+            </button>
+          )}
+          {fk && !fk.selfShip && (fk.packedAt || o.status !== "new") && o.status !== "cancelled" && (
+            <button className="btn" disabled={busy} onClick={() => openPdf(`/shopify/orders/${o._id}/label`)}>
+              Flipkart label & invoice
+            </button>
+          )}
+          {fk && !fk.selfShip && o.status === "packed" && (
+            <button className="btn" disabled={busy} onClick={() => act(() => api.post(`/flipkart-orders/orders/${o._id}/rtd`), "Ready to Dispatch on Flipkart")}>
+              Ready to Dispatch
+            </button>
+          )}
+          {fk && fk.selfShip && sh.awb && !fk.dispatchReportedAt && (
+            <button className="btn" disabled={busy} onClick={() => act(() => api.post(`/flipkart-orders/orders/${o._id}/report-dispatch`), "Dispatch reported to Flipkart")}>
+              Report dispatch to Flipkart
+            </button>
+          )}
+          {!fk && !o.invoice && o.status !== "cancelled" && (
             <button className="btn btn-primary" disabled={busy} onClick={() => act(() => api.post("/shopify/orders/invoice", { ids: [o._id] }), "Invoice created")}>
               Create Invoice
             </button>
           )}
-          {["new", "packed"].includes(o.status) && !isEasy && (
+          {["new", "packed"].includes(o.status) && !isEasy && !fkEkart && (
             <button className="btn" disabled={busy} onClick={() => onShip([o._id])}>
-              Book Shipment
+              {fk ? "Book own courier (self-ship)" : "Book Shipment"}
             </button>
           )}
           {["new", "packed"].includes(o.status) && isEasy && !isEasyShipped && (
@@ -798,6 +887,18 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
         <div className="muted small">{new Date(o.orderDate).toLocaleString("en-IN")}</div>
       </div>
       {o.status === "returned" && <div className="alert alert-info">Returned{o.returnedAt ? ` on ${date(o.returnedAt)}` : ""}{o.returnNote ? ` · ${o.returnNote}` : ""}</div>}
+      {fk && (
+        <div className="alert alert-info" style={{ marginTop: 10 }}>
+          <strong>Flipkart {fk.selfShip ? "self-ship" : fk.selfShip === false ? "order — Flipkart's courier picks it up" : "order"}</strong>
+          {fk.dispatchBy && <> · dispatch by {new Date(fk.dispatchBy).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</>}
+          {fk.state && <> · on Flipkart: {fk.state.replace(/_/g, " ").toLowerCase()}</>}
+          {fk.hold && <div className="text-red small">On hold at Flipkart — wait before packing.</div>}
+          {fk.selfShip == null && <div className="small">Flipkart hasn't said how this ships. If Flipkart asked you to self-ship it, book your own courier; otherwise click "Flipkart picks up".</div>}
+          {fk.selfShip && fk.dispatchReportedAt && <div className="small">Dispatch reported to Flipkart {new Date(fk.dispatchReportedAt).toLocaleString("en-IN")}</div>}
+          {fk.selfShip && fk.dispatchError && !fk.dispatchReportedAt && <div className="text-red small">Flipkart wasn't told the dispatch: {fk.dispatchError}</div>}
+          <div className="muted small">Flipkart sales come into the books with the monthly Flipkart import, so no invoice is made here.</div>
+        </div>
+      )}
       {amz && (
         <div className="alert alert-info" style={{ marginTop: 10 }}>
           <strong>Amazon {isEasy ? "Easy Ship" : "self-ship"} order</strong>
@@ -1056,6 +1157,7 @@ export function ShopifyOrders() {
   const [data, setData] = useState(null);
   const [store, setStore] = useState(null);
   const [amazon, setAmazon] = useState(null);
+  const [flipkart, setFlipkart] = useState(null);
   const [easyShipFor, setEasyShipFor] = useState(null);
   const [couriers, setCouriers] = useState([]);
   const [facets, setFacets] = useState({ states: [], tags: [], financial: [] });
@@ -1104,6 +1206,9 @@ export function ShopifyOrders() {
         return r.data;
       })
       .catch(() => null);
+  useEffect(() => {
+    api.get("/flipkart-orders/account").then((r) => setFlipkart(r.data)).catch(() => {});
+  }, []);
   useEffect(() => {
     loadStore();
     loadAmazon();
@@ -1245,6 +1350,7 @@ export function ShopifyOrders() {
         )}
       </PageHeader>
 
+      {flipkart && flipkart.appId && !flipkart.connected && <div className="alert alert-error" style={{ marginBottom: 12 }}>Flipkart isn't connected. {flipkart.sync?.error && <>Last error: {flipkart.sync.error}. </>}<Link to="/flipkart-settings">Check the connection</Link></div>}
       {amazon && amazon.clientId && !amazon.connected && <div className="alert alert-error" style={{ marginBottom: 12 }}>Amazon isn't connected. {amazon.sync?.error && <>Last error: {amazon.sync.error}. </>}<Link to="/amazon-settings">Check the connection</Link></div>}
       {store && store.shop && !store.connected && <div className="alert alert-error" style={{ marginBottom: 12 }}>Shopify isn't connected. {sync_.error && <>Last error: {sync_.error}. </>}<Link to="/shopify-settings">Check the connection</Link></div>}
       {review.length > 0 && (
@@ -1270,13 +1376,24 @@ export function ShopifyOrders() {
           <input type="date" value={filters.from} onChange={setF("from")} title="From" />
           <span className="muted">to</span>
           <input type="date" value={filters.to} onChange={setF("to")} title="To" />
-          {amazon?.connected && (
+          {(amazon?.connected || flipkart?.connected) && (
             <select value={filters.channel} onChange={setF("channel")}>
-              <option value="">Shopify + Amazon</option>
+              <option value="">All channels</option>
               <option value="shopify">Shopify</option>
-              <option value="amazon">Amazon (all)</option>
-              <option value="amazon_self">Amazon self-ship</option>
-              <option value="amazon_easyship">Amazon Easy Ship</option>
+              {amazon?.connected && (
+                <>
+                  <option value="amazon">Amazon (all)</option>
+                  <option value="amazon_self">Amazon self-ship</option>
+                  <option value="amazon_easyship">Amazon Easy Ship</option>
+                </>
+              )}
+              {flipkart?.connected && (
+                <>
+                  <option value="flipkart">Flipkart (all)</option>
+                  <option value="flipkart_ekart">Flipkart logistics</option>
+                  <option value="flipkart_self">Flipkart self-ship</option>
+                </>
+              )}
             </select>
           )}
           <select value={filters.payment} onChange={setF("payment")}>
@@ -1448,7 +1565,7 @@ export function ShopifyOrders() {
                     </td>
                     <td>
                       <strong>{o.name}</strong>
-                      {o.channel === "amazon" && (
+                      {(o.channel === "amazon" || o.channel === "flipkart") && (
                         <div>
                           <AmazonBadge o={o} />
                         </div>
@@ -1534,7 +1651,7 @@ export function ShopifyOrders() {
                       </td>
                     )}
                     <td onClick={(e) => e.stopPropagation()} className="row-btns">
-                      {["new", "packed"].includes(o.status) && !(o.channel === "amazon" && o.amazon?.easyShip) && (
+                      {["new", "packed"].includes(o.status) && !(o.channel === "amazon" && o.amazon?.easyShip) && !(o.channel === "flipkart" && o.flipkart?.selfShip === false) && (
                         <button className="btn btn-sm" onClick={() => setShip([o._id])}>
                           Ship
                         </button>
@@ -1544,7 +1661,7 @@ export function ShopifyOrders() {
                           Easy Ship
                         </button>
                       )}
-                      {(sh.awb || sh.carrier === "amazon_easyship") && (
+                      {(sh.awb || sh.carrier === "amazon_easyship" || (o.channel === "flipkart" && !o.flipkart?.selfShip && o.status !== "new")) && (
                         <button className="btn btn-sm" onClick={() => openPdf(`/shopify/orders/${o._id}/label`)}>
                           Label
                         </button>

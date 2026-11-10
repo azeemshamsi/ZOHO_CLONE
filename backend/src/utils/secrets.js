@@ -18,6 +18,7 @@ const crypto = require("crypto");
 const PREFIX = "enc:v1:";
 const FIELDS = {
   AmazonAccount: ["clientSecret", "refreshToken", "accessToken"],
+  FlipkartAccount: ["appSecret", "accessToken"],
   ShopifyStore: ["clientSecret", "accessToken"],
   CourierAccount: ["credentials", "token"],
   GspAccount: ["token", "clientSecret", "password", "authToken", "sek"],

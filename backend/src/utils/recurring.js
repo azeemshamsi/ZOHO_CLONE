@@ -97,6 +97,13 @@ function startScheduler() {
   const amazon = () => require("./amazon/orders").autoSyncAll().catch((e) => console.error("Amazon sync failed:", e.message));
   setTimeout(amazon, 40000).unref();
   setInterval(amazon, 15 * 60 * 1000).unref();
+  // Flipkart: orders every 15 minutes, stock (from Shopify) every 30 minutes.
+  const flipkart = () => require("./flipkart/orders").autoSyncAll().catch((e) => console.error("Flipkart sync failed:", e.message));
+  setTimeout(flipkart, 60000).unref();
+  setInterval(flipkart, 15 * 60 * 1000).unref();
+  const flipkartStock = () => require("./flipkart/inventory").syncAllStock().catch((e) => console.error("Flipkart stock sync failed:", e.message));
+  setTimeout(flipkartStock, 120000).unref();
+  setInterval(flipkartStock, 30 * 60 * 1000).unref();
   setInterval(() => require("./amazon/ship").trackAllEasyShip().catch((e) => console.error("Easy Ship tracking failed:", e.message)), 2 * 60 * 60 * 1000).unref();
   setInterval(() => require("./shopify/inventory").pushAll().catch((e) => console.error("Inventory sync failed:", e.message)), 30 * 60 * 1000).unref();
   setInterval(() => require("./shopify/ship").trackAll().catch((e) => console.error("Courier tracking failed:", e.message)), 2 * 60 * 60 * 1000).unref();
