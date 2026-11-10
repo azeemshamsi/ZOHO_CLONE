@@ -513,12 +513,13 @@ router.post(
   ah(async (req, res) => {
     const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
     if (!o) throw new HttpError(404, "Order not found");
+    let r;
     try {
-      await cancelShipment(o);
+      r = await cancelShipment(o);
     } catch (e) {
       throw new HttpError(400, e.message);
     }
-    res.send(o);
+    res.send({ ...o.toObject(), shopifyNote: r?.shopify || "" });
   })
 );
 

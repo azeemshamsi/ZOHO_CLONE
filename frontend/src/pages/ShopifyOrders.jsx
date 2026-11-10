@@ -779,7 +779,12 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
             </button>
           )}
           {sh.awb && o.status === "ready_to_ship" && !isEasyShipped && (
-            <button className="btn btn-ghost" disabled={busy} onClick={() => window.confirm(`Cancel shipment ${sh.awb}?`) && act(() => api.post(`/shopify/orders/${o._id}/cancel-shipment`), "Shipment cancelled")}>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => window.confirm(`Cancel shipment ${sh.awb}?`) && act(async () => {
+                const r = await api.post(`/shopify/orders/${o._id}/cancel-shipment`);
+                const note = r.data?.shopifyNote || "";
+                toast(note ? `Shipment cancelled · ${note}` : "Shipment cancelled", /not cancelled|check it/.test(note) ? "error" : undefined);
+                return r;
+              })}>
               Cancel Shipment
             </button>
           )}
