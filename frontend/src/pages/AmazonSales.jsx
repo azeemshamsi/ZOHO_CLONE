@@ -490,7 +490,7 @@ function ImportBox({ S, onImported }) {
           Seller Hub → Reports → Tax reports: download the{" "}
           <strong>Sales Report</strong> for the month (and the{" "}
           <strong>GSTR-1 report</strong> to check against). Upload the Excel
-          files as they are. Each Flipkart invoice becomes an invoice (B2C to
+          files as they are. Each Flipkart sale becomes an invoice in your own series (e.g. INV…, shared with Pepperfry and continuing from your books), with Flipkart's invoice number kept as Reference# (B2C to
           "Flipkart B2C" or your Flipkart party, B2B to the buyer), each return
           or cancellation a credit note; bank-offer cash back notes from the
           Cash Back sheet are included, so the month equals Flipkart's GSTR-8.
@@ -661,7 +661,7 @@ function ImportBox({ S, onImported }) {
             }}
           >
             {series && (
-              <Field label="Invoice numbers" hint={series.on ? `From ${series.prefix}${String(series.next).padStart(series.width || 0, "0")} in date order${series.last ? ` (last in your books: ${series.last})` : ""}; ${S.label}'s number stays as Reference#` : `${S.label}'s order numbers`}>
+              <Field label="Invoice numbers" hint={series.on ? `${series.count ? `${series.count} invoices ` : ""}from ${series.prefix}${String(series.next).padStart(series.width || 0, "0")} in date order${series.last ? ` (last in your books: ${series.last})` : ""}; ${S.label}'s number stays as Reference#` : `${S.label}'s order numbers`}>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <select value={series.on ? "own" : "market"} onChange={(e) => setSeries({ ...series, on: e.target.value === "own" })}>
                     <option value="own">My series</option>

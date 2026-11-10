@@ -19,10 +19,13 @@ const P = require("./pepperfry");
 // Marketplaces whose monthly tax reports this import posts (same documents, ledgers and party logic).
 const SRC = {
   amazon: { key: "amazon", label: "Amazon", b2c: "Amazon B2C", ledger: "Amazon Sales", party: /^amazon[\s_-]*sre$/i, report: "Amazon's Merchant Tax Report" },
-  pepperfry: { key: "pepperfry", label: "Pepperfry", b2c: "Pepperfry B2C", ledger: "Pepperfry Sales", party: /^pepperfry([\s_-]*sre)?$/i, report: "Pepperfry's GSTR-1 report" },
-  flipkart: { key: "flipkart", label: "Flipkart", b2c: "Flipkart B2C", ledger: "Flipkart Sales", party: /^flipkart[\s_-]*sre$/i, report: "Flipkart's Sales Report" },
+  pepperfry: { ownSeries: true, key: "pepperfry", label: "Pepperfry", b2c: "Pepperfry B2C", ledger: "Pepperfry Sales", party: /^pepperfry([\s_-]*sre)?$/i, report: "Pepperfry's GSTR-1 report" },
+  flipkart: { ownSeries: true, key: "flipkart", label: "Flipkart", b2c: "Flipkart B2C", ledger: "Flipkart Sales", party: /^flipkart[\s_-]*sre$/i, report: "Flipkart's Sales Report" },
 };
 const srcOf = (k) => SRC[k] || SRC.amazon;
+// Which invoices get the company's own number: sales invoices. Flipkart's bank-offer cash back notes and return
+// cancellations keep Flipkart's document number.
+const ownNumbered = (S, d) => d.kind === "invoice" && (S.key !== "flipkart" || ((d.events || []).includes("Sale") && d.lines.every((l) => l.kind === "product")));
 
 const r4 = (n) => Math.round((Number(n) + Number.EPSILON) * 10000) / 10000;
 const MONTHS = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"];
@@ -162,7 +165,7 @@ async function preview(org, files, source = "amazon") {
   ]);
   const have = new Map([...invs.map((x) => [`i|${x.invoiceNumber}`, x]), ...cns.map((x) => [`c|${x.number}`, x])]);
   // Invoices numbered in the company's own series carry the marketplace number only in importRef.
-  if (S.key === "pepperfry") {
+  if (S.ownSeries) {
     const pre = `${S.key}:${gstin}:${month}:`;
     for (const x of await Invoice.find({ organization: org, importRef: { $in: p.invoices.map((d) => pre + d.number) } }, { invoiceNumber: 1, importRef: 1 }).lean()) have.set(`i|${x.importRef.slice(pre.length)}`, x);
   }
@@ -194,7 +197,7 @@ async function preview(org, files, source = "amazon") {
   const part = (xs) => ({ count: xs.length, taxable: sum(xs, (d) => d.taxable), tax: sum(xs, (d) => d.amazon.tax), value: sum(xs, (d) => d.amazon.value), tcs: sum(xs, (d) => d.tcs) });
   const posting = await postingInfo(org, o, docs.filter((d) => d.state === "new"), S);
   posting.onParty = posting.party ? await existingOnParty(org, posting.party._id, month, S) : null;
-  const series = S.key === "pepperfry" ? await seriesFor(org, posting.party?._id) : null;
+  const series = S.ownSeries ? { ...(await seriesFor(org, posting.party?._id)), count: p.invoices.filter((d) => d.state === "new" && ownNumbered(S, d)).length } : null;
   const id = crypto.randomUUID();
   plans.set(id, { org: String(org), gstin, month, plan: p, at: Date.now(), src: S.key, gstr1: S.key !== "amazon" ? u.gstr1 : null });
   return {
@@ -394,9 +397,10 @@ async function run(ctx, pl, docs, opts, job) {
       };
       const ref = `${S.key}:${pl.gstin}:${pl.month}:${d.number}`;
       if (d.kind === "invoice") {
-        const number = own ? nextOwn() : d.number;
-        if (own) ownOf.set(d.number, number);
-        const inv = await call(require("../../routes/invoices"), "POST", "/", ctx, { ...common, invoiceNumber: number, ...(own ? { orderNumber: d.number, customerNotes: `${S.label} invoice ${d.number} · ${common.customerNotes}` } : {}), dueDate: iso, status: "sent" });
+        const mine = own && ownNumbered(S, d);
+        const number = mine ? nextOwn() : d.number;
+        if (mine) ownOf.set(d.number, number);
+        const inv = await call(require("../../routes/invoices"), "POST", "/", ctx, { ...common, invoiceNumber: number, ...(mine ? { orderNumber: d.number, customerNotes: `${S.label} invoice ${d.number} · ${common.customerNotes}` } : {}), dueDate: iso, status: "sent" });
         const set = { importRef: ref };
         if (d.irn) Object.assign(set, { "einvoice.status": "generated", "einvoice.irn": d.irn, "einvoice.via": S.key, ...(d.irnDate ? { "einvoice.ackDate": new Date(`${d.irnDate.replace(" ", "T")}+05:30`) } : {}) });
         await Invoice.updateOne({ _id: inv._id }, { $set: set });
