@@ -1494,7 +1494,8 @@ export function ShopifyOrders() {
                           ) : (
                             <div>{sh.awb}</div>
                           )}
-                          {sh.trackStatus && <div className="muted">{TRACK_LABEL[sh.trackStatus] || sh.trackStatus}</div>}
+                          {sh.trackStatus && <div className="muted">{o.status === "return_created" ? "Delivery: " : ""}{TRACK_LABEL[sh.trackStatus] || sh.trackStatus}</div>}
+                          {o.status === "return_created" && <div className="small" style={{ color: "#b45309" }}>{o.returnStatus === "RETURN_REQUESTED" ? "Return requested in Shopify" : "Return open in Shopify"}</div>}
                           {o.awbScannedAt && <div className="muted small">Scanned {new Date(o.awbScannedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>}
                           {sh.error && /cancelled in Shopify/.test(sh.error) && <div className="text-red small">Fulfilment cancelled in Shopify</div>}
                         </>
