@@ -443,13 +443,20 @@ function codOf(order) {
   return order.paymentMode === "cod" ? r2(order.outstanding > 0 ? order.outstanding : order.total) : 0;
 }
 
+// The courier's order reference: the order number, plus -2, -3… after earlier bookings were cancelled.
+function refOf(order) {
+  const base = String(order.name || order.orderNumber).replace(/^#/, "");
+  const cancelled = Math.max((order.cancelledShipments || []).length, (String(order.remarks || "").match(/Shipment .+ cancelled on/g) || []).length);
+  return cancelled ? `${base}-${cancelled + 1}` : base;
+}
+
 // Everything a carrier needs, from a Shopify order.
 function shipmentFrom(order, org, pkg, itemMap = new Map()) {
   const a = order.shippingAddress || {};
   const items = order.lines.filter((l) => l.quantity > 0).map((l) => ({ name: l.variantTitle ? `${l.title} - ${l.variantTitle}` : l.title, sku: l.sku, quantity: l.quantity, price: l.quantity ? r2(l.total / l.quantity) : 0, hsn: itemMap.get(String(l.item))?.hsnSac || l.hsn || "", taxRate: itemMap.get(String(l.item))?.taxRate ?? (l.shopifyTaxRate || 0), category: l.productType || "" }));
   const orgAddr = org.address || {};
   return {
-    reference: String(order.name || order.orderNumber).replace(/^#/, ""),
+    reference: refOf(order),
     orderDate: order.orderDate,
     cod: codOf(order) > 0,
     codAmount: codOf(order),

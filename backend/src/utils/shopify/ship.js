@@ -140,6 +140,7 @@ async function cancelShipment(order) {
   const acc = sh.account ? await CourierAccount.findById(sh.account) : null;
   const was = `${sh.courierName || ""} ${sh.awb}`.trim();
   if (acc) await CARRIERS[acc.carrier].cancel(acc, sh);
+  order.cancelledShipments = [...(order.cancelledShipments || []), { courier: sh.courierName || "", awb: sh.awb, at: new Date() }];
   order.shipment = {};
   order.awbScannedAt = undefined; // the scan belonged to the cancelled AWB (it stays in awbScans)
   order.awbScannedBy = undefined;

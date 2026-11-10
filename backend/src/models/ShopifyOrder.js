@@ -126,6 +126,9 @@ const shopifyOrderSchema = new mongoose.Schema(
     awbScannedAt: Date,
     awbScannedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     awbScans: [{ _id: false, awb: String, courier: String, at: Date, by: mongoose.Schema.Types.ObjectId, byName: String }],
+    // Shipments booked and cancelled: a new booking then uses "<order>-2", "-3"… as the courier's order reference
+    // (couriers refuse a reference they have seen before).
+    cancelledShipments: [{ _id: false, courier: String, awb: String, at: Date }],
     returnFrom: String, // status before the return was opened (to go back to if it's declined)
     // COD order confirmed / cancel requested by the buyer with the WhatsApp buttons (Marketing → Automations).
     // A cancel request only flags the order for staff; it is never cancelled automatically.
