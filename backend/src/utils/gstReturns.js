@@ -167,8 +167,9 @@ async function gstr1(org, period, freq) {
     } else {
       for (const r of taxed) {
         const key = `${itr ? "INTER" : "INTRA"}|${pos}|${r.rt}`;
-        const s = (b2csMap[key] = b2csMap[key] || { sply_ty: itr ? "INTER" : "INTRA", pos, typ: "OE", rt: r.rt, ...zero() });
+        const s = (b2csMap[key] = b2csMap[key] || { sply_ty: itr ? "INTER" : "INTRA", pos, typ: "OE", rt: r.rt, ...zero(), docs: [] });
         add(s, r);
+        s.docs.push({ id: i._id, kind: "invoice", number: i.invoiceNumber, date: i.date, name: i.customerName, value: val, txval: r.txval, iamt: r.iamt, camt: r.camt, samt: r.samt });
       }
     }
   }
@@ -200,17 +201,18 @@ async function gstr1(org, period, freq) {
     } else {
       for (const r of rates.filter((x) => x.rt > 0)) {
         const key = `${itr ? "INTER" : "INTRA"}|${pos}|${r.rt}`;
-        const s = (b2csMap[key] = b2csMap[key] || { sply_ty: itr ? "INTER" : "INTRA", pos, typ: "OE", rt: r.rt, ...zero() });
+        const s = (b2csMap[key] = b2csMap[key] || { sply_ty: itr ? "INTER" : "INTRA", pos, typ: "OE", rt: r.rt, ...zero(), docs: [] });
         add(s, { txval: -r.txval, iamt: -r.iamt, camt: -r.camt, samt: -r.samt });
+        s.docs.push({ id: c._id, kind: "credit", number: c.number, date: c.date, name: c.customerName, value: -val, txval: -r.txval, iamt: -r.iamt, camt: -r.camt, samt: -r.samt });
       }
     }
   }
 
-  const b2cs = Object.values(b2csMap)
+  const b2csRows = Object.values(b2csMap)
     .filter((s) => s.txval)
-    .sort((a, b) => a.pos.localeCompare(b.pos) || a.rt - b.rt)
-    .map((s) => (s.sply_ty === "INTER" ? { sply_ty: s.sply_ty, pos: s.pos, typ: s.typ, rt: s.rt, txval: s.txval, iamt: s.iamt, csamt: 0 } : { sply_ty: s.sply_ty, pos: s.pos, typ: s.typ, rt: s.rt, txval: s.txval, camt: s.camt, samt: s.samt, csamt: 0 }));
-  view.b2cs = b2cs.map((s) => ({ type: s.sply_ty === "INTER" ? "Inter-state" : "Intra-state", pos: s.pos, rate: s.rt, txval: s.txval, iamt: s.iamt || 0, camt: s.camt || 0, samt: s.samt || 0 }));
+    .sort((a, b) => a.pos.localeCompare(b.pos) || a.rt - b.rt);
+  const b2cs = b2csRows.map((s) => (s.sply_ty === "INTER" ? { sply_ty: s.sply_ty, pos: s.pos, typ: s.typ, rt: s.rt, txval: s.txval, iamt: s.iamt, csamt: 0 } : { sply_ty: s.sply_ty, pos: s.pos, typ: s.typ, rt: s.rt, txval: s.txval, camt: s.camt, samt: s.samt, csamt: 0 }));
+  view.b2cs = b2csRows.map((s) => ({ type: s.sply_ty === "INTER" ? "Inter-state" : "Intra-state", pos: s.pos, rate: s.rt, txval: r2(s.txval), iamt: s.sply_ty === "INTER" ? r2(s.iamt) : 0, camt: s.sply_ty === "INTER" ? 0 : r2(s.camt), samt: s.sply_ty === "INTER" ? 0 : r2(s.samt), docs: s.docs.sort((a, b) => a.date - b.date || String(a.number).localeCompare(String(b.number))) }));
   const nilRows = Object.entries(nil)
     .filter(([, v]) => v.txval)
     .map(([sply_ty, v]) => ({ sply_ty, nil_amt: v.txval, expt_amt: 0, ngsup_amt: 0 }));
@@ -228,7 +230,29 @@ async function gstr1(org, period, freq) {
     { doc_num: 1, label: "Invoices for outward supply", ...docSeries(invoices.map((i) => i.invoiceNumber), voided.map((v) => v.invoiceNumber)) },
     { doc_num: 5, label: "Credit notes", ...docSeries(credits.map((c) => c.number), voidCn.map((c) => c.number)) },
   ].filter((d) => d.series.length);
-  for (const d of docSummary) for (const sr of d.series) if (sr.missing.length) issues.push({ problem: `${d.label}: ${sr.missing.length} number(s) missing in series ${sr.from} – ${sr.to} (${sr.missing.slice(0, 5).join(", ")}${sr.missing.length > 5 ? "…" : ""}). Gaps count as unexplained on the portal.` });
+  // Numbers skipped inside a series: find out why (dated in another month, still a draft, or not in OrdexaGo).
+  const notes = [];
+  const gapWhy = async (Model, field, d) => {
+    const want = d.series.flatMap((sr) => sr.missing).slice(0, 3000);
+    if (!want.length) return;
+    const found = new Map((await Model.find({ organization: org._id, [field]: { $in: want } }, { [field]: 1, date: 1, status: 1 }).lean()).map((x) => [x[field], x]));
+    for (const sr of d.series) {
+      sr.missing = sr.missing.map((no) => {
+        const x = found.get(no);
+        if (!x) return { number: no, why: "not in OrdexaGo (deleted, or the number was skipped)" };
+        if (x.status === "draft") return { number: no, why: "draft — not issued yet", id: x._id };
+        if (x.date < from || x.date > to) return { number: no, why: `dated ${dmy(x.date)} (another month)`, id: x._id, other: true };
+        return { number: no, why: x.status, id: x._id };
+      });
+      const drafts = sr.missing.filter((m) => /^draft/.test(m.why));
+      const gone = sr.missing.filter((m) => !m.id);
+      const other = sr.missing.filter((m) => m.other);
+      for (const m of drafts) issues.push({ doc: m.number, id: m.id, kind: d.doc_num === 5 ? "credit" : "invoice", problem: `is a draft inside the ${sr.from} – ${sr.to} series: issue it or void it` });
+      if (gone.length) notes.push(`${d.label} ${sr.from} – ${sr.to}: ${gone.length} number(s) not in OrdexaGo (${gone.slice(0, 5).map((m) => m.number).join(", ")}${gone.length > 5 ? "…" : ""}). If they were deleted or skipped, that's fine to file; Tally also counts only the documents that exist.`);
+      if (other.length) notes.push(`${d.label} ${sr.from} – ${sr.to}: ${other.length} number(s) are dated in another month (${other.slice(0, 3).map((m) => `${m.number} ${m.why.replace(/ \(another month\)/, "")}`).join(", ")}${other.length > 3 ? "…" : ""}). They are reported in that month's return.`);
+    }
+  };
+  for (const d of docSummary) await gapWhy(d.doc_num === 5 ? CreditNote : Invoice, d.doc_num === 5 ? "number" : "invoiceNumber", d);
   const docs = docSummary.map((d) => ({ doc_num: d.doc_num, docs: d.series.map((sr, n) => ({ num: n + 1, from: sr.from, to: sr.to, totnum: sr.totnum, cancel: sr.cancel, net_issue: sr.net_issue })) }));
 
   const json = {
@@ -263,7 +287,7 @@ async function gstr1(org, period, freq) {
   summary.docs = { count: view.docs.length, totnum: docTot("totnum"), cancel: docTot("cancel"), net_issue: docTot("net_issue") };
   const liability = add(add(add(add(zero(), summary.b2b), summary.b2cl), summary.b2cs), summary.exp);
   for (const k of ["txval", "iamt", "camt", "samt"]) liability[k] = r2(liability[k] - summary.cdnr[k] - summary.cdnur[k]);
-  return { period: lbl, fp, from, to, json, view, summary, liability, issues: dedupe(issues), documents: { invoices: invoices.length, creditNotes: credits.length, cancelled: voided.length } };
+  return { period: lbl, fp, from, to, json, view, summary, liability, issues: dedupe(issues), notes, documents: { invoices: invoices.length, creditNotes: credits.length, cancelled: voided.length } };
 }
 function dedupe(list) {
   const seen = new Set();

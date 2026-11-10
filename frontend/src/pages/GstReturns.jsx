@@ -145,6 +145,191 @@ const SECTIONS = [
   ["hsn", "12 · HSN summary", ""],
 ];
 
+function DocLink({ r }) {
+  const credit = r.kind === "credit";
+  return <Link to={`/${credit ? "credit-notes" : "invoices"}/${r.id}`} onClick={(e) => e.stopPropagation()}>{r.number}</Link>;
+}
+
+// The documents behind one GSTR-1 section, shown right under its row (like Tally's drill-down).
+function SectionDetail({ k, rows, docs }) {
+  const [grp, setGrp] = useState(-1);
+  if (k === "docs")
+    return (
+      <table className="table sub-table">
+        <thead>
+          <tr>
+            <th>Nature of document</th>
+            <th>From</th>
+            <th>To</th>
+            <th className="num">Total issued</th>
+            <th className="num">Cancelled</th>
+            <th className="num">Net issued</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, n) => (
+            <tr key={n}>
+              <td data-label="Nature">
+                {r.nature}
+                {r.missing?.length > 0 && (
+                  <details className="small muted" onClick={(e) => e.stopPropagation()}>
+                    <summary>{r.missing.length} number(s) skipped in this range — why</summary>
+                    <ul className="issue-list">
+                      {r.missing.slice(0, 50).map((m, j) => (
+                        <li key={j}>
+                          {m.id ? <DocLink r={{ ...m, kind: r.nature.startsWith("Credit") ? "credit" : "invoice" }} /> : <strong>{m.number}</strong>} — {m.why}
+                        </li>
+                      ))}
+                      {r.missing.length > 50 && <li>…and {r.missing.length - 50} more</li>}
+                    </ul>
+                  </details>
+                )}
+              </td>
+              <td data-label="From">{r.from}</td>
+              <td data-label="To">{r.to}</td>
+              <td data-label="Total" className="num">{r.totnum}</td>
+              <td data-label="Cancelled" className="num">{r.cancel}</td>
+              <td data-label="Net" className="num">{r.net_issue}</td>
+            </tr>
+          ))}
+          <tr className="total-row">
+            <td colSpan={3}>Total</td>
+            <td className="num">{docs.totnum}</td>
+            <td className="num">{docs.cancel}</td>
+            <td className="num">{docs.net_issue}</td>
+          </tr>
+        </tbody>
+      </table>
+    );
+  const taxCols = (r) => (
+    <>
+      <td data-label="Taxable" className="num"><Amt v={r.txval ?? r.nil_amt} /></td>
+      {k !== "nil" && (
+        <>
+          <td data-label="IGST" className="num"><Amt v={r.iamt} /></td>
+          <td data-label="CGST" className="num"><Amt v={r.camt} /></td>
+          <td data-label="SGST" className="num"><Amt v={r.samt} /></td>
+        </>
+      )}
+    </>
+  );
+  const docRow = (r, n, kind) => (
+    <tr key={n}>
+      <td data-label="Number"><DocLink r={{ ...r, kind: r.kind || kind }} /></td>
+      <td data-label="Date">{date(r.date)}</td>
+      <td data-label="Customer">
+        {r.name}
+        {r.gstin && <div className="muted small">{r.gstin}</div>}
+        {r.invoice && <div className="muted small">Against {r.invoice}</div>}
+      </td>
+      <td data-label="Value" className="num"><Amt v={r.value} /></td>
+      {taxCols(r)}
+    </tr>
+  );
+  const docHead = (
+    <tr>
+      <th>Number</th>
+      <th>Date</th>
+      <th>Customer</th>
+      <th className="num">Invoice value</th>
+      <th className="num">Taxable</th>
+      <th className="num">IGST</th>
+      <th className="num">CGST</th>
+      <th className="num">SGST</th>
+    </tr>
+  );
+  if (k === "b2cs")
+    return (
+      <table className="table sub-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Place of supply</th>
+            <th className="num">Rate</th>
+            <th className="num">Documents</th>
+            <th className="num">Taxable</th>
+            <th className="num">IGST</th>
+            <th className="num">CGST</th>
+            <th className="num">SGST</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, n) => [
+            <tr key={n} className="clickable" onClick={() => setGrp(grp === n ? -1 : n)}>
+              <td data-label="Type">{grp === n ? "▾" : "▸"} {r.type}</td>
+              <td data-label="Place of supply">{stateName(r.pos)}</td>
+              <td data-label="Rate" className="num">{r.rate}%</td>
+              <td data-label="Documents" className="num">{r.docs?.length || 0}</td>
+              {taxCols(r)}
+            </tr>,
+            grp === n && (
+              <tr key={`${n}d`} className="detail-row">
+                <td colSpan={8}>
+                  <table className="table sub-table">
+                    <thead>{docHead}</thead>
+                    <tbody>{(r.docs || []).map((x, j) => docRow(x, j))}</tbody>
+                  </table>
+                </td>
+              </tr>
+            ),
+          ])}
+        </tbody>
+      </table>
+    );
+  if (k === "hsn" || k === "nil")
+    return (
+      <table className="table sub-table">
+        <thead>
+          <tr>
+            {k === "hsn" ? (
+              <>
+                <th>HSN/SAC</th>
+                <th>Description</th>
+                <th className="num">Qty</th>
+                <th className="num">Rate</th>
+              </>
+            ) : (
+              <th>Supply type</th>
+            )}
+            <th className="num">Taxable</th>
+            {k !== "nil" && (
+              <>
+                <th className="num">IGST</th>
+                <th className="num">CGST</th>
+                <th className="num">SGST</th>
+              </>
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, n) => (
+            <tr key={n}>
+              {k === "hsn" ? (
+                <>
+                  <td data-label="HSN/SAC">{r.hsn_sc || <span className="red">missing</span>}</td>
+                  <td data-label="Description">{r.desc}</td>
+                  <td data-label="Qty" className="num">
+                    {r.qty} {r.uqc}
+                  </td>
+                  <td data-label="Rate" className="num">{r.rt}%</td>
+                </>
+              ) : (
+                <td data-label="Supply type">{r.sply_ty}</td>
+              )}
+              {taxCols(r)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  return (
+    <table className="table sub-table">
+      <thead>{docHead}</thead>
+      <tbody>{rows.map((r, n) => docRow(r, n, k.startsWith("cdn") ? "credit" : "invoice"))}</tbody>
+    </table>
+  );
+}
+
 function Gstr1({ period, canEdit }) {
   const [d, setD] = useState(null);
   const [open, setOpen] = useState("");
@@ -156,7 +341,7 @@ function Gstr1({ period, canEdit }) {
     load();
   }, [period]);
   if (!d) return <Spinner />;
-  const rows = d.view?.[open] || [];
+  const sections = [...SECTIONS, ...(d.summary.docs ? [["docs", "13 · Documents issued", `${d.summary.docs.totnum} issued · ${d.summary.docs.cancel} cancelled · ${d.summary.docs.net_issue} net — by number series`]] : [])];
   return (
     <>
       <div className="ret-head">
@@ -174,7 +359,18 @@ function Gstr1({ period, canEdit }) {
         </div>
       </div>
       <Issues list={d.issues} />
-      <div className="card flush" style={{ marginTop: 14 }}>
+      {d.notes?.length > 0 && (
+        <div className="alert alert-info" style={{ marginTop: 10 }}>
+          <strong>For your information (no action needed to file)</strong>
+          <ul className="issue-list">
+            {d.notes.map((t, n) => (
+              <li key={n}>{t}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="muted small" style={{ marginTop: 14 }}>Click a section to see its documents.</p>
+      <div className="card flush">
         <table className="table">
           <thead>
             <tr>
@@ -187,34 +383,40 @@ function Gstr1({ period, canEdit }) {
             </tr>
           </thead>
           <tbody>
-            {SECTIONS.map(([k, l, hint]) => {
+            {sections.map(([k, l, hint]) => {
               const s = d.summary[k];
-              return (
+              const rows = d.view?.[k] || [];
+              const isOpen = open === k && rows.length > 0;
+              return [
                 <tr key={k} className={s.count ? "clickable" : ""} onClick={() => s.count && setOpen(open === k ? "" : k)}>
                   <td data-label="Section">
-                    <strong>{l}</strong>
+                    <strong>
+                      {s.count ? (isOpen ? "▾ " : "▸ ") : ""}
+                      {l}
+                    </strong>
                     {hint && <div className="muted small">{hint}</div>}
                   </td>
                   <td data-label="Count" className="num">{s.count}</td>
-                  <td data-label="Taxable" className="num"><Amt v={s.txval} /></td>
-                  <td data-label="IGST" className="num"><Amt v={s.iamt} /></td>
-                  <td data-label="CGST" className="num"><Amt v={s.camt} /></td>
-                  <td data-label="SGST" className="num"><Amt v={s.samt} /></td>
-                </tr>
-              );
+                  {k === "docs" ? (
+                    <td colSpan={4} />
+                  ) : (
+                    <>
+                      <td data-label="Taxable" className="num"><Amt v={s.txval} /></td>
+                      <td data-label="IGST" className="num"><Amt v={s.iamt} /></td>
+                      <td data-label="CGST" className="num"><Amt v={s.camt} /></td>
+                      <td data-label="SGST" className="num"><Amt v={s.samt} /></td>
+                    </>
+                  )}
+                </tr>,
+                isOpen && (
+                  <tr key={`${k}-detail`} className="detail-row">
+                    <td colSpan={6}>
+                      <SectionDetail k={k} rows={rows} docs={d.summary.docs} />
+                    </td>
+                  </tr>
+                ),
+              ];
             })}
-            {d.summary.docs && (
-              <tr className={d.summary.docs.count ? "clickable" : ""} onClick={() => d.summary.docs.count && setOpen(open === "docs" ? "" : "docs")}>
-                <td data-label="Section">
-                  <strong>13 · Documents issued</strong>
-                  <div className="muted small">
-                    {d.summary.docs.totnum} issued · {d.summary.docs.cancel} cancelled · {d.summary.docs.net_issue} net — by number series
-                  </div>
-                </td>
-                <td data-label="Count" className="num">{d.summary.docs.count}</td>
-                <td colSpan={4} />
-              </tr>
-            )}
             <tr className="total-row">
               <td>Tax liability (net of credit notes)</td>
               <td />
@@ -226,130 +428,6 @@ function Gstr1({ period, canEdit }) {
           </tbody>
         </table>
       </div>
-      {open === "docs" && rows.length > 0 && (
-        <div className="card flush" style={{ marginTop: 14 }}>
-          <div className="card-title pad">13 · Documents issued (Document Summary)</div>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Nature of document</th>
-                <th>From</th>
-                <th>To</th>
-                <th className="num">Total issued</th>
-                <th className="num">Cancelled</th>
-                <th className="num">Net issued</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, n) => (
-                <tr key={n}>
-                  <td data-label="Nature">
-                    {r.nature}
-                    {r.missing?.length > 0 && <div className="small" style={{ color: "var(--danger, #c0392b)" }}>{r.missing.length} number(s) missing in this range</div>}
-                  </td>
-                  <td data-label="From">{r.from}</td>
-                  <td data-label="To">{r.to}</td>
-                  <td data-label="Total" className="num">{r.totnum}</td>
-                  <td data-label="Cancelled" className="num">{r.cancel}</td>
-                  <td data-label="Net" className="num">{r.net_issue}</td>
-                </tr>
-              ))}
-              <tr className="total-row">
-                <td colSpan={3}>Total</td>
-                <td className="num">{d.summary.docs.totnum}</td>
-                <td className="num">{d.summary.docs.cancel}</td>
-                <td className="num">{d.summary.docs.net_issue}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
-      {open && open !== "docs" && rows.length > 0 && (
-        <div className="card flush" style={{ marginTop: 14 }}>
-          <div className="card-title pad">{SECTIONS.find((s) => s[0] === open)[1]}</div>
-          <table className="table">
-            <thead>
-              <tr>
-                {open === "b2cs" ? (
-                  <>
-                    <th>Type</th>
-                    <th>Place of supply</th>
-                    <th className="num">Rate</th>
-                  </>
-                ) : open === "hsn" ? (
-                  <>
-                    <th>HSN/SAC</th>
-                    <th>Description</th>
-                    <th className="num">Qty</th>
-                    <th className="num">Rate</th>
-                  </>
-                ) : open === "nil" ? (
-                  <th>Supply type</th>
-                ) : (
-                  <>
-                    <th>Number</th>
-                    <th>Date</th>
-                    <th>Customer</th>
-                    <th className="num">Value</th>
-                  </>
-                )}
-                <th className="num">Taxable</th>
-                {open !== "nil" && (
-                  <>
-                    <th className="num">IGST</th>
-                    <th className="num">CGST</th>
-                    <th className="num">SGST</th>
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, n) => (
-                <tr key={n}>
-                  {open === "b2cs" ? (
-                    <>
-                      <td>{r.type}</td>
-                      <td>{stateName(r.pos)}</td>
-                      <td className="num">{r.rate}%</td>
-                    </>
-                  ) : open === "hsn" ? (
-                    <>
-                      <td>{r.hsn_sc || <span className="red">missing</span>}</td>
-                      <td>{r.desc}</td>
-                      <td className="num">
-                        {r.qty} {r.uqc}
-                      </td>
-                      <td className="num">{r.rt}%</td>
-                    </>
-                  ) : open === "nil" ? (
-                    <td>{r.sply_ty}</td>
-                  ) : (
-                    <>
-                      <td>
-                        <Link to={`/${open.startsWith("cdn") ? "credit-notes" : "invoices"}/${r.id}`}>{r.number}</Link>
-                      </td>
-                      <td>{date(r.date)}</td>
-                      <td>
-                        {r.name}
-                        {r.gstin && <div className="muted small">{r.gstin}</div>}
-                      </td>
-                      <td className="num"><Amt v={r.value} /></td>
-                    </>
-                  )}
-                  <td className="num"><Amt v={r.txval ?? r.nil_amt} /></td>
-                  {open !== "nil" && (
-                    <>
-                      <td className="num"><Amt v={r.iamt} /></td>
-                      <td className="num"><Amt v={r.camt} /></td>
-                      <td className="num"><Amt v={r.samt} /></td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
       <HowTo form="GSTR-1" />
     </>
   );

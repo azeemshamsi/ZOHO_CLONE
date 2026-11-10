@@ -965,3 +965,9 @@ tr.clickable:hover td { background: var(--brand-50); }
 .int-grid .span-2 { grid-column: 1 / -1; }
 .sec-h { margin: 18px 0 8px; }
 @media (max-width: 760px) { .int-grid { grid-template-columns: 1fr; } }
+
+/* GSTR-1 drill-down: a section's documents open right under its row */
+.detail-row > td { background: var(--gray-50, #f8fafc); padding: 8px 10px 14px !important; }
+.sub-table { background: #fff; border: 1px solid var(--border, #e5e7eb); border-radius: 8px; font-size: 13px; }
+.sub-table th, .sub-table td { padding: 6px 10px; }
+.sub-table .detail-row > td { background: #f3f6fb; }
