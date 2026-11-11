@@ -142,7 +142,8 @@ const SECTIONS = [
   ["cdnr", "9B · Credit notes (registered)", ""],
   ["cdnur", "9B · Credit notes (unregistered)", ""],
   ["nil", "8 · Nil rated / exempt", ""],
-  ["hsn", "12 · HSN summary", ""],
+  ["hsnB2b", "12 · HSN summary — B2B", "Sales to registered customers (with GSTIN)"],
+  ["hsnB2c", "12 · HSN summary — B2C", "Sales to unregistered customers"],
 ];
 
 function DocLink({ r }) {
@@ -276,12 +277,12 @@ function SectionDetail({ k, rows, docs }) {
         </tbody>
       </table>
     );
-  if (k === "hsn" || k === "nil")
+  if (k.startsWith("hsn") || k === "nil")
     return (
       <table className="table sub-table">
         <thead>
           <tr>
-            {k === "hsn" ? (
+            {k.startsWith("hsn") ? (
               <>
                 <th>HSN/SAC</th>
                 <th>Description</th>
@@ -304,7 +305,7 @@ function SectionDetail({ k, rows, docs }) {
         <tbody>
           {rows.map((r, n) => (
             <tr key={n}>
-              {k === "hsn" ? (
+              {k.startsWith("hsn") ? (
                 <>
                   <td data-label="HSN/SAC">{r.hsn_sc || <span className="red">missing</span>}</td>
                   <td data-label="Description">{r.desc}</td>

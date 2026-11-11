@@ -963,7 +963,7 @@ export function DocForm({ kind, recurring = false }) {
               </button>
             ))
           ) : (
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => submit(form.status)}>
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => submit(undefined)}>
               Save
             </button>
           )}

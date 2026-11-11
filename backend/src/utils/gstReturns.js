@@ -135,7 +135,8 @@ async function gstr1(org, period, freq) {
     if (!i.placeOfSupply) issues.push({ doc: i.invoiceNumber, id: i._id, kind: "invoice", problem: "No place of supply — your own state was used" });
     for (const l of i.lineItems || []) {
       if (!l.hsnSac) issues.push({ doc: i.invoiceNumber, id: i._id, kind: "invoice", problem: `"${l.name}" has no HSN/SAC code` });
-      const hk = `${l.hsnSac || ""}|${l.taxRate || 0}`;
+      // B2B and B2C are summed apart (GSTR-1 Table 12 has a B2B and a B2C part).
+      const hk = `${i.customerGstin ? "B2B" : "B2C"}|${l.hsnSac || ""}|${l.taxRate || 0}`;
       const h = (hsnMap[hk] = hsnMap[hk] || { hsn_sc: l.hsnSac || "", desc: (l.name || "").slice(0, 30), uqc: uqcOf(l.unit), qty: 0, rt: Number(l.taxRate) || 0, ...zero(), b2b: !!i.customerGstin });
       h.qty = r2(h.qty + (l.quantity || 0));
       add(h, { txval: (l.amount || 0) * k, iamt: (l.igst || 0) * k, camt: (l.cgst || 0) * k, samt: (l.sgst || 0) * k });
@@ -183,7 +184,7 @@ async function gstr1(org, period, freq) {
     const pos = c.placeOfSupply || org.state;
     const itr = inter(c, org);
     for (const l of c.lineItems || []) {
-      const hk = `${l.hsnSac || ""}|${l.taxRate || 0}`;
+      const hk = `${c.customerGstin ? "B2B" : "B2C"}|${l.hsnSac || ""}|${l.taxRate || 0}`;
       const h = (hsnMap[hk] = hsnMap[hk] || { hsn_sc: l.hsnSac || "", desc: (l.name || "").slice(0, 30), uqc: uqcOf(l.unit), qty: 0, rt: Number(l.taxRate) || 0, ...zero(), b2b: !!c.customerGstin });
       h.qty = r2(h.qty - (l.quantity || 0));
       add(h, { txval: -(l.amount || 0) * k, iamt: -(l.igst || 0) * k, camt: -(l.cgst || 0) * k, samt: -(l.sgst || 0) * k });
@@ -222,7 +223,8 @@ async function gstr1(org, period, freq) {
   const hsnRows = (rows) => rows.sort((a, b) => a.hsn_sc.localeCompare(b.hsn_sc) || a.rt - b.rt).map((h, n) => ({ num: n + 1, hsn_sc: h.hsn_sc, desc: h.desc, uqc: h.uqc, qty: h.qty, rt: h.rt, txval: h.txval, iamt: h.iamt, camt: h.camt, samt: h.samt, csamt: 0 }));
   const hsn_b2b = hsnRows(hsnAll.filter((h) => h.b2b));
   const hsn_b2c = hsnRows(hsnAll.filter((h) => !h.b2b));
-  view.hsn = hsnRows(hsnAll.map((h) => ({ ...h })));
+  view.hsnB2b = hsn_b2b;
+  view.hsnB2c = hsn_b2c;
 
   // Table 13: documents issued, one row per number series (prefix + running number), like Tally's Document Summary.
   const voidCn = await CreditNote.find({ organization: org._id, status: "void", opening: { $ne: true }, date: { $gte: from, $lte: to } }, { number: 1 }).lean();
@@ -280,7 +282,8 @@ async function gstr1(org, period, freq) {
     cdnr: { count: view.cdnr.length, ...sum(view.cdnr) },
     cdnur: { count: view.cdnur.length, ...sum(view.cdnur) },
     nil: { count: nilRows.length, txval: r2(nilRows.reduce((s, r) => s + r.nil_amt, 0)), iamt: 0, camt: 0, samt: 0 },
-    hsn: { count: view.hsn.length, ...sum(view.hsn) },
+    hsnB2b: { count: view.hsnB2b.length, ...sum(view.hsnB2b) },
+    hsnB2c: { count: view.hsnB2c.length, ...sum(view.hsnB2c) },
   };
   view.docs = docSummary.flatMap((d) => d.series.map((sr) => ({ nature: d.label, ...sr })));
   const docTot = (k) => view.docs.reduce((t, r) => t + r[k], 0);
