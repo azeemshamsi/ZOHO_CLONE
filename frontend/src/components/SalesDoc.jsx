@@ -231,7 +231,8 @@ export function DocForm({ kind, recurring = false }) {
         setLedgers(live.filter((a) => a.ledgerKind === ledgerKind));
         // Bills: expense ledgers too (Amazon commission, freight…), and TDS ledgers for the TDS line.
         if (ledgerKind === "purchase") {
-          setExpenseLedgers(live.filter((a) => a.ledgerKind !== "purchase" && ["Expense", "Other Expense"].includes(a.group)));
+          // Tally's Direct Expenses come in as Cost Of Goods Sold, Indirect Expenses as Expense.
+          setExpenseLedgers(live.filter((a) => a.ledgerKind !== "purchase" && ["Expense", "Other Expense", "Cost Of Goods Sold"].includes(a.group) && a.code !== "cogs"));
           setTdsLedgers(live.filter((a) => ["Other Current Liability", "Other Liability", "Current Liability"].includes(a.group) && /tds/i.test(a.name)));
         }
       })
@@ -607,7 +608,7 @@ export function DocForm({ kind, recurring = false }) {
                     return ledgerGroups.length && rest.length ? <optgroup label="Other ledgers">{opts}</optgroup> : opts;
                   })()}
                   {expenseLedgers.length > 0 && (
-                    <optgroup label="Expense ledgers (commission, freight, rent…)">
+                    <optgroup label="Expense ledgers (direct and indirect expenses)">
                       {expenseLedgers.map((a) => (
                         <option key={a.code} value={a.code}>
                           {a.name}
