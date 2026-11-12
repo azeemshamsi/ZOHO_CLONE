@@ -218,12 +218,23 @@ export function DocForm({ kind, recurring = false }) {
   const [ledgers, setLedgers] = useState([]);
   const [ledgerGroups, setLedgerGroups] = useState([]);
   // Sales ledger (invoices, credit notes) / purchase ledger (bills, vendor credits), as in Tally.
+  const [expenseLedgers, setExpenseLedgers] = useState([]);
+  const [tdsLedgers, setTdsLedgers] = useState([]);
+  const [tdsRate, setTdsRate] = useState("");
   const ledgerKind = recurring ? "" : ["invoice", "creditNote"].includes(kind.key) ? "sales" : ["bill", "vendorCredit"].includes(kind.key) ? "purchase" : "";
   useEffect(() => {
     if (!ledgerKind) return;
     api
       .get("/accounts")
-      .then((r) => setLedgers(r.data.filter((a) => a.ledgerKind === ledgerKind && a.active !== false)))
+      .then((r) => {
+        const live = r.data.filter((a) => a.active !== false);
+        setLedgers(live.filter((a) => a.ledgerKind === ledgerKind));
+        // Bills: expense ledgers too (Amazon commission, freight…), and TDS ledgers for the TDS line.
+        if (ledgerKind === "purchase") {
+          setExpenseLedgers(live.filter((a) => a.ledgerKind !== "purchase" && ["Expense", "Other Expense"].includes(a.group)));
+          setTdsLedgers(live.filter((a) => ["Other Current Liability", "Other Liability", "Current Liability"].includes(a.group) && /tds/i.test(a.name)));
+        }
+      })
       .catch(() => {});
     api
       .get("/accounts/ledger-groups", { params: { kind: ledgerKind } })
@@ -595,7 +606,16 @@ export function DocForm({ kind, recurring = false }) {
                     ));
                     return ledgerGroups.length && rest.length ? <optgroup label="Other ledgers">{opts}</optgroup> : opts;
                   })()}
-                  {form.ledger && !ledgers.some((a) => a.code === form.ledger) && <option value={form.ledger}>(current ledger)</option>}
+                  {expenseLedgers.length > 0 && (
+                    <optgroup label="Expense ledgers (commission, freight, rent…)">
+                      {expenseLedgers.map((a) => (
+                        <option key={a.code} value={a.code}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {form.ledger && !ledgers.some((a) => a.code === form.ledger) && !expenseLedgers.some((a) => a.code === form.ledger) && <option value={form.ledger}>(current ledger)</option>}
                 </select>
               </Field>
             )}
@@ -916,10 +936,23 @@ export function DocForm({ kind, recurring = false }) {
               <span>Shipping Charges</span>
               <input type="number" step="0.01" min="0" value={form.shippingCharge} onChange={set("shippingCharge")} />
             </div>
-            <div className="tot-row">
-              <span>Adjustment</span>
-              <input type="number" step="0.01" value={form.adjustment} onChange={set("adjustment")} />
-            </div>
+            {kind.key === "bill" && (
+              <TdsRow
+                form={form}
+                setForm={setForm}
+                taxable={totals.sub}
+                ledgers={tdsLedgers}
+                rate={tdsRate}
+                setRate={setTdsRate}
+                onCreated={(a) => setTdsLedgers([...tdsLedgers, a])}
+              />
+            )}
+            {!(kind.key === "bill" && tdsLedgers.some((a) => a.code === form.adjustmentAccount)) && (
+              <div className="tot-row">
+                <span>Adjustment</span>
+                <input type="number" step="0.01" value={form.adjustment} onChange={set("adjustment")} />
+              </div>
+            )}
             <div className="tot-row tot-total">
               <span>Total ({cur})</span>
               <span>{amount(totals.total)}</span>
@@ -1320,3 +1353,97 @@ export function MiniTable({ title, columns, rows, empty = "None" }) {
 export const dateCol = (label = "Date", field = "date") => ({ label, render: (r) => date(r[field]) });
 export const statusCol = { label: "Status", render: (r) => <Status value={r.displayStatus || r.status} /> };
 export const moneyCol = (label, field) => ({ label, num: true, render: (r) => money(r[field]) });
+
+// TDS deducted on a bill (commission, freight, professional fees…): taken off what the vendor is owed and credited
+// to a TDS payable ledger (the bill's adjustment, posted to that ledger). TDS is on the taxable value, not on GST.
+const TDS_SECTIONS = [
+  ["194C", "Contractors / freight (194C)", 2, "1% for an individual or HUF, 2% for others"],
+  ["194H", "Commission or brokerage (194H)", 2, ""],
+  ["194J", "Professional or technical fees (194J)", 10, "2% for technical services"],
+  ["194I", "Rent (194I)", 10, "2% for plant and machinery"],
+  ["194Q", "Purchase of goods (194Q)", 0.1, ""],
+];
+function TdsRow({ form, setForm, taxable, ledgers, rate, setRate, onCreated }) {
+  const on = ledgers.some((a) => a.code === form.adjustmentAccount);
+  const [busy, setBusy] = useState(false);
+  const amountOf = (r) => -Math.round(((Number(taxable) || 0) * (Number(r) || 0)) / 100);
+  // Keep the TDS in step with the bill's taxable value.
+  useEffect(() => {
+    if (on && rate !== "") setForm((f) => ({ ...f, adjustment: amountOf(rate) }));
+  }, [taxable, rate, on]);
+  const pick = async (v) => {
+    if (!v) return setForm({ ...form, adjustmentAccount: "", adjustment: 0 });
+    let code = v;
+    let r = rate;
+    if (v.startsWith("new:")) {
+      const sec = TDS_SECTIONS.find((x) => x[0] === v.slice(4));
+      setBusy(true);
+      try {
+        const { data } = await api.post("/accounts", { name: `TDS Payable u/s ${sec[0]}`, group: "Other Current Liability", description: `TDS deducted on ${sec[1].replace(/ \(.*\)/, "").toLowerCase()} (${sec[0]})` });
+        const a = { code: String(data._id || data.code), name: data.name, group: data.group };
+        onCreated(a);
+        code = a.code;
+      } catch (e) {
+        setBusy(false);
+        return toast(errMsg(e), "error");
+      }
+      setBusy(false);
+      r = String(sec[2]);
+    }
+    if (r === "") {
+      const name = (ledgers.find((a) => a.code === code)?.name || "").toUpperCase();
+      r = String(TDS_SECTIONS.find((x) => name.includes(x[0]))?.[2] ?? "");
+    }
+    setRate(r);
+    setForm({ ...form, adjustmentAccount: code, adjustment: amountOf(r) });
+  };
+  if (!on && rate === "" && !form.adjustment)
+    return (
+      <div className="tot-row">
+        <span>TDS</span>
+        <select value="" disabled={busy} onChange={(e) => pick(e.target.value)} style={{ maxWidth: 210 }}>
+          <option value="">No TDS</option>
+          {ledgers.map((a) => (
+            <option key={a.code} value={a.code}>
+              {a.name}
+            </option>
+          ))}
+          <optgroup label="Create a TDS ledger">
+            {TDS_SECTIONS.filter((x) => !ledgers.some((a) => a.name.toUpperCase().includes(x[0]))).map((x) => (
+              <option key={x[0]} value={`new:${x[0]}`}>
+                + {x[1]}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+      </div>
+    );
+  if (!on) return null;
+  const sec = TDS_SECTIONS.find((x) => (ledgers.find((a) => a.code === form.adjustmentAccount)?.name || "").toUpperCase().includes(x[0]));
+  return (
+    <>
+      <div className="tot-row">
+        <span>TDS</span>
+        <select value={form.adjustmentAccount} onChange={(e) => pick(e.target.value)} style={{ maxWidth: 210 }}>
+          <option value="">No TDS</option>
+          {ledgers.map((a) => (
+            <option key={a.code} value={a.code}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="tot-row">
+        <span className="small">
+          Rate % on {amount(taxable)}
+          {sec?.[3] ? <div className="muted small">{sec[3]}</div> : null}
+        </span>
+        <input type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} style={{ maxWidth: 90 }} />
+      </div>
+      <div className="tot-row">
+        <span>TDS deducted</span>
+        <input type="number" step="1" value={form.adjustment} onChange={(e) => (setRate(""), setForm({ ...form, adjustment: e.target.value }))} />
+      </div>
+    </>
+  );
+}
