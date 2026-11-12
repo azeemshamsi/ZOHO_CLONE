@@ -354,8 +354,11 @@ function Gstr1({ period, canEdit }) {
         </div>
         <div className="ret-actions">
           <FiledBox form="GSTR-1" period={period} filing={d.filing} onDone={load} summary={d.summary} canEdit={canEdit} />
-          <button className="btn btn-primary" onClick={() => download("/gst/returns/gstr1", { period, download: 1 }, `GSTR1_${d.fp}.json`)}>
+          <button className="btn btn-primary" onClick={() => download("/gst/returns/gstr1", { period, download: 1 }, `GSTR1_${d.fp}.json`)} title="One JSON file with every section">
             Download JSON
+          </button>
+          <button className="btn" onClick={() => download("/gst/returns/gstr1", { period, download: 1, split: 1 }, `GSTR1_${d.fp}.zip`)} title="One JSON file per section (B2B, B2CS, CDNR, HSN, documents…) in a zip, as Tally makes them">
+            JSON per section (zip)
           </button>
         </div>
       </div>

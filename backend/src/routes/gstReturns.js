@@ -31,7 +31,24 @@ router.get(
     const org = await orgOf(req);
     const freq = req.query.freq || freqOf(org);
     const r = await G.gstr1(org, req.query.period, freq);
-    if (req.query.download) return sendJson(res, `GSTR1_${org.gstin || "GSTIN"}_${r.fp}.json`, r.json);
+    if (req.query.download) {
+      // File names as Tally makes them: <GSTIN>_GSTR1[_<SECTION>]_<MON-YYYY>_<ddmmyyyy_hhmmss>.json
+      const MON = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][Number(r.fp.slice(0, 2)) - 1];
+      const t = new Date(Date.now() + 5.5 * 3600000).toISOString();
+      const stamp = `${t.slice(8, 10)}${t.slice(5, 7)}${t.slice(0, 4)}_${t.slice(11, 13)}${t.slice(14, 16)}${t.slice(17, 19)}`;
+      const base = `${org.gstin || "GSTIN"}_GSTR1`;
+      const tail = `${MON}-${r.fp.slice(2)}_${stamp}`;
+      if (!req.query.split) return sendJson(res, `${base}_${tail}.json`, r.json);
+      // One file per section (the portal accepts them one at a time), zipped.
+      const SECTIONS = [["b2b", "B2B"], ["b2cl", "B2CL"], ["b2cs", "B2CS"], ["exp", "EXP"], ["cdnr", "CDNR"], ["cdnur", "CDNUR"], ["nil", "NIL"], ["hsn", "HSN"], ["doc_issue", "DOCISSUE"]];
+      const head = Object.fromEntries(Object.entries(r.json).filter(([k]) => !SECTIONS.some(([s]) => s === k)));
+      const files = SECTIONS.filter(([k]) => r.json[k] !== undefined).map(([k, name]) => ({ name: `${base}_${name}_${tail}.json`, data: JSON.stringify({ ...head, [k]: r.json[k] }) }));
+      if (!files.length) throw new HttpError(400, "Nothing to report in this period");
+      const zip = require("../utils/zip").writeZip(files);
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader("Content-Disposition", `attachment; filename="${base}_${tail}.zip"`);
+      return res.send(zip);
+    }
     const filing = await GstFiling.findOne({ organization: req.org, form: "GSTR-1", period: filingKey(org, "GSTR-1", req.query.period, freq) }).lean();
     res.send({ ...r, json: undefined, freq, filing });
   })
