@@ -251,6 +251,54 @@ router.get(
   })
 );
 
+// Abandoned checkouts, read live from Shopify (not stored: buyers' contact details stay in Shopify).
+// ?after=<cursor>&q=<search>; 50 per page, newest first; completed checkouts are left out.
+router.get(
+  "/abandoned-checkouts",
+  ah(async (req, res) => {
+    const store = await ShopifyStore.findOne({ organization: req.storeOrg });
+    if (!store?.connected) throw new HttpError(400, "Connect the Shopify store first");
+    const { gql } = require("../utils/shopify/client");
+    const q = String(req.query.q || "").replace(/["\\]/g, "").trim();
+    let d;
+    try {
+      d = await gql(
+        store,
+        `query($after: String, $query: String) { abandonedCheckouts(first: 50, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+          pageInfo { hasNextPage endCursor }
+          nodes { id name createdAt updatedAt completedAt abandonedCheckoutUrl
+            totalPriceSet { shopMoney { amount } }
+            customer { displayName defaultEmailAddress { emailAddress } defaultPhoneNumber { phoneNumber } numberOfOrders }
+            shippingAddress { name phone city province zip }
+            billingAddress { phone }
+            lineItems(first: 10) { nodes { title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } image { url } } } } } }`,
+        { after: req.query.after || null, query: q || null }
+      );
+    } catch (e) {
+      if (/access|scope|permission/i.test(e.message)) throw new HttpError(400, "The Shopify app can't read abandoned checkouts — give it the read_orders access scope and reinstall it");
+      throw new HttpError(400, e.message);
+    }
+    const c = d.abandonedCheckouts || {};
+    const rows = (c.nodes || [])
+      .filter((x) => !x.completedAt)
+      .map((x) => ({
+        id: x.id.split("/").pop(),
+        name: x.name,
+        createdAt: x.createdAt,
+        updatedAt: x.updatedAt,
+        url: x.abandonedCheckoutUrl,
+        total: Number(x.totalPriceSet?.shopMoney?.amount) || 0,
+        customer: x.customer?.displayName || x.shippingAddress?.name || "",
+        email: x.customer?.defaultEmailAddress?.emailAddress || "",
+        phone: x.shippingAddress?.phone || x.customer?.defaultPhoneNumber?.phoneNumber || x.billingAddress?.phone || "",
+        orders: x.customer?.numberOfOrders != null ? Number(x.customer.numberOfOrders) : null,
+        city: [x.shippingAddress?.city, x.shippingAddress?.province, x.shippingAddress?.zip].filter(Boolean).join(", "),
+        items: (x.lineItems?.nodes || []).map((l) => ({ title: l.title, variant: l.variantTitle || "", sku: l.sku || "", quantity: l.quantity, price: Number(l.originalUnitPriceSet?.shopMoney?.amount) || 0, image: l.image?.url || "" })),
+      }));
+    res.send({ rows, next: c.pageInfo?.hasNextPage ? c.pageInfo.endCursor : null, shop: store.shop });
+  })
+);
+
 // Orders returned in Shopify that are still Shipped here (found by the delivery check): closing them posts the
 // credit notes against their OrdexaGo invoices, so the user does it.
 router.get(

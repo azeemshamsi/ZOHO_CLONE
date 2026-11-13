@@ -64,6 +64,7 @@ const NAV = [
     children: [
       { to: "/shopify-orders", label: "Orders", mod: ["store_orders", "store_shipping"] },
       { to: "/awb-scan", label: "Scan AWB", mod: "store_shipping" },
+      { to: "/abandoned-checkouts", label: "Abandoned Checkouts", mod: "store_orders" },
       { to: "/returns-scan", label: "Scan Returns", mod: "store_returns" },
       { to: "/package-types", label: "Package Types", mod: ["store_shipping", "store_settings", "store_orders"] },
       { to: "/shipping-calculator", label: "Shipping Calculator", mod: ["store_shipping", "store_settings", "store_orders"] },
@@ -138,6 +139,7 @@ const PATH_MODULES = [
   ["/shopify-settings", ["store_settings", "store_orders"]],
   ["/amazon-settings", "store_settings"],
   ["/flipkart-settings", "store_settings"],
+  ["/abandoned-checkouts", "store_orders"],
   ["/returns-scan", "store_returns"],
   ["/awb-scan", "store_shipping"],
   ["/package-types", ["store_shipping", "store_settings", "store_orders"]],
