@@ -701,7 +701,7 @@ function Gstr3b({ period, canEdit }) {
                 line("(2) Import of services", z, { indent: true }),
                 line("(3) Inward supplies liable to reverse charge (other than 1 & 2 above)", z, { indent: true }),
                 line("(4) Inward supplies from ISD", z, { indent: true }),
-                line("(5) All other ITC", d.itc, { indent: true, hint: d.itcSource === "2b" ? "As per GSTR-2B" : "As per books: bills and expenses less vendor credits", docs: d.itcSource === "2b" ? null : [...(dd.itcBooks || []), ...(dd.itcReversed || []).map((x) => ({ ...x, value: -x.value, txval: -x.txval, iamt: -x.iamt, camt: -x.camt, samt: -x.samt }))], k: "itc" }),
+                line("(5) All other ITC", d.itc, { indent: true, hint: d.itcSource === "2b" ? "As per GSTR-2B" : "As per books: bills and expenses with GST, less vendor credits", docs: d.itcSource === "2b" ? null : [...(dd.itcBooks || []), ...(dd.itcReversed || []).map((x) => ({ ...x, value: -x.value, txval: -x.txval, iamt: -x.iamt, camt: -x.camt, samt: -x.samt }))], k: "itc" }),
                 line("(B) ITC Reversed", z, { head: true }),
                 line("(1) As per rules 38, 42 & 43 of CGST Rules and section 17(5)", z, { indent: true }),
                 line("(2) Others", z, { indent: true }),
@@ -737,7 +737,8 @@ function Gstr3b({ period, canEdit }) {
                 <td>
                   {docs?.length ? (sec === k ? "▾ " : "▸ ") : ""}
                   {label}
-                  {k === "inNon" && !docs?.length && <div className="muted small">Purchases posted to a ledger marked "Non-GST supply" in Chart of Accounts (petrol, diesel, liquor…)</div>}
+                  {k === "inNon" && <div className="muted small">Purchases from unregistered suppliers (no GSTIN), and ledgers marked "Non-GST supply" in Chart of Accounts</div>}
+                  {k === "inNil" && <div className="muted small">0% GST lines on bills and expenses of registered suppliers</div>}
                 </td>
                 <td className="num"><Amt v={v.inter} /></td>
                 <td className="num"><Amt v={v.intra} /></td>

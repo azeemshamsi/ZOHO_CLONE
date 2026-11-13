@@ -367,6 +367,11 @@ async function gstr3b(org, period, freq, { itcFrom2b } = {}) {
   // 5. inward supplies with no GST: exempt / nil-rated, and non-GST (lines posted to a ledger marked Non-GST:
   // petrol, liquor…), split inter-state / intra-state as on the portal.
   const nonGstAcc = new Set((await Account.find({ organization: org._id, nonGst: true }, { _id: 1 }).lean()).map((a) => String(a._id)));
+  // Purchases from unregistered suppliers (no GSTIN) carry no GST: reported as non-GST inward supplies, as Tally does.
+  const Vendor = require("../models/Vendor");
+  const expVendors = [...new Set(expenses.map((e) => e.vendor && String(e.vendor)).filter(Boolean))];
+  const vendorGstin = new Map((expVendors.length ? await Vendor.find({ _id: { $in: expVendors } }, { gstin: 1 }).lean() : []).map((v) => [String(v._id), v.gstin || ""]));
+  const unregistered = (d, kind) => !(kind === "bill" ? d.vendorGstin : vendorGstin.get(String(d.vendor || "")));
   const inwardNil = { inter: 0, intra: 0 };
   const inwardNonGst = { inter: 0, intra: 0 };
   const inwardDocs = { nil: new Map(), nonGst: new Map() };
@@ -375,7 +380,7 @@ async function gstr3b(org, period, freq, { itcFrom2b } = {}) {
     const where = d.isInterState ? "inter" : "intra";
     for (const l of lines) {
       if (l.taxRate) continue;
-      const nonGst = nonGstAcc.has(String(l.account || d.ledger || d.account || ""));
+      const nonGst = nonGstAcc.has(String(l.account || d.ledger || d.account || "")) || unregistered(d, kind);
       const amt = r2((l.amount || 0) * fx(d));
       const bucket = nonGst ? inwardNonGst : inwardNil;
       bucket[where] = r2(bucket[where] + amt);
@@ -415,12 +420,12 @@ async function gstr3b(org, period, freq, { itcFrom2b } = {}) {
     nil: merge(V.nil.flatMap((r) => r.docs || [])),
     unreg: Object.fromEntries(Object.keys(unreg).map((pos) => [pos, merge([...V.b2cl.filter((d) => d.pos === pos).map((d) => ({ ...d, kind: "invoice" })), ...V.b2cs.filter((g) => g.type === "Inter-state" && g.pos === pos).flatMap((g) => g.docs || [])])])),
     itcBooks: [
-      ...bills.map((b) => ({ id: b._id, kind: "bill", number: b.billNumber, date: b.date, name: b.vendorName, value: r2((b.total || 0) * fx(b)), txval: r2((b.subTotal || 0) * fx(b)), ...taxOf(b) })),
-      ...expenses.map((e) => ({ id: e._id, kind: "expense", number: e.category, date: e.date, name: e.vendorName, value: r2((e.total || 0) * fx(e)), txval: r2((e.amount || 0) * fx(e)), ...taxOf(e) })),
+      ...bills.filter((b) => b.igst || b.cgst || b.sgst).map((b) => ({ id: b._id, kind: "bill", number: b.billNumber, date: b.date, name: b.vendorName, value: r2((b.total || 0) * fx(b)), txval: r2((b.subTotal || 0) * fx(b)), ...taxOf(b) })),
+      ...expenses.filter((e) => e.igst || e.cgst || e.sgst).map((e) => ({ id: e._id, kind: "expense", number: e.category, date: e.date, name: e.vendorName, value: r2((e.total || 0) * fx(e)), txval: r2((e.amount || 0) * fx(e)), ...taxOf(e) })),
     ].sort((a, b) => a.date - b.date),
     inwardNil: [...inwardDocs.nil.values()].sort((a, b) => a.date - b.date),
     inwardNonGst: [...inwardDocs.nonGst.values()].sort((a, b) => a.date - b.date),
-    itcReversed: vcs.map((v) => ({ id: v._id, kind: "vendorCredit", number: v.number, date: v.date, name: v.vendorName, value: r2((v.total || 0) * fx(v)), txval: r2((v.subTotal || 0) * fx(v)), ...taxOf(v) })).sort((a, b) => a.date - b.date),
+    itcReversed: vcs.filter((v) => v.igst || v.cgst || v.sgst).map((v) => ({ id: v._id, kind: "vendorCredit", number: v.number, date: v.date, name: v.vendorName, value: r2((v.total || 0) * fx(v)), txval: r2((v.subTotal || 0) * fx(v)), ...taxOf(v) })).sort((a, b) => a.date - b.date),
   };
   const json = {
     gstin: org.gstin,
