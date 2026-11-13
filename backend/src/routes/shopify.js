@@ -251,6 +251,35 @@ router.get(
   })
 );
 
+// Orders returned in Shopify that are still Shipped here (found by the delivery check): closing them posts the
+// credit notes against their OrdexaGo invoices, so the user does it.
+router.get(
+  "/orders/returned-in-shopify",
+  ah(async (req, res) => {
+    const list = await ShopifyOrder.find({ organization: req.storeOrg, status: "shipped", returnStatus: "RETURNED" }, { name: 1, invoiceNumber: 1, total: 1, orderDate: 1 }).lean();
+    res.send(list);
+  })
+);
+router.post(
+  "/orders/returned-in-shopify/close",
+  ah(async (req, res) => {
+    const store = await ShopifyStore.findOne({ organization: req.storeOrg });
+    const { markReturnClosed } = require("../utils/shopify/returns");
+    const out = { closed: 0, creditNotes: [], failed: [] };
+    for (const o of await ShopifyOrder.find({ organization: req.storeOrg, status: "shipped", returnStatus: "RETURNED" })) {
+      try {
+        const r = await markReturnClosed({ org: req.storeOrg, user: req.user }, o, store, { shopifyDone: true });
+        out.closed++;
+        if (r.creditNote) out.creditNotes.push(r.creditNote);
+      } catch (e) {
+        out.failed.push(`${o.name}: ${e.message}`);
+      }
+    }
+    require("../utils/shopify/orderIndex").forget(String(req.storeOrg));
+    res.send(out);
+  })
+);
+
 router.get(
   "/orders/:id",
   ah(async (req, res) => {

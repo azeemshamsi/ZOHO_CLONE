@@ -368,11 +368,14 @@ async function syncStore(store, { full = false } = {}) {
 async function refreshDeliveries(store, { withDelivered = false } = {}) {
   const since = new Date(Date.now() - 120 * 86400000);
   const statuses = withDelivered ? ["shipped", "delivered"] : ["shipped"];
-  const open = (await ShopifyOrder.find({ organization: store.organization, status: { $in: statuses } })).filter((o) => String(o.shopifyId || "").startsWith("gid://") && (o.status === "shipped" || !o.deliveredChecked) && (!o.orderDate || o.orderDate >= since));
+  // Shipped orders of any age (an old order can still be out, or was delivered / returned / cancelled in Shopify
+  // without the order being touched since); delivered ones only to confirm the delivery time of recent orders.
+  const open = (await ShopifyOrder.find({ organization: store.organization, status: { $in: statuses } })).filter((o) => String(o.shopifyId || "").startsWith("gid://") && (o.status === "shipped" || (!o.deliveredChecked && (!o.orderDate || o.orderDate >= since))));
   let changed = 0;
+  const toClose = [];
   for (let i = 0; i < open.length; i += 50) {
     const batch = open.slice(i, i + 50);
-    const data = await gql(store, `query($ids: [ID!]!) { nodes(ids: $ids) { ... on Order { id fulfillments(first: 10) { ${FULFILMENT} } } } }`, { ids: batch.map((o) => o.shopifyId) });
+    const data = await gql(store, `query($ids: [ID!]!) { nodes(ids: $ids) { ... on Order { id cancelledAt returnStatus fulfillments(first: 10) { ${FULFILMENT} } } } }`, { ids: batch.map((o) => o.shopifyId) });
     const byId = new Map((data.nodes || []).filter(Boolean).map((n) => [n.id, n]));
     for (const o of batch) {
       const n = byId.get(o.shopifyId);
@@ -384,10 +387,44 @@ async function refreshDeliveries(store, { withDelivered = false } = {}) {
         o.deliveredChecked = true;
         await o.save();
         changed++;
+        continue;
+      }
+      // Shipped here, but Shopify has moved on.
+      if (n.returnStatus === "RETURNED") {
+        // Returned in Shopify long ago: closing it here posts a credit note against OrdexaGo's invoice, so it waits
+        // for the user (Store → Orders shows these with a "Close returns" button). Without an invoice it just closes.
+        if (o.returnStatus !== "RETURNED") {
+          o.returnStatus = "RETURNED";
+          await o.save();
+          changed++;
+        }
+        if (!o.invoice) toClose.push(o._id);
+      } else if (OPEN_RETURN.includes(n.returnStatus)) {
+        o.returnStatus = n.returnStatus;
+        o.returnFrom = d?.status === "delivered" ? "delivered" : "shipped";
+        if (d?.status === "delivered") o.deliveredAt = o.deliveredAt || d.at || new Date();
+        o.status = "return_created";
+        o.statusChangedAt = new Date();
+        await o.save();
+        changed++;
+      } else if (n.cancelledAt) {
+        o.status = "cancelled";
+        o.cancelledAt = new Date(n.cancelledAt);
+        o.statusChangedAt = new Date();
+        o.remarks = [o.remarks, `Cancelled in Shopify after it was shipped${o.invoiceNumber ? ` — invoice ${o.invoiceNumber} is still in the books` : ""}`].filter(Boolean).join("\n");
+        await o.save();
+        changed++;
       } else if (applyDelivery(o, d)) {
         await o.save();
         changed++;
       }
+    }
+  }
+  if (toClose.length) {
+    const { markReturnClosed } = require("./returns");
+    for (const id of toClose) {
+      const o = await ShopifyOrder.findById(id);
+      if (o && o.status !== "returned") await markReturnClosed({ org: store.organization, user: null }, o, store, { shopifyDone: true }).catch((e) => console.error(`Closing return ${o.name} failed: ${e.message}`));
     }
   }
   if (changed) require("./orderIndex").forget(store.organization);

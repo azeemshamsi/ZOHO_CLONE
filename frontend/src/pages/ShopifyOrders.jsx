@@ -1158,6 +1158,7 @@ export function ShopifyOrders() {
   const [store, setStore] = useState(null);
   const [amazon, setAmazon] = useState(null);
   const [flipkart, setFlipkart] = useState(null);
+  const [returnedInShopify, setReturnedInShopify] = useState([]);
   const [easyShipFor, setEasyShipFor] = useState(null);
   const [couriers, setCouriers] = useState([]);
   const [facets, setFacets] = useState({ states: [], tags: [], financial: [] });
@@ -1208,6 +1209,7 @@ export function ShopifyOrders() {
       .catch(() => null);
   useEffect(() => {
     api.get("/flipkart-orders/account").then((r) => setFlipkart(r.data)).catch(() => {});
+    api.get("/shopify/orders/returned-in-shopify").then((r) => setReturnedInShopify(r.data)).catch(() => {});
   }, []);
   useEffect(() => {
     loadStore();
@@ -1350,6 +1352,29 @@ export function ShopifyOrders() {
         )}
       </PageHeader>
 
+      {returnedInShopify.length > 0 && (
+        <div className="alert alert-warn" style={{ marginBottom: 12 }}>
+          <strong>{returnedInShopify.length} order{returnedInShopify.length > 1 ? "s were" : " was"} returned in Shopify but still show as Shipped here</strong>{" "}
+          ({returnedInShopify.slice(0, 8).map((o) => o.name).join(", ")}
+          {returnedInShopify.length > 8 ? "…" : ""}). Closing them marks them Returned, posts a credit note against each one's OrdexaGo invoice and puts the stock back.{" "}
+          <button
+            className="btn btn-sm"
+            onClick={async () => {
+              if (!window.confirm(`Close ${returnedInShopify.length} returns?\n\nEach order becomes Returned; a credit note is posted against its OrdexaGo invoice (${returnedInShopify.filter((o) => o.invoiceNumber).length} invoices) and its stock is put back.`)) return;
+              try {
+                const { data } = await api.post("/shopify/orders/returned-in-shopify/close");
+                toast(`${data.closed} returns closed · ${data.creditNotes.length} credit notes${data.failed.length ? ` · ${data.failed.length} failed: ${data.failed.slice(0, 2).join("; ")}` : ""}`, data.failed.length ? "error" : undefined);
+                setReturnedInShopify([]);
+                load();
+              } catch (e) {
+                toast(errMsg(e), "error");
+              }
+            }}
+          >
+            Close {returnedInShopify.length} returns
+          </button>
+        </div>
+      )}
       {flipkart && flipkart.appId && !flipkart.connected && <div className="alert alert-error" style={{ marginBottom: 12 }}>Flipkart isn't connected. {flipkart.sync?.error && <>Last error: {flipkart.sync.error}. </>}<Link to="/flipkart-settings">Check the connection</Link></div>}
       {amazon && amazon.clientId && !amazon.connected && <div className="alert alert-error" style={{ marginBottom: 12 }}>Amazon isn't connected. {amazon.sync?.error && <>Last error: {amazon.sync.error}. </>}<Link to="/amazon-settings">Check the connection</Link></div>}
       {store && store.shop && !store.connected && <div className="alert alert-error" style={{ marginBottom: 12 }}>Shopify isn't connected. {sync_.error && <>Last error: {sync_.error}. </>}<Link to="/shopify-settings">Check the connection</Link></div>}
