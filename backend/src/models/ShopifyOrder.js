@@ -123,6 +123,8 @@ const shopifyOrderSchema = new mongoose.Schema(
     invoiceOrg: { type: mongoose.Schema.Types.ObjectId, ref: "Organization" }, // the company the invoice is in
     invoiceError: String,
     remarks: String,
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // created from OrdexaGo (New order) by
+    createdByName: String,
     // Payment screenshots (bytes in GridFS "attachments"); sent to the Shopify order (metafield + note).
     paymentProofs: [
       {

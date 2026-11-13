@@ -748,11 +748,12 @@ function B2bBox({ o, onSaved }) {
   );
 }
 
-function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
+function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
   const [o, setO] = useState(null);
   const [busy, setBusy] = useState(false);
   const [remarks, setRemarks] = useState("");
   const [easyShip, setEasyShip] = useState(false);
+  const { user } = useAuth();
   const [packOpen, setPackOpen] = useState(false);
   const load = () =>
     api.get(`/shopify/orders/${id}`).then((r) => {
@@ -795,7 +796,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
       title={`Order ${o.name}`}
       onClose={onClose}
       footer={
-        <div className="order-actions">
+        readOnly ? null : <div className="order-actions">
           {fk && !fkEkart && ["new", "packed"].includes(o.status) && fk.selfShip == null && (
             <>
               <button className="btn" disabled={busy} onClick={() => act(() => api.put(`/flipkart-orders/orders/${o._id}/self-ship`, { selfShip: false }), "Marked: Flipkart picks it up")}>
@@ -927,8 +928,9 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
         <div>
           <div className="label-sm">Invoice</div>
           {o.invoice ? <Link to={`/invoices/${o.invoice}`}>{o.invoiceNumber}</Link> : <span className="muted">Not invoiced{o.invoiceError ? ` — ${o.invoiceError}` : ""}</span>}
-          <B2bBox o={o} onSaved={() => (load(), onChanged())} />
-          {(!o.channel || o.channel === "shopify") && <PaymentProofs orderId={o._id} />}
+          {!readOnly && <B2bBox o={o} onSaved={() => (load(), onChanged())} />}
+          {(!o.channel || o.channel === "shopify") && <PaymentProofs orderId={o._id} canEdit={!readOnly || (o.createdBy === user?._id && Date.now() - new Date(o.createdAt) < 30 * 60000)} />}
+          {o.createdByName && <div className="muted small">Created in OrdexaGo by {o.createdByName}</div>}
           <div className="label-sm" style={{ marginTop: 10 }}>
             Shipment
           </div>
@@ -1056,7 +1058,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
       )}
       <WhatsAppLog orderId={o._id} />
       <Field label="Remarks (only in OrdexaGo)">
-        <textarea rows={2} value={remarks} onChange={(e) => setRemarks(e.target.value)} onBlur={() => remarks !== (o.remarks || "") && api.put(`/shopify/orders/${o._id}/remarks`, { remarks }).then(() => toast("Remarks saved"))} />
+        <textarea rows={2} readOnly={readOnly} value={remarks} onChange={(e) => setRemarks(e.target.value)} onBlur={() => remarks !== (o.remarks || "") && api.put(`/shopify/orders/${o._id}/remarks`, { remarks }).then(() => toast("Remarks saved"))} />
       </Field>
     </Modal>
     </>
@@ -1150,6 +1152,8 @@ function ReviewItems({ items, onClose, onChanged }) {
 
 export function ShopifyOrders() {
   const { organization, organizations, user } = useAuth();
+  // View-only (e.g. an order taker): no selecting, shipping, status changes or edits.
+  const canAct = can(user, ["store_orders", "store_shipping", "store_returns"], "full");
   const companyName = (id) => (organizations || []).find((c) => String(c._id) === String(id))?.name || "other company";
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") || "new";
@@ -1347,7 +1351,7 @@ export function ShopifyOrders() {
             {amazon.sync?.running ? `Amazon… ${amazon.sync.fetched || 0}` : "Sync Amazon"}
           </button>
         )}
-        {store?.connected && can(user, "store_orders", "full") && (
+        {store?.connected && can(user, "store_orders.new_order", "full") && (
           <Link className="btn" to="/shopify-orders/new">
             + New order
           </Link>
@@ -1501,7 +1505,7 @@ export function ShopifyOrders() {
           </div>
         )}
 
-        {sel.size > 0 && (
+        {canAct && sel.size > 0 && (
           <div className="bulk-bar">
             <strong>{sel.size} selected</strong>
             <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => bulk("/shopify/orders/invoice", { ids }, "Invoices")}>
@@ -1683,12 +1687,12 @@ export function ShopifyOrders() {
                       </td>
                     )}
                     <td onClick={(e) => e.stopPropagation()} className="row-btns">
-                      {["new", "packed"].includes(o.status) && !(o.channel === "amazon" && o.amazon?.easyShip) && !(o.channel === "flipkart" && o.flipkart?.selfShip === false) && (
+                      {canAct && ["new", "packed"].includes(o.status) && !(o.channel === "amazon" && o.amazon?.easyShip) && !(o.channel === "flipkart" && o.flipkart?.selfShip === false) && (
                         <button className="btn btn-sm" onClick={() => setShip([o._id])}>
                           Ship
                         </button>
                       )}
-                      {["new", "packed"].includes(o.status) && o.channel === "amazon" && o.amazon?.easyShip && sh.carrier !== "amazon_easyship" && (
+                      {canAct && ["new", "packed"].includes(o.status) && o.channel === "amazon" && o.amazon?.easyShip && sh.carrier !== "amazon_easyship" && (
                         <button className="btn btn-sm" onClick={() => setEasyShipFor(o)} title="Schedule Amazon's pickup">
                           Easy Ship
                         </button>
@@ -1735,7 +1739,7 @@ export function ShopifyOrders() {
       )}
       {results && <ResultsModal {...results} onClose={() => setResults(null)} />}
       {easyShipFor && <EasyShipModal order={easyShipFor} onClose={() => setEasyShipFor(null)} onDone={() => (setEasyShipFor(null), load())} />}
-      {view && <OrderModal id={view} couriers={couriers} onClose={() => setView(null)} onChanged={load} onShip={(i) => setShip(i)} />}
+      {view && <OrderModal id={view} couriers={couriers} readOnly={!canAct} onClose={() => setView(null)} onChanged={load} onShip={(i) => setShip(i)} />}
       {showReview && <ReviewItems items={review} onClose={() => setShowReview(false)} onChanged={loadReview} />}
       {void nav}
     </>

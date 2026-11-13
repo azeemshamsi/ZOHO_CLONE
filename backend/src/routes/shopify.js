@@ -688,6 +688,13 @@ async function proofToShopify(req, o, p) {
     p.error = proofScopeErr(e.message);
   }
 }
+// Without full Store: Orders access, only the person who created the order here, within 30 minutes of creating it.
+function ownProofOk(req, o) {
+  if ((req.perms?.store_orders || "none") === "full") return;
+  const mine = o.createdBy && String(o.createdBy) === String(req.user?._id);
+  const recent = o.createdAt && Date.now() - new Date(o.createdAt).getTime() < 30 * 60000;
+  if (!mine || !recent) throw new HttpError(403, "Only an admin or staff with full Store: Orders access can change this order now");
+}
 const proofOut = (p) => ({ _id: p._id, name: p.name, type: p.type, size: p.size, reference: p.reference, by: p.by, at: p.at, inShopify: !!p.shopifyFileId, shopifyUrl: p.shopifyUrl, error: p.error });
 router.get(
   "/orders/:id/payment-proofs",
@@ -703,6 +710,7 @@ router.post(
     const d = validate(Joi.object({ name: Joi.string().max(200).required(), type: Joi.string().allow("").default(""), data: Joi.string().required(), reference: Joi.string().allow("").max(100).default("") }), req.body);
     const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
     if (!o) throw new HttpError(404, "Order not found");
+    ownProofOk(req, o);
     if (!o.shopifyId || o.channel === "amazon" || o.channel === "flipkart") throw new HttpError(400, "Payment proof can be added to Shopify orders only");
     const buf = Buffer.from(d.data.replace(/^data:.*?;base64,/, ""), "base64");
     if (!buf.length) throw new HttpError(400, "The file is empty");
@@ -725,6 +733,7 @@ router.post(
     const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
     const p = o?.paymentProofs.id(req.params.pid);
     if (!p) throw new HttpError(404, "Not found");
+    ownProofOk(req, o);
     if (!p.shopifyFileId) await proofToShopify(req, o, p);
     await ShopifyOrder.updateOne({ _id: o._id }, { paymentProofs: o.paymentProofs });
     res.send(proofOut(p));
@@ -1082,6 +1091,10 @@ router.post(
 // Which permission a request needs: returns, shipping, settings, or orders.
 router.moduleOf = function (req) {
   const p = req.path;
+  if (/^\/new-order/.test(p)) return "store_orders.new_order";
+  if (p === "/abandoned-checkouts") return "store_orders.abandoned";
+  // Payment proof: full store_orders, or the order taker on an order they just created (checked in the route).
+  if (/^\/orders\/[^/]+\/payment-proofs/.test(p)) return ["store_orders", "store_orders.new_order"];
   if (/^\/returns\/|^\/orders\/return$/.test(p)) return "store_returns";
   if (/^\/orders\/(ship|track|labels)$|^\/orders\/[^/]+\/(label|cancel-shipment)$/.test(p)) return "store_shipping";
   if (p === "/orders/quotes" || p === "/couriers/calculate") return ["store_orders", "store_shipping", "store_settings"];

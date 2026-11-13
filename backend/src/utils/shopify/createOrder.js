@@ -246,14 +246,14 @@ async function createOrder(store, body, { user } = {}) {
       `Shopify made draft ${draft.name} but couldn't complete it: ${err2}. Complete it in Shopify → Drafts.`,
     );
   const order = done.draftOrderComplete.draftOrder?.order;
-  const saved = order ? await pull(store, order.id) : null;
+  const saved = order ? await pull(store, order.id, user) : null;
   return {
     order: { shopifyId: order?.id, name: order?.name, total, id: saved?._id },
   };
 }
 
 // Bring one Shopify order into Store → Orders straight away (items made, list refreshed).
-async function pull(store, shopifyId) {
+async function pull(store, shopifyId, user = null) {
   const ShopifyOrder = require("../../models/ShopifyOrder");
   const num = String(shopifyId).split("/").pop();
   const d = await gql(store, ORDERS_QUERY, {
@@ -268,6 +268,10 @@ async function pull(store, shopifyId) {
     organization: store.organization,
     shopifyId: o.id,
   });
+  if (doc && user && !doc.createdBy) {
+    doc.createdBy = user._id;
+    doc.createdByName = user.name || "";
+  }
   if (doc && !(doc.lines || []).some((l) => l.item)) {
     await require("./invoice").ensureItems(
       store.organization,
@@ -275,8 +279,8 @@ async function pull(store, shopifyId) {
       store,
       new Map(),
     );
-    await doc.save();
   }
+  if (doc) await doc.save();
   require("./orderIndex").forget(String(store.organization));
   return doc;
 }

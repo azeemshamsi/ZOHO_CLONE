@@ -26,6 +26,7 @@ const FEATURES = {
   sales: [["customers", "Customers"], ["quotes", "Quotes"], ["sales_orders", "Sales Orders"], ["invoices", "Invoices"], ["recurring", "Recurring Invoices"], ["payments", "Payments Received"], ["credit_notes", "Credit Notes"], ["ledgers", "Sales Ledgers"], ["amazon", "Amazon Sales"], ["flipkart", "Flipkart Sales"], ["pepperfry", "Pepperfry Sales"], ["projects", "Time Tracking (projects, timesheet)"]],
   purchases: [["vendors", "Vendors"], ["expenses", "Expenses"], ["purchase_orders", "Purchase Orders"], ["bills", "Bills"], ["recurring", "Recurring Bills & Expenses"], ["payments_made", "Payments Made"], ["vendor_credits", "Vendor Credits"], ["ledgers", "Purchase Ledgers"]],
   items: [["items", "Items"], ["adjustments", "Inventory Adjustments"], ["transfer_orders", "Transfer Orders"]],
+  store_orders: [["new_order", "Create new orders (in Shopify)"], ["abandoned", "Abandoned Checkouts"]],
   accountant: [["journals", "Manual Journals"], ["accounts", "Chart of Accounts"], ["fixed_assets", "Fixed Assets"], ["budgets", "Budgets"]],
 };
 const KEYS = MODULES.map((m) => m[0]);
@@ -46,6 +47,7 @@ const ROLES = {
   accountant: { label: "Accountant", desc: "Everything except company settings and users.", perms: { ...all("full"), settings: "none", store_settings: "view", store_sellers: "view", inbox: "none", marketing: "none" } },
   staff: { label: "Staff", desc: "Sales, purchases, items, inventory, GST documents, the store and the Inbox. Can view reports.", perms: { ...all("full"), banking: "none", accountant: "none", reports: "view", settings: "none", store_settings: "none", store_sellers: "none", marketing: "none" } },
   sales: { label: "Sales Staff", desc: "Customers, quotes, sales orders, invoices, payments, store orders and the Inbox.", perms: { ...all("none"), sales: "full", items: "view", store_orders: "full", inbox: "full" } },
+  order_taker: { label: "Order Taker", desc: "Creates new orders in Shopify and follows up abandoned checkouts; sees store orders but can't change, ship or cancel them.", perms: { ...all("none"), store_orders: "view", "store_orders.new_order": "full", "store_orders.abandoned": "full", items: "view" }, home: "/shopify-orders" },
   support: { label: "Support", desc: "Only the Inbox: reads and replies to customers' messages and sees their orders there.", perms: { ...all("none"), inbox: "full" }, home: "/inbox" },
   marketer: { label: "Marketing", desc: "Inbox and Marketing: campaigns, WhatsApp order updates, auto-replies and integrations.", perms: { ...all("none"), inbox: "full", marketing: "full" }, home: "/inbox" },
   warehouse: { label: "Warehouse", desc: "Store orders, shipping, returns and inventory. No accounts.", perms: { ...all("none"), items: "view", inventory: "full", store_orders: "full", store_shipping: "full", store_returns: "full" } },
