@@ -661,18 +661,95 @@ function Gstr3b({ period, canEdit }) {
             </button>
           </div>
         </div>
+        {/* Table 4 as on the portal: its own columns (no taxable value). */}
         <table className="table">
-          <tbody>
-            {row("ITC on bills and expenses", { ...d.itcBooks, txval: undefined }, "", "itc", dd.itcBooks, "Vendor")}
-            {row("Less: vendor credits", { ...d.itcReversed, txval: undefined }, "", "itcRev", dd.itcReversed, "Vendor")}
-            {d.itc2bAvailable && row("ITC available in GSTR-2B", { iamt: d.itc2bAvailable.iamt, camt: d.itc2bAvailable.camt, samt: d.itc2bAvailable.samt })}
-            <tr className="total-row">
-              <td>(A)(5) All other ITC — {d.itcSource === "2b" ? "as per GSTR-2B" : "as per books"}</td>
-              <td />
-              <td className="num"><Amt v={d.itc.iamt} /></td>
-              <td className="num"><Amt v={d.itc.camt} /></td>
-              <td className="num"><Amt v={d.itc.samt} /></td>
+          <thead>
+            <tr>
+              <th>Details</th>
+              <th className="num">Integrated tax</th>
+              <th className="num">Central tax</th>
+              <th className="num">State/UT tax</th>
+              <th className="num">Cess</th>
             </tr>
+          </thead>
+          <tbody>
+            {(() => {
+              const z = { iamt: 0, camt: 0, samt: 0 };
+              const line = (label, v, opts = {}) => [
+                <tr key={label} className={`${opts.docs?.length ? "clickable" : ""} ${opts.total ? "total-row" : ""}`} onClick={() => opts.docs?.length && setSec(sec === opts.k ? "" : opts.k)} title={opts.docs?.length ? "Show the documents" : ""}>
+                  <td style={{ paddingLeft: opts.indent ? 28 : undefined }}>
+                    {opts.docs?.length ? (sec === opts.k ? "▾ " : "▸ ") : ""}
+                    {label}
+                    {opts.hint && <div className="muted small">{opts.hint}</div>}
+                  </td>
+                  <td className="num">{opts.head ? "" : <Amt v={v.iamt} />}</td>
+                  <td className="num">{opts.head ? "" : <Amt v={v.camt} />}</td>
+                  <td className="num">{opts.head ? "" : <Amt v={v.samt} />}</td>
+                  <td className="num">{opts.head ? "" : <Amt v={0} />}</td>
+                </tr>,
+                opts.docs?.length > 0 && sec === opts.k && (
+                  <tr key={`${label}-d`} className="detail-row">
+                    <td colSpan={5}>
+                      <DocsTable docs={opts.docs} party="Vendor" />
+                    </td>
+                  </tr>
+                ),
+              ];
+              return [
+                line("(A) ITC Available (whether in full or part)", z, { head: true }),
+                line("(1) Import of goods", z, { indent: true }),
+                line("(2) Import of services", z, { indent: true }),
+                line("(3) Inward supplies liable to reverse charge (other than 1 & 2 above)", z, { indent: true }),
+                line("(4) Inward supplies from ISD", z, { indent: true }),
+                line("(5) All other ITC", d.itc, { indent: true, hint: d.itcSource === "2b" ? "As per GSTR-2B" : "As per books: bills and expenses less vendor credits", docs: d.itcSource === "2b" ? null : [...(dd.itcBooks || []), ...(dd.itcReversed || []).map((x) => ({ ...x, value: -x.value, txval: -x.txval, iamt: -x.iamt, camt: -x.camt, samt: -x.samt }))], k: "itc" }),
+                line("(B) ITC Reversed", z, { head: true }),
+                line("(1) As per rules 38, 42 & 43 of CGST Rules and section 17(5)", z, { indent: true }),
+                line("(2) Others", z, { indent: true }),
+                line("(C) Net ITC available (A) – (B)", d.itc, { total: true }),
+                line("(D) Other details", z, { head: true }),
+                line("(1) ITC reclaimed which was reversed under Table 4(B)(2) in earlier tax period", z, { indent: true }),
+                line("(2) Ineligible ITC under section 16(4) & ITC restricted due to PoS rules", z, { indent: true }),
+              ];
+            })()}
+          </tbody>
+        </table>
+        {d.itc2bAvailable && (
+          <p className="muted small pad">
+            Books: ITC on bills and expenses {money((d.itcBooks.iamt || 0) + (d.itcBooks.camt || 0) + (d.itcBooks.samt || 0))}, less vendor credits {money((d.itcReversed.iamt || 0) + (d.itcReversed.camt || 0) + (d.itcReversed.samt || 0))} · GSTR-2B: {money((d.itc2bAvailable.iamt || 0) + (d.itc2bAvailable.camt || 0) + (d.itc2bAvailable.samt || 0))}
+          </p>
+        )}
+      </div>
+      <div className="card flush" style={{ marginTop: 14 }}>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>5 · Values of exempt, nil-rated and non-GST inward supplies</th>
+              <th className="num">Inter-State supplies</th>
+              <th className="num">Intra-State supplies</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              ["From a supplier under composition scheme, Exempt and Nil rated supply", d.inwardNil, "inNil", dd.inwardNil],
+              ["Non GST supply", d.inwardNonGst || { inter: 0, intra: 0 }, "inNon", dd.inwardNonGst],
+            ].map(([label, v, k, docs]) => [
+              <tr key={k} className={docs?.length ? "clickable" : ""} onClick={() => docs?.length && setSec(sec === k ? "" : k)} title={docs?.length ? "Show the documents" : ""}>
+                <td>
+                  {docs?.length ? (sec === k ? "▾ " : "▸ ") : ""}
+                  {label}
+                  {k === "inNon" && !docs?.length && <div className="muted small">Purchases posted to a ledger marked "Non-GST supply" in Chart of Accounts (petrol, diesel, liquor…)</div>}
+                </td>
+                <td className="num"><Amt v={v.inter} /></td>
+                <td className="num"><Amt v={v.intra} /></td>
+              </tr>,
+              sec === k && docs?.length > 0 && (
+                <tr key={`${k}-d`} className="detail-row">
+                  <td colSpan={3}>
+                    <DocsTable docs={docs} party="Vendor" />
+                  </td>
+                </tr>
+              ),
+            ])}
           </tbody>
         </table>
       </div>

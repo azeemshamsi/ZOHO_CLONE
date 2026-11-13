@@ -59,6 +59,7 @@ async function chartOfAccounts(org) {
       group: a.group,
       type: GROUP_TYPE(a.group),
       ledgerKind: a.ledgerKind || "",
+      nonGst: !!a.nonGst,
       role: a.role || "",
       accountCode: a.accountCode,
       description: a.description,

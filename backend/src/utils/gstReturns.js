@@ -7,6 +7,7 @@
 const Invoice = require("../models/Invoice");
 const CreditNote = require("../models/CreditNote");
 const Bill = require("../models/Bill");
+const Account = require("../models/Account");
 const Expense = require("../models/Expense");
 const VendorCredit = require("../models/VendorCredit");
 const Vendor = require("../models/Vendor");
@@ -363,11 +364,27 @@ async function gstr3b(org, period, freq, { itcFrom2b } = {}) {
     itcAvl = { iamt: itcFrom2b.iamt, camt: itcFrom2b.camt, samt: itcFrom2b.samt, csamt: 0 };
     itcSource = "2b";
   }
-  // 5. exempt / nil inward supplies
+  // 5. inward supplies with no GST: exempt / nil-rated, and non-GST (lines posted to a ledger marked Non-GST:
+  // petrol, liquor…), split inter-state / intra-state as on the portal.
+  const nonGstAcc = new Set((await Account.find({ organization: org._id, nonGst: true }, { _id: 1 }).lean()).map((a) => String(a._id)));
   const inwardNil = { inter: 0, intra: 0 };
-  for (const d of [...bills, ...expenses]) {
-    const lines = d.lineItems || [{ amount: d.amount, taxRate: d.taxRate }];
-    for (const l of lines) if (!l.taxRate) inwardNil[d.isInterState ? "inter" : "intra"] = r2(inwardNil[d.isInterState ? "inter" : "intra"] + (l.amount || 0) * fx(d));
+  const inwardNonGst = { inter: 0, intra: 0 };
+  const inwardDocs = { nil: new Map(), nonGst: new Map() };
+  for (const [d, kind] of [...bills.map((b) => [b, "bill"]), ...expenses.map((e) => [e, "expense"])]) {
+    const lines = d.lineItems || [{ amount: d.amount, taxRate: d.taxRate, account: d.account }];
+    const where = d.isInterState ? "inter" : "intra";
+    for (const l of lines) {
+      if (l.taxRate) continue;
+      const nonGst = nonGstAcc.has(String(l.account || d.ledger || d.account || ""));
+      const amt = r2((l.amount || 0) * fx(d));
+      const bucket = nonGst ? inwardNonGst : inwardNil;
+      bucket[where] = r2(bucket[where] + amt);
+      const m = inwardDocs[nonGst ? "nonGst" : "nil"];
+      const x = m.get(String(d._id)) || { id: d._id, kind, number: kind === "bill" ? d.billNumber : d.category, date: d.date, name: d.vendorName, gstin: "", value: 0, txval: 0, iamt: 0, camt: 0, samt: 0, where };
+      x.txval = r2(x.txval + amt);
+      x.value = x.txval;
+      m.set(String(d._id), x);
+    }
   }
 
   const liab = { iamt: r2(osup.iamt + zeroRated.iamt), camt: osup.camt, samt: osup.samt };
@@ -401,6 +418,8 @@ async function gstr3b(org, period, freq, { itcFrom2b } = {}) {
       ...bills.map((b) => ({ id: b._id, kind: "bill", number: b.billNumber, date: b.date, name: b.vendorName, value: r2((b.total || 0) * fx(b)), txval: r2((b.subTotal || 0) * fx(b)), ...taxOf(b) })),
       ...expenses.map((e) => ({ id: e._id, kind: "expense", number: e.category, date: e.date, name: e.vendorName, value: r2((e.total || 0) * fx(e)), txval: r2((e.amount || 0) * fx(e)), ...taxOf(e) })),
     ].sort((a, b) => a.date - b.date),
+    inwardNil: [...inwardDocs.nil.values()].sort((a, b) => a.date - b.date),
+    inwardNonGst: [...inwardDocs.nonGst.values()].sort((a, b) => a.date - b.date),
     itcReversed: vcs.map((v) => ({ id: v._id, kind: "vendorCredit", number: v.number, date: v.date, name: v.vendorName, value: r2((v.total || 0) * fx(v)), txval: r2((v.subTotal || 0) * fx(v)), ...taxOf(v) })).sort((a, b) => a.date - b.date),
   };
   const json = {
@@ -435,7 +454,7 @@ async function gstr3b(org, period, freq, { itcFrom2b } = {}) {
     inward_sup: {
       isup_details: [
         { ty: "GST", inter: inwardNil.inter, intra: inwardNil.intra },
-        { ty: "NONGST", inter: 0, intra: 0 },
+        { ty: "NONGST", inter: inwardNonGst.inter, intra: inwardNonGst.intra },
       ],
     },
   };
@@ -452,6 +471,7 @@ async function gstr3b(org, period, freq, { itcFrom2b } = {}) {
     itc: itcAvl,
     itcSource,
     inwardNil,
+    inwardNonGst,
     liability: liab,
     setoff,
     docs,

@@ -20,7 +20,7 @@ function AccountModal({ open, account, onClose, onSaved }) {
     if (open)
       setF(
         account
-          ? { name: account.name, group: account.group, accountCode: account.accountCode || "", description: account.description || "", active: account.active !== false, ledgerKind: account.ledgerKind || "" }
+          ? { name: account.name, group: account.group, accountCode: account.accountCode || "", description: account.description || "", active: account.active !== false, ledgerKind: account.ledgerKind || "", nonGst: !!account.nonGst }
           : { name: "", group: "Expense", accountCode: "", description: "", active: true, ledgerKind: "" }
       );
   }, [open, account]);
@@ -64,6 +64,11 @@ function AccountModal({ open, account, onClose, onSaved }) {
               {["Income", "Other Income"].includes(f.group) ? <option value="sales">Sales ledger</option> : <option value="purchase">Purchase ledger</option>}
             </select>
           </Field>
+        )}
+        {["Cost Of Goods Sold", "Expense", "Other Expense", "Fixed Asset"].includes(f.group) && (
+          <label className="check" title="GSTR-3B Table 5: purchases posted to this ledger are reported as non-GST inward supplies">
+            <input type="checkbox" checked={!!f.nonGst} onChange={(e) => setF({ ...f, nonGst: e.target.checked })} /> Non-GST supply (petrol, diesel, liquor…) — for GSTR-3B Table 5
+          </label>
         )}
         {account && (
           <label className="check">

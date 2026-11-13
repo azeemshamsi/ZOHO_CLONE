@@ -27,6 +27,8 @@ const accountSchema = new mongoose.Schema(
     active: { type: Boolean, default: true },
     // Sales / purchase ledger (as in Tally): offered on invoices and credit notes / bills and vendor credits.
     ledgerKind: { type: String, enum: ["", "sales", "purchase"], default: "" },
+    // Purchases posted here are non-GST supplies (petrol, diesel, liquor…): GSTR-3B Table 5 "Non GST supply".
+    nonGst: { type: Boolean, default: false },
     // "opening_stock_diff": Tally's Opening Stock ledger minus its items' opening values (shown as Opening Stock in the Tally view)
     role: { type: String, default: "" },
   },
