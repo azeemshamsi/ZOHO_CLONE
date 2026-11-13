@@ -8,6 +8,9 @@ const roleSchema = new mongoose.Schema(
     desc: { type: String, default: "" },
     perms: { type: mongoose.Schema.Types.Mixed, default: {} },
     home: { type: String, default: "" }, // page this role lands on, e.g. /returns-scan
+    // Set on a company's change to a built-in role ("sales", "order_taker"…): its edited name/access, or deleted.
+    builtin: { type: String, default: "" },
+    deleted: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

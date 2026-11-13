@@ -6,14 +6,18 @@ const User = require("../models/User");
 const Organization = require("../models/Organization");
 const Membership = require("../models/Membership");
 const Role = require("../models/Role");
-const { ROLES, resolveRole } = require("../utils/roles");
+const { ROLES, resolveRole, builtinRoles } = require("../utils/roles");
 const { ah, validate, HttpError } = require("../utils/http");
 const audit = require("../utils/audit");
 
 // A role key is a built-in role or "custom:<id>" of a role in this company.
 async function checkRole(org, role) {
   if (role === "seller") throw new HttpError(400, "Seller logins are added from Store → Sellers");
-  if (ROLES[role]) return role;
+  if (ROLES[role]) {
+    const b = (await builtinRoles(org)).find(([k]) => k === role)?.[1];
+    if (b?.deleted) throw new HttpError(400, `The ${b.label} role was deleted. Choose another role.`);
+    return role;
+  }
   if (/^custom:[a-f0-9]{24}$/.test(role) && (await Role.exists({ _id: role.slice(7), organization: org }))) return role;
   throw new HttpError(400, "Choose a valid role");
 }
@@ -47,8 +51,9 @@ async function invite(req, user, role) {
 router.get(
   "/roles",
   ah(async (req, res) => {
-    const custom = await Role.find({ organization: req.org }).sort({ name: 1 }).lean();
-    res.send([...Object.entries(ROLES).filter(([, r]) => !r.hidden).map(([key, r]) => ({ key, ...r, builtIn: true })), ...custom.map((r) => ({ key: `custom:${r._id}`, _id: r._id, label: r.name, desc: r.desc, perms: r.perms, home: r.home, builtIn: false }))]);
+    const custom = (await Role.find({ organization: req.org }).sort({ name: 1 }).lean()).filter((r) => !r.builtin);
+    const { LOCKED } = require("../utils/roles");
+    res.send([...(await builtinRoles(req.org)).filter(([, r]) => !r.hidden && !r.deleted).map(([key, r]) => ({ key, ...r, builtIn: true, locked: LOCKED.includes(key) })), ...custom.map((r) => ({ key: `custom:${r._id}`, _id: r._id, label: r.name, desc: r.desc, perms: r.perms, home: r.home, builtIn: false }))]);
   })
 );
 

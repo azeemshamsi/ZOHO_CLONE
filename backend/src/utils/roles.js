@@ -77,7 +77,34 @@ async function resolveRole(role, org, extra = []) {
   return { label: labels.join(" + "), perms, home: main.home };
 }
 
+// A company's edits to built-in roles (Role docs with builtin set), cached briefly: read on every request.
+const LOCKED = ["admin", "seller"]; // can't be edited or deleted
+const overrideCache = new Map();
+async function builtinOverrides(org) {
+  const k = String(org || "");
+  const hit = overrideCache.get(k);
+  if (hit && hit.at > Date.now() - 30000) return hit.map;
+  const Role = require("../models/Role");
+  const list = org && require("mongoose").connection.readyState === 1 ? await Role.find({ organization: org }).lean().catch(() => []) : [];
+  const map = new Map(list.filter((r) => r.builtin).map((r) => [r.builtin, r]));
+  overrideCache.set(k, { at: Date.now(), map });
+  return map;
+}
+const forgetOverrides = (org) => overrideCache.delete(String(org || ""));
+// Built-in roles as this company has them: [key, {label, desc, perms, home, edited, deleted}].
+async function builtinRoles(org) {
+  const ov = await builtinOverrides(org);
+  return Object.entries(ROLES).map(([key, r]) => {
+    const o = LOCKED.includes(key) ? null : ov.get(key);
+    return [key, o ? { ...r, label: o.name || r.label, desc: o.desc ?? r.desc, perms: o.deleted ? r.perms : o.perms, home: o.home || r.home || "", edited: !o.deleted, deleted: !!o.deleted } : { ...r }];
+  });
+}
+
 async function resolveOne(role, org) {
+  if (ROLES[role] && !LOCKED.includes(role)) {
+    const o = (await builtinOverrides(org)).get(role);
+    if (o && !o.deleted) return { label: o.name || ROLES[role].label, perms: expand(o.perms), home: o.home || ROLES[role].home || "" };
+  }
   if (String(role || "").startsWith("custom:")) {
     const Role = require("../models/Role");
     const r = await Role.findOne({ _id: role.slice(7), organization: org }).lean().catch(() => null);
@@ -103,4 +130,4 @@ const permit = (module, { readAll = false } = {}) =>
     res.status(403).send({ message: reading ? "You don't have access to this" : "Your role doesn't allow changes here. Ask an admin." });
   };
 
-module.exports = { MODULES, FEATURES, KEYS, FEATURE_KEYS, ALL_KEYS, ROLES, CORE, anyOf, expand, permsOf, resolveRole, permit };
+module.exports = { MODULES, FEATURES, KEYS, FEATURE_KEYS, ALL_KEYS, ROLES, CORE, LOCKED, anyOf, expand, permsOf, resolveRole, permit, builtinRoles, forgetOverrides };
