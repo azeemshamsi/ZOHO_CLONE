@@ -1147,7 +1147,7 @@ function ReviewItems({ items, onClose, onChanged }) {
 }
 
 export function ShopifyOrders() {
-  const { organization, organizations } = useAuth();
+  const { organization, organizations, user } = useAuth();
   const companyName = (id) => (organizations || []).find((c) => String(c._id) === String(id))?.name || "other company";
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") || "new";
@@ -1344,6 +1344,11 @@ export function ShopifyOrders() {
           <button className="btn" disabled={amazon.sync?.running} onClick={syncAmazon} title={amazon.lastSyncAt ? `Amazon last synced ${new Date(amazon.lastSyncAt).toLocaleString("en-IN")}` : ""}>
             {amazon.sync?.running ? `Amazon… ${amazon.sync.fetched || 0}` : "Sync Amazon"}
           </button>
+        )}
+        {store?.connected && can(user, "store_orders", "full") && (
+          <Link className="btn" to="/shopify-orders/new">
+            + New order
+          </Link>
         )}
         {(store?.connected || store?.shop) && (
           <button className="btn btn-primary" disabled={sync_.running || !store?.connected} onClick={sync}>

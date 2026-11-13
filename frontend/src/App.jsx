@@ -53,6 +53,7 @@ import AmazonSales, { FlipkartSales, PepperfrySales } from "./pages/AmazonSales"
 import AmazonSettings from "./pages/AmazonSettings";
 import FlipkartSettings from "./pages/FlipkartSettings";
 import AbandonedCheckouts from "./pages/AbandonedCheckouts";
+import NewStoreOrder from "./pages/NewStoreOrder";
 import Privacy from "./pages/Privacy";
 import Sellers from "./pages/Sellers";
 import SellerPortal from "./pages/SellerPortal";
@@ -113,6 +114,7 @@ export default function App() {
           <Route path="currencies" element={<Currencies />} />
           <Route path="import" element={<Import />} />
           <Route path="shopify-orders" element={<ShopifyOrders />} />
+          <Route path="shopify-orders/new" element={<NewStoreOrder />} />
           <Route path="shopify-settings" element={<ShopifySettings />} />
           <Route path="package-types" element={<PackageTypes />} />
           <Route path="shipping-calculator" element={<ShippingCalculator />} />

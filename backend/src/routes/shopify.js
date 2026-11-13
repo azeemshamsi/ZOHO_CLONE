@@ -299,6 +299,67 @@ router.get(
   })
 );
 
+// Create an order in Shopify from OrdexaGo (phone / WhatsApp orders): product and customer look-ups, then the order.
+const CO = require("../utils/shopify/createOrder");
+const draftScopeErr = (e) => {
+  if (/access|scope|permission|denied/i.test(e.message)) return new HttpError(400, "The Shopify app can't create orders yet — add the read_draft_orders and write_draft_orders scopes to the app, release it and reinstall it on the store (Store → Shopify settings has the steps)");
+  return new HttpError(400, e.message);
+};
+async function connectedStore(req) {
+  const store = await ShopifyStore.findOne({ organization: req.storeOrg });
+  if (!store?.connected) throw new HttpError(400, "Connect the Shopify store first");
+  return store;
+}
+router.get(
+  "/new-order/products",
+  ah(async (req, res) => {
+    const store = await connectedStore(req);
+    try {
+      res.send(await CO.searchProducts(store, req.query.q));
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+  })
+);
+router.get(
+  "/new-order/customers",
+  ah(async (req, res) => {
+    const store = await connectedStore(req);
+    try {
+      res.send(await CO.searchCustomers(store, req.query.q));
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+  })
+);
+const addrSchema = Joi.object({ name: Joi.string().trim().required(), company: Joi.string().allow("").default(""), address1: Joi.string().trim().required(), address2: Joi.string().allow("").default(""), city: Joi.string().trim().required(), state: Joi.string().required(), zip: Joi.string().trim().pattern(/^\d{6}$/).required().messages({ "string.pattern.base": "Pincode must be 6 digits" }), phone: Joi.string().allow("").default("") });
+const newOrderSchema = Joi.object({
+      customerId: Joi.string().allow("", null),
+      customer: Joi.object({ name: Joi.string().allow("").default(""), email: Joi.string().email({ tlds: false }).allow("").default(""), phone: Joi.string().allow("").default("") }).default({}),
+      address: addrSchema.required(),
+      lines: Joi.array().items(Joi.object({ variantId: Joi.string().required(), quantity: Joi.number().integer().min(1).required(), price: Joi.number().min(0).allow(null, ""), basePrice: Joi.number().allow(null) }).unknown(true)).min(1).required(),
+      shipping: Joi.object({ title: Joi.string().allow("").default(""), amount: Joi.number().min(0).default(0) }).default({}),
+      discount: Joi.object({ type: Joi.string().valid("percent", "amount").default("amount"), value: Joi.number().min(0).default(0), reason: Joi.string().allow("").default("") }).default({}),
+      payment: Joi.string().valid("cod", "paid", "link").required(),
+      note: Joi.string().allow("").default(""),
+      tags: Joi.array().items(Joi.string().allow("")).default([]),
+});
+router.post(
+  "/new-order",
+  ah(async (req, res) => {
+    const body = validate(newOrderSchema, req.body);
+    const store = await connectedStore(req);
+    let r;
+    try {
+      r = await CO.createOrder(store, { ...body, customerId: body.customerId || null }, { user: req.user });
+    } catch (e) {
+      throw draftScopeErr(e);
+    }
+    await audit.log(req, "shopify_order_create", { target: r.order?.name || r.draft?.name || "", meta: { payment: body.payment, lines: body.lines.length } });
+    res.status(201).send(r);
+  })
+);
+
 // Orders returned in Shopify that are still Shipped here (found by the delivery check): closing them posts the
 // credit notes against their OrdexaGo invoices, so the user does it.
 router.get(

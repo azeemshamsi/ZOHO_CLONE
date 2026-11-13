@@ -75,7 +75,7 @@ function Connection({ store, onSaved }) {
         {f.authType === "client" ? (
           <>
             <div className="alert alert-info small">
-              In <strong>dev.shopify.com/dashboard</strong>: create an app → <em>Versions</em> → add scopes <code>read_orders, read_all_orders, read_products, read_customers, read_inventory, write_inventory, read_locations, read_returns, write_returns, read_merchant_managed_fulfillment_orders, write_merchant_managed_fulfillment_orders</code> → Release → <em>Home → Install</em> on your store. Then copy the Client ID and secret from <em>Settings</em>. The app and the store must be in the same Shopify organization.
+              In <strong>dev.shopify.com/dashboard</strong>: create an app → <em>Versions</em> → add scopes <code>read_orders, read_all_orders, read_products, read_customers, read_inventory, write_inventory, read_locations, read_returns, write_returns, read_merchant_managed_fulfillment_orders, write_merchant_managed_fulfillment_orders, read_draft_orders, write_draft_orders</code> → Release → <em>Home → Install</em> on your store. Then copy the Client ID and secret from <em>Settings</em>. The app and the store must be in the same Shopify organization.
             </div>
             <div className="row-2">
               <Field label="Client ID" required>

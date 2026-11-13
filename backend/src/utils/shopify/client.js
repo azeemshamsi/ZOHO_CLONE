@@ -88,7 +88,7 @@ async function gql(store, query, variables = {}, attempt = 0) {
   if (status >= 400) throw new Error(`Shopify error ${status}: ${JSON.stringify(body).slice(0, 300)}`);
   if (body.errors?.length) {
     const msg = body.errors.map((e) => e.message).join("; ");
-    if (/access denied|ACCESS_DENIED|scope/i.test(msg + JSON.stringify(body.errors))) throw new Error(`Shopify: ${msg}. Give the app the read_orders, read_all_orders, read_products, read_customers and read_inventory scopes (and write_merchant_managed_fulfillment_orders to mark orders fulfilled), then release and reinstall it.`);
+    if (/access denied|ACCESS_DENIED|scope/i.test(msg + JSON.stringify(body.errors))) throw new Error(`Shopify: ${msg}. Give the app the read_orders, read_all_orders, read_products, read_customers and read_inventory scopes (write_merchant_managed_fulfillment_orders to mark orders fulfilled, read_draft_orders and write_draft_orders to create orders), then release and reinstall it.`);
     throw new Error(`Shopify: ${msg}`);
   }
   return body.data;
