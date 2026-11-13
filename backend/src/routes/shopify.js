@@ -25,6 +25,7 @@ const { resolvePackage } = require("../utils/shopify/package");
 const PackageType = require("../models/PackageType");
 const { orderIndex, filterEntries } = require("../utils/shopify/orderIndex");
 const audit = require("../utils/audit");
+const { stateCode } = require("../utils/import/common");
 const devices = require("../utils/devices");
 
 const STATUSES = ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "return_created", "returned", "cancelled"];
@@ -268,10 +269,10 @@ router.get(
           pageInfo { hasNextPage endCursor }
           nodes { id name createdAt updatedAt completedAt abandonedCheckoutUrl
             totalPriceSet { shopMoney { amount } }
-            customer { displayName defaultEmailAddress { emailAddress } defaultPhoneNumber { phoneNumber } numberOfOrders }
-            shippingAddress { name phone city province zip }
+            customer { id displayName defaultEmailAddress { emailAddress } defaultPhoneNumber { phoneNumber } numberOfOrders }
+            shippingAddress { name firstName lastName company address1 address2 phone city province provinceCode zip }
             billingAddress { phone }
-            lineItems(first: 10) { nodes { title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } image { url } } } } } }`,
+            lineItems(first: 50) { nodes { title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } discountedUnitPriceSet { shopMoney { amount } } image { url } variant { id price inventoryQuantity } } } } } }`,
         { after: req.query.after || null, query: q || null }
       );
     } catch (e) {
@@ -293,7 +294,30 @@ router.get(
         phone: x.shippingAddress?.phone || x.customer?.defaultPhoneNumber?.phoneNumber || x.billingAddress?.phone || "",
         orders: x.customer?.numberOfOrders != null ? Number(x.customer.numberOfOrders) : null,
         city: [x.shippingAddress?.city, x.shippingAddress?.province, x.shippingAddress?.zip].filter(Boolean).join(", "),
-        items: (x.lineItems?.nodes || []).map((l) => ({ title: l.title, variant: l.variantTitle || "", sku: l.sku || "", quantity: l.quantity, price: Number(l.originalUnitPriceSet?.shopMoney?.amount) || 0, image: l.image?.url || "" })),
+        items: (x.lineItems?.nodes || []).map((l) => ({
+          title: l.title,
+          variant: l.variantTitle || "",
+          sku: l.sku || "",
+          quantity: l.quantity,
+          price: Number(l.originalUnitPriceSet?.shopMoney?.amount) || 0,
+          cartPrice: Number(l.discountedUnitPriceSet?.shopMoney?.amount) || Number(l.originalUnitPriceSet?.shopMoney?.amount) || 0,
+          image: l.image?.url || "",
+          variantId: l.variant?.id || "",
+          listPrice: Number(l.variant?.price) || 0,
+          stock: l.variant?.inventoryQuantity ?? null,
+        })),
+        // For "Create order" from this checkout.
+        customerId: x.customer?.id || "",
+        address: {
+          name: x.shippingAddress?.name || [x.shippingAddress?.firstName, x.shippingAddress?.lastName].filter(Boolean).join(" "),
+          company: x.shippingAddress?.company || "",
+          address1: x.shippingAddress?.address1 || "",
+          address2: x.shippingAddress?.address2 || "",
+          city: x.shippingAddress?.city || "",
+          state: stateCode(x.shippingAddress?.provinceCode || x.shippingAddress?.province) || "",
+          zip: (x.shippingAddress?.zip || "").replace(/\s/g, ""),
+          phone: x.shippingAddress?.phone || "",
+        },
       }));
     res.send({ rows, next: c.pageInfo?.hasNextPage ? c.pageInfo.endCursor : null, shop: store.shop });
   })
@@ -341,6 +365,7 @@ const newOrderSchema = Joi.object({
       shipping: Joi.object({ title: Joi.string().allow("").default(""), amount: Joi.number().min(0).default(0) }).default({}),
       discount: Joi.object({ type: Joi.string().valid("percent", "amount").default("amount"), value: Joi.number().min(0).default(0), reason: Joi.string().allow("").default("") }).default({}),
       payment: Joi.string().valid("cod", "paid", "link").required(),
+      checkoutId: Joi.string().allow("").max(40).default(""),
       note: Joi.string().allow("").default(""),
       tags: Joi.array().items(Joi.string().allow("")).default([]),
 });

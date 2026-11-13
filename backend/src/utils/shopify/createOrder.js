@@ -183,6 +183,7 @@ async function createOrder(store, body, { user } = {}) {
       user?.name
         ? `Created in OrdexaGo by ${user.name}`
         : "Created in OrdexaGo",
+      body.checkoutId ? `From abandoned checkout #${body.checkoutId}` : "",
     ]
       .filter(Boolean)
       .join("\n"),

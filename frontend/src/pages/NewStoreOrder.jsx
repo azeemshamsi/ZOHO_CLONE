@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { money } from "../lib/format";
 import { STATES } from "../lib/constants";
@@ -112,10 +112,43 @@ function LiveSearch({
 
 export default function NewStoreOrder() {
   const nav = useNavigate();
-  const [customerId, setCustomerId] = useState(null);
-  const [customer, setCustomer] = useState({ name: "", email: "", phone: "" });
-  const [addr, setAddr] = useState(EMPTY_ADDR);
-  const [lines, setLines] = useState([]);
+  // Opened from Abandoned Checkouts: the cart's customer, address and items filled in (all editable).
+  const ck = useLocation().state?.checkout || null;
+  const ckLines = (ck?.items || []).filter((l) => l.variantId);
+  const ckMissing = (ck?.items || []).length - ckLines.length;
+  const [customerId, setCustomerId] = useState(ck?.customerId || null);
+  const [customer, setCustomer] = useState(
+    ck
+      ? {
+          name: ck.customer || "",
+          email: ck.email || "",
+          phone: ck.phone || "",
+        }
+      : { name: "", email: "", phone: "" },
+  );
+  const [addr, setAddr] = useState(
+    ck
+      ? {
+          ...EMPTY_ADDR,
+          ...ck.address,
+          name: ck.address?.name || ck.customer || "",
+          phone: ck.address?.phone || ck.phone || "",
+        }
+      : EMPTY_ADDR,
+  );
+  const [lines, setLines] = useState(() =>
+    ckLines.map((l) => ({
+      variantId: l.variantId,
+      title: l.title,
+      variant: l.variant,
+      sku: l.sku,
+      image: l.image,
+      stock: l.stock,
+      quantity: l.quantity,
+      price: l.cartPrice || l.price,
+      basePrice: l.listPrice || l.price,
+    })),
+  );
   const [shipping, setShipping] = useState({ title: "Shipping", amount: 0 });
   const [discount, setDiscount] = useState({
     type: "amount",
@@ -190,6 +223,8 @@ export default function NewStoreOrder() {
         discount: { ...discount, value: Number(discount.value) || 0 },
         payment,
         note,
+        checkoutId: ck?.id || "",
+        tags: ck ? ["Recovered checkout"] : [],
       });
       if (data.order) {
         toast(`Order ${data.order.name} created in Shopify`);
@@ -283,6 +318,19 @@ export default function NewStoreOrder() {
         title="New order"
         subtitle="Created in Shopify with the next Shopify order number, then shown in Store → Orders"
       />
+      {ck && (
+        <div className="alert" style={{ marginBottom: 12 }}>
+          Filled in from abandoned checkout #{ck.id} ({ck.customer || "no name"}
+          ). Check the details, change anything, choose the payment and create
+          the order.
+          {ckMissing > 0 && (
+            <div className="text-red small">
+              {ckMissing} item(s) from the cart are no longer in Shopify and
+              were left out.
+            </div>
+          )}
+        </div>
+      )}
       <form className="form" onSubmit={submit}>
         <div className="card" style={{ marginBottom: 16 }}>
           <h4 className="section-title" style={{ marginTop: 0 }}>
