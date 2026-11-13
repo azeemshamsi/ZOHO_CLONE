@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { money, date, isoDate } from "../lib/format";
@@ -146,14 +146,86 @@ const SECTIONS = [
   ["hsnB2c", "12 · HSN summary — B2C", "Sales to unregistered customers"],
 ];
 
+// Where each kind of document opens.
+const docPath = (r) =>
+  ({ credit: `/credit-notes/${r.id}`, bill: `/bills/${r.id}`, expense: `/expenses/${r.id}/edit`, vendorCredit: `/vendor-credits/${r.id}` })[r.kind] || `/invoices/${r.id}`;
 function DocLink({ r }) {
-  const credit = r.kind === "credit";
-  return <Link to={`/${credit ? "credit-notes" : "invoices"}/${r.id}`} onClick={(e) => e.stopPropagation()}>{r.number}</Link>;
+  return <Link to={docPath(r)} onClick={(e) => e.stopPropagation()}>{r.number}</Link>;
+}
+
+// What's open on the page lives in the address (?sec=…&grp=…), so Back / Esc from a document returns to it.
+function useOpen(key) {
+  const [sp, setSp] = useSearchParams();
+  const val = sp.get(key) || "";
+  const set = (v) => {
+    const n = new URLSearchParams(sp);
+    if (v === "" || v === -1 || v == null) n.delete(key);
+    else n.set(key, String(v));
+    if (key === "sec") n.delete("grp");
+    setSp(n, { replace: true });
+  };
+  return [val, set];
+}
+
+// A list of documents: click a row to open the document (Esc brings you back here).
+function DocsTable({ docs, party = "Customer", qty = false }) {
+  const navigate = useNavigate();
+  if (!docs?.length) return <p className="muted small pad">No documents.</p>;
+  const tot = (f) => docs.reduce((t, d) => t + (Number(d[f]) || 0), 0);
+  return (
+    <table className="table sub-table">
+      <thead>
+        <tr>
+          <th>Number</th>
+          <th>Date</th>
+          <th>{party}</th>
+          {qty ? <th className="num">Qty</th> : <th className="num">Value</th>}
+          <th className="num">Taxable</th>
+          <th className="num">IGST</th>
+          <th className="num">CGST</th>
+          <th className="num">SGST</th>
+        </tr>
+      </thead>
+      <tbody>
+        {docs.map((r, n) => (
+          <tr key={n} className="clickable" onClick={() => navigate(docPath(r))} title="Open">
+            <td data-label="Number">
+              <DocLink r={r} />
+              {r.kind === "credit" && <span className="muted small"> · credit note</span>}
+              {r.kind === "vendorCredit" && <span className="muted small"> · vendor credit</span>}
+              {r.kind === "expense" && <span className="muted small"> · expense</span>}
+            </td>
+            <td data-label="Date">{date(r.date)}</td>
+            <td data-label={party}>
+              {r.name}
+              {r.gstin && <div className="muted small">{r.gstin}</div>}
+              {r.invoice && <div className="muted small">Against {r.invoice}</div>}
+            </td>
+            <td data-label={qty ? "Qty" : "Value"} className="num">{qty ? r.qty : <Amt v={r.value} />}</td>
+            <td data-label="Taxable" className="num"><Amt v={r.txval} /></td>
+            <td data-label="IGST" className="num"><Amt v={r.iamt} /></td>
+            <td data-label="CGST" className="num"><Amt v={r.camt} /></td>
+            <td data-label="SGST" className="num"><Amt v={r.samt} /></td>
+          </tr>
+        ))}
+        <tr className="total-row">
+          <td colSpan={3}>{docs.length} document{docs.length > 1 ? "s" : ""}</td>
+          <td className="num">{qty ? Math.round(tot("qty") * 100) / 100 : <Amt v={tot("value")} />}</td>
+          <td className="num"><Amt v={tot("txval")} /></td>
+          <td className="num"><Amt v={tot("iamt")} /></td>
+          <td className="num"><Amt v={tot("camt")} /></td>
+          <td className="num"><Amt v={tot("samt")} /></td>
+        </tr>
+      </tbody>
+    </table>
+  );
 }
 
 // The documents behind one GSTR-1 section, shown right under its row (like Tally's drill-down).
 function SectionDetail({ k, rows, docs }) {
-  const [grp, setGrp] = useState(-1);
+  const [g, setGrpRaw] = useOpen("grp");
+  const grp = g === "" ? -1 : Number(g);
+  const setGrp = (n) => setGrpRaw(n === -1 ? "" : n);
   if (k === "docs")
     return (
       <table className="table sub-table">
@@ -202,6 +274,7 @@ function SectionDetail({ k, rows, docs }) {
         </tbody>
       </table>
     );
+  const navigate = useNavigate();
   const taxCols = (r) => (
     <>
       <td data-label="Taxable" className="num"><Amt v={r.txval ?? r.nil_amt} /></td>
@@ -215,7 +288,7 @@ function SectionDetail({ k, rows, docs }) {
     </>
   );
   const docRow = (r, n, kind) => (
-    <tr key={n}>
+    <tr key={n} className="clickable" onClick={() => navigate(docPath({ ...r, kind: r.kind || kind }))} title="Open">
       <td data-label="Number"><DocLink r={{ ...r, kind: r.kind || kind }} /></td>
       <td data-label="Date">{date(r.date)}</td>
       <td data-label="Customer">
@@ -303,11 +376,14 @@ function SectionDetail({ k, rows, docs }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, n) => (
-            <tr key={n}>
+          {rows.map((r, n) => [
+            <tr key={n} className="clickable" onClick={() => setGrp(grp === n ? -1 : n)} title="Show the documents">
               {k.startsWith("hsn") ? (
                 <>
-                  <td data-label="HSN/SAC">{r.hsn_sc || <span className="red">missing</span>}</td>
+                  <td data-label="HSN/SAC">
+                    {grp === n ? "▾ " : "▸ "}
+                    {r.hsn_sc || <span className="red">missing</span>}
+                  </td>
                   <td data-label="Description">{r.desc}</td>
                   <td data-label="Qty" className="num">
                     {r.qty} {r.uqc}
@@ -315,11 +391,21 @@ function SectionDetail({ k, rows, docs }) {
                   <td data-label="Rate" className="num">{r.rt}%</td>
                 </>
               ) : (
-                <td data-label="Supply type">{r.sply_ty}</td>
+                <td data-label="Supply type">
+                  {grp === n ? "▾ " : "▸ "}
+                  {r.sply_ty}
+                </td>
               )}
               {taxCols(r)}
-            </tr>
-          ))}
+            </tr>,
+            grp === n && (
+              <tr key={`${n}d`} className="detail-row">
+                <td colSpan={8}>
+                  <DocsTable docs={r.docs} qty={k.startsWith("hsn")} />
+                </td>
+              </tr>
+            ),
+          ])}
         </tbody>
       </table>
     );
@@ -333,7 +419,7 @@ function SectionDetail({ k, rows, docs }) {
 
 function Gstr1({ period, canEdit }) {
   const [d, setD] = useState(null);
-  const [open, setOpen] = useState("");
+  const [open, setOpen] = useOpen("sec");
   const load = () => {
     setD(null);
     api.get("/gst/returns/gstr1", { params: { period } }).then((r) => setD(r.data)).catch((e) => toast(errMsg(e), "error"));
@@ -467,6 +553,7 @@ function HowTo({ form }) {
 
 function Gstr3b({ period, canEdit }) {
   const [d, setD] = useState(null);
+  const [sec, setSec] = useOpen("sec");
   const [itc, setItc] = useState("books");
   const load = () => {
     setD(null);
@@ -476,9 +563,11 @@ function Gstr3b({ period, canEdit }) {
     load();
   }, [period, itc]);
   if (!d) return <Spinner />;
-  const row = (l, v, hint) => (
-    <tr>
+  const dd = d.docs || {};
+  const row = (l, v, hint, key, docs, party) => [
+    <tr key={key || l} className={docs?.length ? "clickable" : ""} onClick={() => docs?.length && setSec(sec === key ? "" : key)} title={docs?.length ? "Show the documents" : ""}>
       <td data-label="">
+        {docs?.length ? (sec === key ? "▾ " : "▸ ") : ""}
         {l}
         {hint && <div className="muted small">{hint}</div>}
       </td>
@@ -486,8 +575,15 @@ function Gstr3b({ period, canEdit }) {
       <td data-label="IGST" className="num">{v.iamt !== undefined ? <Amt v={v.iamt} /> : ""}</td>
       <td data-label="CGST" className="num">{v.camt !== undefined ? <Amt v={v.camt} /> : ""}</td>
       <td data-label="SGST" className="num">{v.samt !== undefined ? <Amt v={v.samt} /> : ""}</td>
-    </tr>
-  );
+    </tr>,
+    sec === key && docs?.length > 0 && (
+      <tr key={`${key}-d`} className="detail-row">
+        <td colSpan={5}>
+          <DocsTable docs={docs} party={party} />
+        </td>
+      </tr>
+    ),
+  ];
   const so = d.setoff;
   return (
     <>
@@ -515,9 +611,9 @@ function Gstr3b({ period, canEdit }) {
             </tr>
           </thead>
           <tbody>
-            {row("(a) Taxable outward supplies", d.outward, "Net of credit notes")}
-            {row("(b) Zero-rated (exports)", d.zeroRated)}
-            {row("(c) Nil rated / exempt", { txval: d.nil })}
+            {row("(a) Taxable outward supplies", d.outward, "Net of credit notes", "outward", dd.outward)}
+            {row("(b) Zero-rated (exports)", d.zeroRated, "", "zero", dd.zeroRated)}
+            {row("(c) Nil rated / exempt", { txval: d.nil }, "", "nil", dd.nil)}
           </tbody>
         </table>
       </div>
@@ -532,13 +628,23 @@ function Gstr3b({ period, canEdit }) {
               </tr>
             </thead>
             <tbody>
-              {d.unreg.map((u) => (
-                <tr key={u.pos}>
-                  <td>{stateName(u.pos)}</td>
+              {d.unreg.map((u) => [
+                <tr key={u.pos} className="clickable" onClick={() => setSec(sec === `pos${u.pos}` ? "" : `pos${u.pos}`)} title="Show the documents">
+                  <td>
+                    {sec === `pos${u.pos}` ? "▾ " : "▸ "}
+                    {stateName(u.pos)}
+                  </td>
                   <td className="num"><Amt v={u.txval} /></td>
                   <td className="num"><Amt v={u.iamt} /></td>
-                </tr>
-              ))}
+                </tr>,
+                sec === `pos${u.pos}` && (
+                  <tr key={`${u.pos}-d`} className="detail-row">
+                    <td colSpan={3}>
+                      <DocsTable docs={dd.unreg?.[u.pos]} />
+                    </td>
+                  </tr>
+                ),
+              ])}
             </tbody>
           </table>
         </div>
@@ -557,8 +663,8 @@ function Gstr3b({ period, canEdit }) {
         </div>
         <table className="table">
           <tbody>
-            {row("ITC on bills and expenses", { ...d.itcBooks, txval: undefined })}
-            {row("Less: vendor credits", { ...d.itcReversed, txval: undefined })}
+            {row("ITC on bills and expenses", { ...d.itcBooks, txval: undefined }, "", "itc", dd.itcBooks, "Vendor")}
+            {row("Less: vendor credits", { ...d.itcReversed, txval: undefined }, "", "itcRev", dd.itcReversed, "Vendor")}
             {d.itc2bAvailable && row("ITC available in GSTR-2B", { iamt: d.itc2bAvailable.iamt, camt: d.itc2bAvailable.camt, samt: d.itc2bAvailable.samt })}
             <tr className="total-row">
               <td>(A)(5) All other ITC — {d.itcSource === "2b" ? "as per GSTR-2B" : "as per books"}</td>
@@ -832,13 +938,27 @@ function QuickFile({ item, onDone }) {
 
 export function GstReturns() {
   const { user, organization, setOrganization } = useAuth();
-  const [tab, setTab] = useState("calendar");
-  const [period, setPeriod] = useState(lastMonth());
+  const [sp, setSp] = useSearchParams();
+  const tab = sp.get("tab") || "calendar";
+  const period = sp.get("period") || lastMonth();
+  const put = (k, v) => {
+    const n = new URLSearchParams(sp);
+    n.set(k, v);
+    n.delete("sec");
+    n.delete("grp");
+    setSp(n, { replace: true });
+  };
+  const setTab = (t) => put("tab", t);
+  const setPeriod = (p) => put("period", p);
   const [freq, setFreq] = useState(organization?.gstFiling?.frequency || "monthly");
   const canEdit = can(user, "gst", "full");
   const open = (t, p) => {
-    if (p) setPeriod(p);
-    setTab(t);
+    const n = new URLSearchParams(sp);
+    n.set("tab", t);
+    if (p) n.set("period", p);
+    n.delete("sec");
+    n.delete("grp");
+    setSp(n, { replace: true });
   };
   const saveFreq = async (v) => {
     try {

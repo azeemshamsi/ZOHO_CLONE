@@ -109,6 +109,19 @@ function docSeries(issued, cancelled = []) {
   return { series };
 }
 
+// One document's share of an HSN row (several lines of a document with the same HSN and rate add up).
+function hsnDoc(h, d, kind, number, sign, l, k) {
+  if (!h.docs) Object.defineProperty(h, "docs", { value: new Map(), enumerable: false });
+  const key = String(d._id);
+  const x = h.docs.get(key) || { id: d._id, kind, number, date: d.date, name: d.customerName, qty: 0, txval: 0, iamt: 0, camt: 0, samt: 0 };
+  x.qty = r2(x.qty + sign * (l.quantity || 0));
+  x.txval = r2(x.txval + sign * (l.amount || 0) * k);
+  x.iamt = r2(x.iamt + sign * (l.igst || 0) * k);
+  x.camt = r2(x.camt + sign * (l.cgst || 0) * k);
+  x.samt = r2(x.samt + sign * (l.sgst || 0) * k);
+  h.docs.set(key, x);
+}
+
 async function gstr1(org, period, freq) {
   const { from, to, fp, label: lbl } = periodRange(period, freq);
   const [invoices, credits] = await Promise.all([
@@ -140,6 +153,7 @@ async function gstr1(org, period, freq) {
       const h = (hsnMap[hk] = hsnMap[hk] || { hsn_sc: l.hsnSac || "", desc: (l.name || "").slice(0, 30), uqc: uqcOf(l.unit), qty: 0, rt: Number(l.taxRate) || 0, ...zero(), b2b: !!i.customerGstin });
       h.qty = r2(h.qty + (l.quantity || 0));
       add(h, { txval: (l.amount || 0) * k, iamt: (l.igst || 0) * k, camt: (l.cgst || 0) * k, samt: (l.sgst || 0) * k });
+      hsnDoc(h, i, "invoice", i.invoiceNumber, 1, l, k);
     }
     const taxed = rates.filter((r) => r.rt > 0);
     const untaxed = rates.filter((r) => !r.rt);
@@ -147,6 +161,7 @@ async function gstr1(org, period, freq) {
       for (const u of untaxed) {
         const key = `${itr ? "INTR" : "INTRA"}${i.customerGstin ? "B2B" : "B2C"}`;
         nil[key].txval = r2(nil[key].txval + u.txval);
+        (nil[key].docs ||= []).push({ id: i._id, kind: "invoice", number: i.invoiceNumber, date: i.date, name: i.customerName, value: val, txval: u.txval, iamt: 0, camt: 0, samt: 0 });
       }
     if (isExport(i)) {
       const kind = i.igst > 0 ? "WPAY" : "WOPAY";
@@ -188,6 +203,7 @@ async function gstr1(org, period, freq) {
       const h = (hsnMap[hk] = hsnMap[hk] || { hsn_sc: l.hsnSac || "", desc: (l.name || "").slice(0, 30), uqc: uqcOf(l.unit), qty: 0, rt: Number(l.taxRate) || 0, ...zero(), b2b: !!c.customerGstin });
       h.qty = r2(h.qty - (l.quantity || 0));
       add(h, { txval: -(l.amount || 0) * k, iamt: -(l.igst || 0) * k, camt: -(l.cgst || 0) * k, samt: -(l.sgst || 0) * k });
+      hsnDoc(h, c, "credit", c.number, -1, l, k);
     }
     const itms = rates.map((r, n) => ({ num: n + 1, itm_det: { txval: r.txval, rt: r.rt, iamt: r.iamt, camt: r.camt, samt: r.samt, csamt: 0 } }));
     const note = { ntty: "C", nt_num: c.number, nt_dt: dmy(c.date), pos, rchrg: "N", inv_typ: "R", val, itms };
@@ -217,14 +233,16 @@ async function gstr1(org, period, freq) {
   const nilRows = Object.entries(nil)
     .filter(([, v]) => v.txval)
     .map(([sply_ty, v]) => ({ sply_ty, nil_amt: v.txval, expt_amt: 0, ngsup_amt: 0 }));
-  view.nil = nilRows;
+  view.nil = nilRows.map((r) => ({ ...r, docs: nil[r.sply_ty].docs || [] }));
   const hsnAll = Object.values(hsnMap).filter((h) => h.txval || h.qty);
   // From 2025 the HSN table is split into B2B and B2C parts.
   const hsnRows = (rows) => rows.sort((a, b) => a.hsn_sc.localeCompare(b.hsn_sc) || a.rt - b.rt).map((h, n) => ({ num: n + 1, hsn_sc: h.hsn_sc, desc: h.desc, uqc: h.uqc, qty: h.qty, rt: h.rt, txval: h.txval, iamt: h.iamt, camt: h.camt, samt: h.samt, csamt: 0 }));
   const hsn_b2b = hsnRows(hsnAll.filter((h) => h.b2b));
   const hsn_b2c = hsnRows(hsnAll.filter((h) => !h.b2b));
-  view.hsnB2b = hsn_b2b;
-  view.hsnB2c = hsn_b2c;
+  // The view keeps each HSN row's documents (for the drill-down); the JSON rows don't.
+  const withDocs = (rows, b2b) => rows.map((r) => ({ ...r, docs: [...(hsnAll.find((h) => h.b2b === b2b && h.hsn_sc === r.hsn_sc && h.rt === r.rt)?.docs?.values() || [])].sort((a, b) => a.date - b.date || String(a.number).localeCompare(String(b.number))) }));
+  view.hsnB2b = withDocs(hsn_b2b, true);
+  view.hsnB2c = withDocs(hsn_b2c, false);
 
   // Table 13: documents issued, one row per number series (prefix + running number), like Tally's Document Summary.
   const voidCn = await CreditNote.find({ organization: org._id, status: "void", opening: { $ne: true }, date: { $gte: from, $lte: to } }, { number: 1 }).lean();
@@ -354,6 +372,37 @@ async function gstr3b(org, period, freq, { itcFrom2b } = {}) {
 
   const liab = { iamt: r2(osup.iamt + zeroRated.iamt), camt: osup.camt, samt: osup.samt };
   const setoff = setOff(liab, itcAvl);
+
+  // The documents behind each figure (for the drill-down; never in the JSON).
+  const V = r1.view;
+  const merge = (rows) => {
+    const m = new Map();
+    for (const d of rows) {
+      const k = `${d.kind}|${d.id}`;
+      const x = m.get(k) || { ...d, txval: 0, iamt: 0, camt: 0, samt: 0 };
+      for (const f of ["txval", "iamt", "camt", "samt"]) x[f] = r2(x[f] + (d[f] || 0));
+      m.set(k, x);
+    }
+    return [...m.values()].sort((a, b) => new Date(a.date) - new Date(b.date) || String(a.number).localeCompare(String(b.number)));
+  };
+  const neg = (d) => ({ ...d, value: -(d.value || 0), txval: -(d.txval || 0), iamt: -(d.iamt || 0), camt: -(d.camt || 0), samt: -(d.samt || 0) });
+  const docs = {
+    outward: merge([
+      ...V.b2b.map((d) => ({ ...d, kind: "invoice" })),
+      ...V.b2cl.map((d) => ({ ...d, kind: "invoice" })),
+      ...V.b2cs.flatMap((g) => g.docs || []),
+      ...V.cdnr.map((d) => neg({ ...d, kind: "credit" })),
+      ...V.cdnur.map((d) => neg({ ...d, kind: "credit" })),
+    ]),
+    zeroRated: merge(V.exp.map((d) => ({ ...d, kind: "invoice" }))),
+    nil: merge(V.nil.flatMap((r) => r.docs || [])),
+    unreg: Object.fromEntries(Object.keys(unreg).map((pos) => [pos, merge([...V.b2cl.filter((d) => d.pos === pos).map((d) => ({ ...d, kind: "invoice" })), ...V.b2cs.filter((g) => g.type === "Inter-state" && g.pos === pos).flatMap((g) => g.docs || [])])])),
+    itcBooks: [
+      ...bills.map((b) => ({ id: b._id, kind: "bill", number: b.billNumber, date: b.date, name: b.vendorName, value: r2((b.total || 0) * fx(b)), txval: r2((b.subTotal || 0) * fx(b)), ...taxOf(b) })),
+      ...expenses.map((e) => ({ id: e._id, kind: "expense", number: e.category, date: e.date, name: e.vendorName, value: r2((e.total || 0) * fx(e)), txval: r2((e.amount || 0) * fx(e)), ...taxOf(e) })),
+    ].sort((a, b) => a.date - b.date),
+    itcReversed: vcs.map((v) => ({ id: v._id, kind: "vendorCredit", number: v.number, date: v.date, name: v.vendorName, value: r2((v.total || 0) * fx(v)), txval: r2((v.subTotal || 0) * fx(v)), ...taxOf(v) })).sort((a, b) => a.date - b.date),
+  };
   const json = {
     gstin: org.gstin,
     ret_period: fp,
@@ -405,6 +454,7 @@ async function gstr3b(org, period, freq, { itcFrom2b } = {}) {
     inwardNil,
     liability: liab,
     setoff,
+    docs,
     issues: r1.issues,
   };
 }
