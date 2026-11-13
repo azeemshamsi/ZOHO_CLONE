@@ -123,6 +123,21 @@ const shopifyOrderSchema = new mongoose.Schema(
     invoiceOrg: { type: mongoose.Schema.Types.ObjectId, ref: "Organization" }, // the company the invoice is in
     invoiceError: String,
     remarks: String,
+    // Payment screenshots (bytes in GridFS "attachments"); sent to the Shopify order (metafield + note).
+    paymentProofs: [
+      {
+        fileId: mongoose.Schema.Types.ObjectId,
+        name: String,
+        type: String,
+        size: Number,
+        reference: String,
+        by: String,
+        at: Date,
+        shopifyFileId: String,
+        shopifyUrl: String,
+        error: String,
+      },
+    ],
     // B2B: the buyer's GSTIN and registered name, entered on the order; its invoice goes to that registered customer.
     b2b: { gstin: String, name: String, at: Date, by: { type: mongoose.Schema.Types.ObjectId, ref: "User" } },
     // AWB scanned by us before handing the parcel to the courier (internal record): latest scan + every scan.

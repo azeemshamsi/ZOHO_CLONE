@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { money } from "../lib/format";
 import { STATES } from "../lib/constants";
+import { uploadProof } from "../components/PaymentProofs";
 import {
   PageHeader,
   Field,
@@ -123,6 +124,8 @@ export default function NewStoreOrder() {
   });
   const [payment, setPayment] = useState("cod");
   const [note, setNote] = useState("");
+  const [proofs, setProofs] = useState([]);
+  const [proofRef, setProofRef] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
 
@@ -190,6 +193,21 @@ export default function NewStoreOrder() {
       });
       if (data.order) {
         toast(`Order ${data.order.name} created in Shopify`);
+        if (payment === "paid" && proofs.length) {
+          if (!data.order.id)
+            toast(
+              "Order created, but it isn't in OrdexaGo yet — add the payment screenshot from the order after the next sync",
+              "error",
+            );
+          for (const f of data.order.id ? proofs : []) {
+            try {
+              const p = await uploadProof(data.order.id, f, proofRef.trim());
+              if (p.error) toast(p.error, "error");
+            } catch (e) {
+              toast(errMsg(e), "error");
+            }
+          }
+        }
         nav(
           data.order.id
             ? `/shopify-orders?tab=new&q=${encodeURIComponent(data.order.name)}`
@@ -525,6 +543,63 @@ export default function NewStoreOrder() {
               Already paid (UPI / bank transfer) — order created now and marked
               paid
             </label>
+            {payment === "paid" && (
+              <div
+                className="card pad"
+                style={{ display: "grid", gap: 6 }}
+                onPaste={(e) =>
+                  e.clipboardData?.files?.length &&
+                  setProofs([...proofs, ...e.clipboardData.files])
+                }
+              >
+                <div className="small">
+                  Payment screenshot (optional) — saved with the order and added
+                  to the Shopify order. You can also paste a screenshot here.
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                  }}
+                >
+                  <input
+                    placeholder="UTR / reference"
+                    value={proofRef}
+                    onChange={(e) => setProofRef(e.target.value)}
+                    style={{ maxWidth: 220 }}
+                  />
+                  <label className="btn btn-sm">
+                    + Add screenshot
+                    <input
+                      type="file"
+                      hidden
+                      multiple
+                      accept="image/*,application/pdf"
+                      onChange={(e) => (
+                        setProofs([...proofs, ...e.target.files]),
+                        (e.target.value = "")
+                      )}
+                    />
+                  </label>
+                </div>
+                {proofs.map((f, i) => (
+                  <div key={i} className="small">
+                    {f.name} ·{" "}
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={() =>
+                        setProofs(proofs.filter((_, j) => j !== i))
+                      }
+                    >
+                      remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <label className="check">
               <input
                 type="radio"

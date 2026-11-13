@@ -53,7 +53,7 @@ app.use("/api/shopify-webhook", express.raw({ type: "*/*", limit: "5mb" }), requ
 app.use("/api/webhooks/meta", express.raw({ type: "*/*", limit: "5mb" }), require("./routes/metaWebhook"));
 app.use("/api/inbox/conversations", express.json({ limit: "25mb" }));
 app.use("/api/import", express.json({ limit: "80mb" }));
-app.use(["/api/attachments", "/api/bill-scan", "/api/gst/returns/2b", "/api/seller-portal"], express.json({ limit: "15mb" }));
+app.use(["/api/attachments", "/api/shopify/orders", "/api/bill-scan", "/api/gst/returns/2b", "/api/seller-portal"], express.json({ limit: "15mb" }));
 app.use("/api/amazon", express.json({ limit: "60mb" }));
 app.use(["/api/flipkart-sales", "/api/pepperfry-sales"], express.json({ limit: "60mb" }));
 app.use(express.json({ limit: "1mb" }));

@@ -28,6 +28,7 @@ const shopifyStoreSchema = new mongoose.Schema(
     // Sync
     syncFrom: { type: Date },
     autoSync: { type: Boolean, default: true },
+    paymentProofDef: { type: Boolean, default: false }, // "Payment proof" order metafield defined in Shopify
     lastSyncAt: { type: Date }, // orders updated after this are fetched next time
     sync: {
       running: { type: Boolean, default: false },

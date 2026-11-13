@@ -671,6 +671,77 @@ router.put(
   })
 );
 
+// Payment proof (UPI / bank screenshots): kept here and sent to the Shopify order.
+const proofBucket = () => new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: "attachments" });
+const proofScopeErr = (msg) => (/access|scope|permission|denied/i.test(msg) ? "Saved in OrdexaGo, but the Shopify app can't add files yet — add the write_files, read_files and write_orders scopes, release and reinstall the app, then click Retry" : msg);
+async function proofToShopify(req, o, p) {
+  const store = await ShopifyStore.findOne({ organization: req.storeOrg });
+  if (!store?.connected) return (p.error = "Shopify store not connected");
+  const chunks = [];
+  await new Promise((resolve, reject) => proofBucket().openDownloadStream(p.fileId).on("data", (c) => chunks.push(c)).on("end", resolve).on("error", reject));
+  try {
+    const f = await require("../utils/shopify/paymentProof").sendToShopify(store, o, { name: p.name, type: p.type, buf: Buffer.concat(chunks), reference: p.reference, by: p.by });
+    p.shopifyFileId = f.id;
+    p.shopifyUrl = f.url;
+    p.error = "";
+  } catch (e) {
+    p.error = proofScopeErr(e.message);
+  }
+}
+const proofOut = (p) => ({ _id: p._id, name: p.name, type: p.type, size: p.size, reference: p.reference, by: p.by, at: p.at, inShopify: !!p.shopifyFileId, shopifyUrl: p.shopifyUrl, error: p.error });
+router.get(
+  "/orders/:id/payment-proofs",
+  ah(async (req, res) => {
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg }, { paymentProofs: 1 }).lean();
+    if (!o) throw new HttpError(404, "Order not found");
+    res.send((o.paymentProofs || []).map(proofOut));
+  })
+);
+router.post(
+  "/orders/:id/payment-proofs",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ name: Joi.string().max(200).required(), type: Joi.string().allow("").default(""), data: Joi.string().required(), reference: Joi.string().allow("").max(100).default("") }), req.body);
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
+    if (!o) throw new HttpError(404, "Order not found");
+    if (!o.shopifyId || o.channel === "amazon" || o.channel === "flipkart") throw new HttpError(400, "Payment proof can be added to Shopify orders only");
+    const buf = Buffer.from(d.data.replace(/^data:.*?;base64,/, ""), "base64");
+    if (!buf.length) throw new HttpError(400, "The file is empty");
+    if (buf.length > 10 * 1024 * 1024) throw new HttpError(400, "Files can be up to 10 MB");
+    if (!/^(image\/|application\/pdf)/.test(d.type)) throw new HttpError(400, "Add a screenshot (image) or a PDF");
+    const fileId = new mongoose.Types.ObjectId();
+    const { Readable } = require("stream");
+    await new Promise((resolve, reject) => Readable.from(buf).pipe(proofBucket().openUploadStreamWithId(fileId, d.name, { metadata: { organization: req.storeOrg, type: d.type } })).on("finish", resolve).on("error", reject));
+    o.paymentProofs.push({ fileId, name: d.name, type: d.type, size: buf.length, reference: d.reference.trim(), by: req.user?.name || "", at: new Date() });
+    const p = o.paymentProofs[o.paymentProofs.length - 1];
+    await proofToShopify(req, o, p);
+    await ShopifyOrder.updateOne({ _id: o._id }, { paymentProofs: o.paymentProofs });
+    await audit.log(req, "payment_proof_add", { target: o.name, meta: { name: d.name, reference: d.reference, shopify: !p.error } });
+    res.status(201).send(proofOut(p));
+  })
+);
+router.post(
+  "/orders/:id/payment-proofs/:pid/retry",
+  ah(async (req, res) => {
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
+    const p = o?.paymentProofs.id(req.params.pid);
+    if (!p) throw new HttpError(404, "Not found");
+    if (!p.shopifyFileId) await proofToShopify(req, o, p);
+    await ShopifyOrder.updateOne({ _id: o._id }, { paymentProofs: o.paymentProofs });
+    res.send(proofOut(p));
+  })
+);
+router.get(
+  "/orders/:id/payment-proofs/:pid/file",
+  ah(async (req, res) => {
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg }, { paymentProofs: 1 });
+    const p = o?.paymentProofs.id(req.params.pid);
+    if (!p) throw new HttpError(404, "Not found");
+    res.setHeader("Content-Type", p.type || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(p.name)}"`);
+    proofBucket().openDownloadStream(p.fileId).on("error", () => res.status(404).end()).pipe(res);
+  })
+);
+
 // B2B: the buyer's GSTIN (blank = back to B2C). Not invoiced yet → the invoice goes to the registered customer.
 // Already invoiced → the invoice is moved to that customer (GSTR-1 moves it from B2C to B2B, or back).
 router.put(

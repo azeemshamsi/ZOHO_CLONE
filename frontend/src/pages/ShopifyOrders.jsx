@@ -10,6 +10,7 @@ import SearchSelect from "../components/SearchSelect";
 import PackagePicker, { packageOptions } from "../components/PackagePicker";
 import { useAuth } from "../lib/auth";
 import { can } from "../components/Layout";
+import PaymentProofs from "../components/PaymentProofs";
 
 const TABS = [
   ["new", "New"],
@@ -927,6 +928,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip }) {
           <div className="label-sm">Invoice</div>
           {o.invoice ? <Link to={`/invoices/${o.invoice}`}>{o.invoiceNumber}</Link> : <span className="muted">Not invoiced{o.invoiceError ? ` — ${o.invoiceError}` : ""}</span>}
           <B2bBox o={o} onSaved={() => (load(), onChanged())} />
+          {(!o.channel || o.channel === "shopify") && <PaymentProofs orderId={o._id} />}
           <div className="label-sm" style={{ marginTop: 10 }}>
             Shipment
           </div>
