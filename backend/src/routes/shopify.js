@@ -252,74 +252,161 @@ router.get(
   })
 );
 
-// Abandoned checkouts, read live from Shopify (not stored: buyers' contact details stay in Shopify).
+// Abandoned checkouts, read live from Shopify; the team's remarks / status / next follow-up are kept here.
 // ?after=<cursor>&q=<search>; 50 per page, newest first; completed checkouts are left out.
+// ?status=<status>|any (checkouts with remarks) or ?due=1 (follow-up due today or earlier): from the remarks here.
+const CheckoutFollowUp = require("../models/CheckoutFollowUp");
+const CK_STATUSES = ["No answer", "Interested", "Will order later", "Price / shipping query", "Not interested", "Wrong number", "Ordered"];
+const CK_FIELDS = `id name createdAt updatedAt completedAt abandonedCheckoutUrl
+  totalPriceSet { shopMoney { amount } }
+  customer { id displayName defaultEmailAddress { emailAddress } defaultPhoneNumber { phoneNumber } numberOfOrders }
+  shippingAddress { name firstName lastName company address1 address2 phone city province provinceCode zip }
+  billingAddress { phone }
+  lineItems(first: 50) { nodes { title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } discountedUnitPriceSet { shopMoney { amount } } image { url } variant { id price inventoryQuantity } } }`;
+const ckKey = (r) => (r.customerId ? r.customerId.split("/").pop() : "") || String(r.phone || "").replace(/\D/g, "").slice(-10) || String(r.email || "").toLowerCase();
+const ckRow = (x) => {
+  const r = {
+    id: x.id.split("/").pop(),
+    name: x.name,
+    createdAt: x.createdAt,
+    updatedAt: x.updatedAt,
+    completed: !!x.completedAt,
+    url: x.abandonedCheckoutUrl,
+    total: Number(x.totalPriceSet?.shopMoney?.amount) || 0,
+    customer: x.customer?.displayName || x.shippingAddress?.name || "",
+    email: x.customer?.defaultEmailAddress?.emailAddress || "",
+    phone: x.shippingAddress?.phone || x.customer?.defaultPhoneNumber?.phoneNumber || x.billingAddress?.phone || "",
+    orders: x.customer?.numberOfOrders != null ? Number(x.customer.numberOfOrders) : null,
+    city: [x.shippingAddress?.city, x.shippingAddress?.province, x.shippingAddress?.zip].filter(Boolean).join(", "),
+    items: (x.lineItems?.nodes || []).map((l) => ({
+      title: l.title,
+      variant: l.variantTitle || "",
+      sku: l.sku || "",
+      quantity: l.quantity,
+      price: Number(l.originalUnitPriceSet?.shopMoney?.amount) || 0,
+      cartPrice: Number(l.discountedUnitPriceSet?.shopMoney?.amount) || Number(l.originalUnitPriceSet?.shopMoney?.amount) || 0,
+      image: l.image?.url || "",
+      variantId: l.variant?.id || "",
+      listPrice: Number(l.variant?.price) || 0,
+      stock: l.variant?.inventoryQuantity ?? null,
+    })),
+    // For "Create order" from this checkout.
+    customerId: x.customer?.id || "",
+    address: {
+      name: x.shippingAddress?.name || [x.shippingAddress?.firstName, x.shippingAddress?.lastName].filter(Boolean).join(" "),
+      company: x.shippingAddress?.company || "",
+      address1: x.shippingAddress?.address1 || "",
+      address2: x.shippingAddress?.address2 || "",
+      city: x.shippingAddress?.city || "",
+      state: stateCode(x.shippingAddress?.provinceCode || x.shippingAddress?.province) || "",
+      zip: (x.shippingAddress?.zip || "").replace(/\s/g, ""),
+      phone: x.shippingAddress?.phone || "",
+    },
+  };
+  r.customerKey = ckKey(r);
+  return r;
+};
+const fuOut = (f) => (f ? { status: f.status || "", nextOn: f.nextOn, orderName: f.orderName || "", lastAt: f.lastAt, notes: (f.notes || []).map((n) => ({ _id: n._id, text: n.text, status: n.status || "", by: n.by, byId: n.byId, at: n.at })) } : null);
+// Remarks of these checkouts, and the same customer's remarks on their other checkouts.
+async function withFollowUps(org, rows) {
+  if (!rows.length) return rows;
+  const ids = rows.map((r) => r.id);
+  const keys = [...new Set(rows.map((r) => r.customerKey).filter(Boolean))];
+  const [own, byCust] = await Promise.all([CheckoutFollowUp.find({ organization: org, checkoutId: { $in: ids } }).lean(), keys.length ? CheckoutFollowUp.find({ organization: org, customerKey: { $in: keys } }).lean() : []]);
+  const of = new Map(own.map((f) => [f.checkoutId, f]));
+  return rows.map((r) => {
+    const earlier = byCust
+      .filter((f) => f.customerKey === r.customerKey && f.checkoutId !== r.id)
+      .flatMap((f) => (f.notes || []).map((n) => ({ text: n.text, status: n.status || "", by: n.by, at: n.at, checkout: f.checkoutId })))
+      .sort((a, b) => new Date(b.at) - new Date(a.at));
+    return { ...r, followUp: fuOut(of.get(r.id)), earlier };
+  });
+}
+router.get(
+  "/abandoned-checkouts/statuses",
+  ah(async (req, res) => res.send(CK_STATUSES))
+);
 router.get(
   "/abandoned-checkouts",
   ah(async (req, res) => {
     const store = await ShopifyStore.findOne({ organization: req.storeOrg });
     if (!store?.connected) throw new HttpError(400, "Connect the Shopify store first");
     const { gql } = require("../utils/shopify/client");
+    const scopeErr = (e) => (/access|scope|permission/i.test(e.message) ? new HttpError(400, "The Shopify app can't read abandoned checkouts — give it the read_orders access scope and reinstall it") : new HttpError(400, e.message));
+    // Filtered by the team's remarks: the checkouts are looked up by id.
+    if (req.query.status || req.query.due) {
+      const today = new Date(Date.now() + 330 * 60000); // end of today in India
+      today.setUTCHours(23, 59, 59, 999);
+      today.setTime(today.getTime() - 330 * 60000);
+      let fus = (await CheckoutFollowUp.find({ organization: req.storeOrg }).lean()).filter((f) => (req.query.due ? f.nextOn && new Date(f.nextOn) <= today && f.status !== "Ordered" && f.status !== "Not interested" : req.query.status === "any" ? (f.notes || []).length : f.status === req.query.status));
+      fus.sort((a, b) => (req.query.due ? new Date(a.nextOn) - new Date(b.nextOn) : new Date(b.lastAt || 0) - new Date(a.lastAt || 0)));
+      const start = Number(req.query.after) || 0;
+      const page = fus.slice(start, start + 50);
+      let nodes = [];
+      try {
+        if (page.length) nodes = (await gql(store, `query($ids: [ID!]!) { nodes(ids: $ids) { ... on AbandonedCheckout { ${CK_FIELDS} } } }`, { ids: page.map((f) => `gid://shopify/AbandonedCheckout/${f.checkoutId}`) })).nodes || [];
+      } catch (e) {
+        throw scopeErr(e);
+      }
+      const byId = new Map(nodes.filter((n) => n?.id).map((n) => [n.id.split("/").pop(), n]));
+      // A checkout Shopify no longer has still shows, from what was saved with the remarks.
+      const rows = page.map((f) => (byId.get(f.checkoutId) ? ckRow(byId.get(f.checkoutId)) : { id: f.checkoutId, gone: true, createdAt: f.createdAt, customer: f.customer, phone: f.phone, email: "", items: [], total: 0, city: "", customerKey: f.customerKey, address: {} }));
+      return res.send({ rows: await withFollowUps(req.storeOrg, rows), next: start + 50 < fus.length ? String(start + 50) : null, shop: store.shop, total: fus.length });
+    }
     const q = String(req.query.q || "").replace(/["\\]/g, "").trim();
     let d;
     try {
-      d = await gql(
-        store,
-        `query($after: String, $query: String) { abandonedCheckouts(first: 50, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
-          pageInfo { hasNextPage endCursor }
-          nodes { id name createdAt updatedAt completedAt abandonedCheckoutUrl
-            totalPriceSet { shopMoney { amount } }
-            customer { id displayName defaultEmailAddress { emailAddress } defaultPhoneNumber { phoneNumber } numberOfOrders }
-            shippingAddress { name firstName lastName company address1 address2 phone city province provinceCode zip }
-            billingAddress { phone }
-            lineItems(first: 50) { nodes { title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } discountedUnitPriceSet { shopMoney { amount } } image { url } variant { id price inventoryQuantity } } } } } }`,
-        { after: req.query.after || null, query: q || null }
-      );
+      d = await gql(store, `query($after: String, $query: String) { abandonedCheckouts(first: 50, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) { pageInfo { hasNextPage endCursor } nodes { ${CK_FIELDS} } } }`, { after: req.query.after || null, query: q || null });
     } catch (e) {
-      if (/access|scope|permission/i.test(e.message)) throw new HttpError(400, "The Shopify app can't read abandoned checkouts — give it the read_orders access scope and reinstall it");
-      throw new HttpError(400, e.message);
+      throw scopeErr(e);
     }
     const c = d.abandonedCheckouts || {};
-    const rows = (c.nodes || [])
-      .filter((x) => !x.completedAt)
-      .map((x) => ({
-        id: x.id.split("/").pop(),
-        name: x.name,
-        createdAt: x.createdAt,
-        updatedAt: x.updatedAt,
-        url: x.abandonedCheckoutUrl,
-        total: Number(x.totalPriceSet?.shopMoney?.amount) || 0,
-        customer: x.customer?.displayName || x.shippingAddress?.name || "",
-        email: x.customer?.defaultEmailAddress?.emailAddress || "",
-        phone: x.shippingAddress?.phone || x.customer?.defaultPhoneNumber?.phoneNumber || x.billingAddress?.phone || "",
-        orders: x.customer?.numberOfOrders != null ? Number(x.customer.numberOfOrders) : null,
-        city: [x.shippingAddress?.city, x.shippingAddress?.province, x.shippingAddress?.zip].filter(Boolean).join(", "),
-        items: (x.lineItems?.nodes || []).map((l) => ({
-          title: l.title,
-          variant: l.variantTitle || "",
-          sku: l.sku || "",
-          quantity: l.quantity,
-          price: Number(l.originalUnitPriceSet?.shopMoney?.amount) || 0,
-          cartPrice: Number(l.discountedUnitPriceSet?.shopMoney?.amount) || Number(l.originalUnitPriceSet?.shopMoney?.amount) || 0,
-          image: l.image?.url || "",
-          variantId: l.variant?.id || "",
-          listPrice: Number(l.variant?.price) || 0,
-          stock: l.variant?.inventoryQuantity ?? null,
-        })),
-        // For "Create order" from this checkout.
-        customerId: x.customer?.id || "",
-        address: {
-          name: x.shippingAddress?.name || [x.shippingAddress?.firstName, x.shippingAddress?.lastName].filter(Boolean).join(" "),
-          company: x.shippingAddress?.company || "",
-          address1: x.shippingAddress?.address1 || "",
-          address2: x.shippingAddress?.address2 || "",
-          city: x.shippingAddress?.city || "",
-          state: stateCode(x.shippingAddress?.provinceCode || x.shippingAddress?.province) || "",
-          zip: (x.shippingAddress?.zip || "").replace(/\s/g, ""),
-          phone: x.shippingAddress?.phone || "",
-        },
-      }));
-    res.send({ rows, next: c.pageInfo?.hasNextPage ? c.pageInfo.endCursor : null, shop: store.shop });
+    const rows = (c.nodes || []).filter((x) => !x.completedAt).map(ckRow);
+    res.send({ rows: await withFollowUps(req.storeOrg, rows), next: c.pageInfo?.hasNextPage ? c.pageInfo.endCursor : null, shop: store.shop });
+  })
+);
+// Add a remark (and/or change the status / next follow-up date).
+router.post(
+  "/abandoned-checkouts/:id/remarks",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        text: Joi.string().trim().allow("").max(2000).default(""),
+        status: Joi.string().valid("", ...CK_STATUSES).allow(null),
+        nextOn: Joi.date().allow(null, ""),
+        customerKey: Joi.string().allow("").max(80).default(""),
+        customer: Joi.string().allow("").max(200).default(""),
+        phone: Joi.string().allow("").max(40).default(""),
+      }),
+      req.body
+    );
+    if (!/^\d+$/.test(req.params.id)) throw new HttpError(400, "Bad checkout");
+    if (!d.text && d.status == null && d.nextOn === undefined) throw new HttpError(400, "Write a remark or choose a status");
+    let f = await CheckoutFollowUp.findOne({ organization: req.storeOrg, checkoutId: req.params.id });
+    if (!f) f = new CheckoutFollowUp({ organization: req.storeOrg, checkoutId: req.params.id });
+    if (d.customerKey) f.customerKey = d.customerKey;
+    if (d.customer) f.customer = d.customer;
+    if (d.phone) f.phone = d.phone;
+    const statusChanged = d.status != null && d.status !== f.status;
+    if (d.status != null) f.status = d.status;
+    if (d.nextOn !== undefined) f.nextOn = d.nextOn || null;
+    if (d.text || statusChanged) f.notes.push({ text: d.text, status: statusChanged ? d.status : "", by: req.user?.name || "", byId: req.user?._id, at: new Date() });
+    f.lastAt = new Date();
+    await f.save();
+    res.send(fuOut(f));
+  })
+);
+router.delete(
+  "/abandoned-checkouts/:id/remarks/:nid",
+  ah(async (req, res) => {
+    const f = await CheckoutFollowUp.findOne({ organization: req.storeOrg, checkoutId: req.params.id });
+    const n = f?.notes.id(req.params.nid);
+    if (!n) throw new HttpError(404, "Remark not found");
+    const full = (req.perms?.store_orders || "none") === "full";
+    if (!full && String(n.byId) !== String(req.user?._id)) throw new HttpError(403, "You can delete only your own remarks");
+    n.deleteOne();
+    await f.save();
+    res.send(fuOut(f));
   })
 );
 
@@ -379,6 +466,15 @@ router.post(
       r = await CO.createOrder(store, { ...body, customerId: body.customerId || null }, { user: req.user });
     } catch (e) {
       throw draftScopeErr(e);
+    }
+    if (body.checkoutId && /^\d+$/.test(body.checkoutId)) {
+      const f = (await CheckoutFollowUp.findOne({ organization: req.storeOrg, checkoutId: body.checkoutId })) || new CheckoutFollowUp({ organization: req.storeOrg, checkoutId: body.checkoutId, customer: body.customer?.name || body.address?.name || "", phone: body.customer?.phone || body.address?.phone || "" });
+      const label = r.order?.name ? `Order ${r.order.name} created` : `Payment link ${r.draft?.name || ""} sent`;
+      if (r.order) f.status = "Ordered";
+      f.orderName = r.order?.name || f.orderName || "";
+      f.notes.push({ text: `${label} from this checkout`, status: r.order ? "Ordered" : "", by: req.user?.name || "", byId: req.user?._id, at: new Date() });
+      f.lastAt = new Date();
+      await f.save().catch(() => {});
     }
     await audit.log(req, "shopify_order_create", { target: r.order?.name || r.draft?.name || "", meta: { payment: body.payment, lines: body.lines.length } });
     res.status(201).send(r);
@@ -1117,7 +1213,7 @@ router.post(
 router.moduleOf = function (req) {
   const p = req.path;
   if (/^\/new-order/.test(p)) return "store_orders.new_order";
-  if (p === "/abandoned-checkouts") return "store_orders.abandoned";
+  if (/^\/abandoned-checkouts/.test(p)) return "store_orders.abandoned";
   // Payment proof: full store_orders, or the order taker on an order they just created (checked in the route).
   if (/^\/orders\/[^/]+\/payment-proofs/.test(p)) return ["store_orders", "store_orders.new_order"];
   if (/^\/returns\/|^\/orders\/return$/.test(p)) return "store_returns";
