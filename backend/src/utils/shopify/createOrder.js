@@ -5,6 +5,7 @@
  * Shopify: draftOrderCreate → then
  *   cod  : draftOrderComplete(paymentPending) — order created, payment pending (shows as COD here)
  *   paid : draftOrderComplete — order created and marked paid (money already received: UPI, bank transfer)
+ *   advance: completed as pending, then the advance recorded (orderCreateManualPayment) — the rest is COD
  *   link : the draft stays open; its checkout link goes to the customer, and the order is created when they pay.
  * Needs the read_draft_orders / write_draft_orders scopes.
  */
@@ -141,7 +142,7 @@ const userErr = (errs) =>
 
 // body: { customerId?, customer: {name, email, phone}, address: {name, company, address1, address2, city, state, zip, phone},
 //         lines: [{variantId, quantity, price?}], shipping: {title, amount}, discount: {type: "percent"|"amount", value, reason},
-//         payment: "cod"|"paid"|"link", note, tags: [] }
+//         payment: "cod"|"paid"|"advance"|"link", advance, note, tags: [] }
 async function createOrder(store, body, { user } = {}) {
   const a = body.address || {};
   const c = body.customer || {};
@@ -169,6 +170,7 @@ async function createOrder(store, body, { user } = {}) {
   const tags = [
     "OrdexaGo",
     ...(body.payment === "cod" ? ["COD"] : []),
+    ...(body.payment === "advance" ? ["Advance paid"] : []),
     ...(body.tags || []),
   ]
     .map((t) => String(t).trim())
@@ -247,22 +249,39 @@ async function createOrder(store, body, { user } = {}) {
       `Shopify made draft ${draft.name} but couldn't complete it: ${err2}. Complete it in Shopify → Drafts.`,
     );
   const order = done.draftOrderComplete.draftOrder?.order;
+  // Advance received (UPI / bank): recorded on the order; the rest is collected on delivery.
+  let warning = "";
+  if (order && body.payment === "advance") {
+    const adv = Math.min(Number(body.advance) || 0, total);
+    try {
+      const m = await gql(
+        store,
+        `mutation($id: ID!, $amount: MoneyInput, $method: String) { orderCreateManualPayment(id: $id, amount: $amount, paymentMethodName: $method) { order { id displayFinancialStatus } userErrors { field message } } }`,
+        { id: order.id, amount: money(adv), method: "UPI / bank transfer (advance)" },
+      );
+      const e = userErr(m.orderCreateManualPayment?.userErrors);
+      if (e) throw new Error(e);
+    } catch (e) {
+      warning = `Order ${order.name} was created as unpaid, but Shopify didn't take the advance of ₹${adv} (${/access|scope|denied/i.test(e.message) ? "the app needs the write_orders scope" : e.message}). Record it in Shopify → the order → Collect payment.`;
+    }
+  }
   const saved = order ? await pull(store, order.id, user) : null;
   return {
     order: { shopifyId: order?.id, name: order?.name, total, id: saved?._id },
+    warning,
   };
 }
 
 // Bring one Shopify order into Store → Orders straight away (items made, list refreshed).
 async function pull(store, shopifyId, user = null) {
   const ShopifyOrder = require("../../models/ShopifyOrder");
-  const num = String(shopifyId).split("/").pop();
-  const d = await gql(store, ORDERS_QUERY, {
-    first: 1,
-    after: null,
-    query: `id:${num}`,
-  });
-  const o = d.orders?.nodes?.[0];
+  // Read the order by id (Shopify's order search lags a few seconds behind a new order).
+  const fields = ORDERS_QUERY.slice(ORDERS_QUERY.indexOf("nodes {") + 7, ORDERS_QUERY.lastIndexOf("\n    }"));
+  let o = null;
+  for (let i = 0; i < 4 && !o; i++) {
+    if (i) await new Promise((r) => setTimeout(r, 1500));
+    o = (await gql(store, `query($id: ID!) { order(id: $id) { ${fields} } }`, { id: shopifyId })).order;
+  }
   if (!o) return null;
   await upsert(store.organization, normalise(o));
   const doc = await ShopifyOrder.findOne({

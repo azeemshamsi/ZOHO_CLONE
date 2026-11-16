@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { money } from "../lib/format";
 import { STATES } from "../lib/constants";
-import { uploadProof } from "../components/PaymentProofs";
+import { readB64 } from "../components/PaymentProofs";
 import {
   PageHeader,
   Field,
@@ -159,6 +159,7 @@ export default function NewStoreOrder() {
   const [note, setNote] = useState("");
   const [proofs, setProofs] = useState([]);
   const [proofRef, setProofRef] = useState("");
+  const [advance, setAdvance] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
 
@@ -204,8 +205,25 @@ export default function NewStoreOrder() {
     if (!lines.length) return toast("Add at least one product", "error");
     if (!customer.phone && !addr.phone)
       return toast("Enter the customer's phone number", "error");
+    if (payment === "advance" && !(Number(advance) > 0))
+      return toast("Enter the advance amount received", "error");
+    if (payment === "advance" && Number(advance) >= total)
+      return toast(
+        "The advance is the full amount — choose Already paid instead",
+        "error",
+      );
+    const big = proofs.find((f) => f.size > 10 * 1024 * 1024);
+    if (big) return toast(`${big.name} is over 10 MB`, "error");
     setBusy(true);
     try {
+      const withProofs = ["paid", "advance"].includes(payment) ? proofs : [];
+      const proofData = await Promise.all(
+        withProofs.map(async (f) => ({
+          name: f.name || "payment.png",
+          type: f.type || "",
+          data: await readB64(f),
+        })),
+      );
       const { data } = await api.post("/shopify/new-order", {
         customerId,
         customer: { ...customer, name: customer.name || addr.name },
@@ -222,27 +240,19 @@ export default function NewStoreOrder() {
         },
         discount: { ...discount, value: Number(discount.value) || 0 },
         payment,
+        advance: payment === "advance" ? Number(advance) : undefined,
+        proofs: proofData,
+        proofReference: proofRef.trim(),
         note,
         checkoutId: ck?.id || "",
         tags: ck ? ["Recovered checkout"] : [],
       });
       if (data.order) {
         toast(`Order ${data.order.name} created in Shopify`);
-        if (payment === "paid" && proofs.length) {
-          if (!data.order.id)
-            toast(
-              "Order created, but it isn't in OrdexaGo yet — add the payment screenshot from the order after the next sync",
-              "error",
-            );
-          for (const f of data.order.id ? proofs : []) {
-            try {
-              const p = await uploadProof(data.order.id, f, proofRef.trim());
-              if (p.error) toast(p.error, "error");
-            } catch (e) {
-              toast(errMsg(e), "error");
-            }
-          }
-        }
+        if (data.warning) toast(data.warning, "error");
+        if (data.proofError) toast(data.proofError, "error");
+        for (const p of data.proofs || [])
+          if (p.error) toast(`${p.name}: ${p.error}`, "error");
         nav(
           data.order.id
             ? `/shopify-orders?tab=new&q=${encodeURIComponent(data.order.name)}`
@@ -591,7 +601,36 @@ export default function NewStoreOrder() {
               Already paid (UPI / bank transfer) — order created now and marked
               paid
             </label>
-            {payment === "paid" && (
+            <label className="check">
+              <input
+                type="radio"
+                name="pay"
+                checked={payment === "advance"}
+                onChange={() => setPayment("advance")}
+              />{" "}
+              Advance paid, rest on delivery — the advance is recorded, the
+              balance is COD
+            </label>
+            {payment === "advance" && (
+              <div className="row-2">
+                <Field label="Advance received (₹)" required>
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.01"
+                    value={advance}
+                    onChange={(e) => setAdvance(e.target.value)}
+                  />
+                </Field>
+                <Field label="Balance to collect on delivery">
+                  <input
+                    readOnly
+                    value={money(Math.max(0, total - (Number(advance) || 0)))}
+                  />
+                </Field>
+              </div>
+            )}
+            {["paid", "advance"].includes(payment) && (
               <div
                 className="card pad"
                 style={{ display: "grid", gap: 6 }}

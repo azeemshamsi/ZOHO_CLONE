@@ -451,7 +451,10 @@ const newOrderSchema = Joi.object({
       lines: Joi.array().items(Joi.object({ variantId: Joi.string().required(), quantity: Joi.number().integer().min(1).required(), price: Joi.number().min(0).allow(null, ""), basePrice: Joi.number().allow(null) }).unknown(true)).min(1).required(),
       shipping: Joi.object({ title: Joi.string().allow("").default(""), amount: Joi.number().min(0).default(0) }).default({}),
       discount: Joi.object({ type: Joi.string().valid("percent", "amount").default("amount"), value: Joi.number().min(0).default(0), reason: Joi.string().allow("").default("") }).default({}),
-      payment: Joi.string().valid("cod", "paid", "link").required(),
+      payment: Joi.string().valid("cod", "paid", "advance", "link").required(),
+      advance: Joi.number().min(0).allow(null, ""),
+      proofs: Joi.array().items(Joi.object({ name: Joi.string().max(200).required(), type: Joi.string().allow("").default(""), data: Joi.string().required() })).max(5).default([]),
+      proofReference: Joi.string().allow("").max(100).default(""),
       checkoutId: Joi.string().allow("").max(40).default(""),
       note: Joi.string().allow("").default(""),
       tags: Joi.array().items(Joi.string().allow("")).default([]),
@@ -460,6 +463,8 @@ router.post(
   "/new-order",
   ah(async (req, res) => {
     const body = validate(newOrderSchema, req.body);
+    if (body.payment === "advance" && !(Number(body.advance) > 0)) throw new HttpError(400, "Enter the advance amount received");
+    if (body.proofs.length && !["paid", "advance"].includes(body.payment)) body.proofs = [];
     const store = await connectedStore(req);
     let r;
     try {
@@ -475,6 +480,19 @@ router.post(
       f.notes.push({ text: `${label} from this checkout`, status: r.order ? "Ordered" : "", by: req.user?.name || "", byId: req.user?._id, at: new Date() });
       f.lastAt = new Date();
       await f.save().catch(() => {});
+    }
+    // Payment screenshots sent with the order: kept with it here and added to the Shopify order.
+    if (body.proofs.length) {
+      const o = r.order?.id ? await ShopifyOrder.findById(r.order.id) : null;
+      r.proofs = [];
+      if (!o) r.proofError = `Order ${r.order?.name || ""} was created, but it isn't in OrdexaGo yet, so the payment screenshot wasn't saved — add it from the order after the next sync.`;
+      for (const f of o ? body.proofs : []) {
+        try {
+          r.proofs.push(proofOut(await addProof(req, o, { ...f, reference: body.proofReference })));
+        } catch (e) {
+          r.proofs.push({ name: f.name, error: e.message });
+        }
+      }
     }
     await audit.log(req, "shopify_order_create", { target: r.order?.name || r.draft?.name || "", meta: { payment: body.payment, lines: body.lines.length } });
     res.status(201).send(r);
@@ -816,6 +834,25 @@ function ownProofOk(req, o) {
   const recent = o.createdAt && Date.now() - new Date(o.createdAt).getTime() < 30 * 60000;
   if (!mine || !recent) throw new HttpError(403, "Only an admin or staff with full Store: Orders access can change this order now");
 }
+// Keep one proof (base64) with the order and send it to Shopify; saves the order's proof list.
+const PROOF_TYPE = /^(image\/|application\/pdf)|\.(png|jpe?g|webp|gif|heic|heif|pdf)$/i;
+async function addProof(req, o, d) {
+  if (!o.shopifyId || o.channel === "amazon" || o.channel === "flipkart") throw new HttpError(400, "Payment proof can be added to Shopify orders only");
+  const buf = Buffer.from(String(d.data).replace(/^data:.*?;base64,/, ""), "base64");
+  if (!buf.length) throw new HttpError(400, `${d.name}: the file is empty`);
+  if (buf.length > 10 * 1024 * 1024) throw new HttpError(400, `${d.name}: files can be up to 10 MB`);
+  if (!PROOF_TYPE.test(d.type || "") && !PROOF_TYPE.test(d.name || "")) throw new HttpError(400, `${d.name}: add a screenshot (image) or a PDF`);
+  const type = d.type || (/\.pdf$/i.test(d.name) ? "application/pdf" : "image/jpeg");
+  const fileId = new mongoose.Types.ObjectId();
+  const { Readable } = require("stream");
+  await new Promise((resolve, reject) => Readable.from(buf).pipe(proofBucket().openUploadStreamWithId(fileId, d.name, { metadata: { organization: req.storeOrg, type } })).on("finish", resolve).on("error", reject));
+  o.paymentProofs.push({ fileId, name: d.name, type, size: buf.length, reference: String(d.reference || "").trim(), by: req.user?.name || "", at: new Date() });
+  const p = o.paymentProofs[o.paymentProofs.length - 1];
+  await ShopifyOrder.updateOne({ _id: o._id }, { paymentProofs: o.paymentProofs }); // kept even if Shopify fails
+  await proofToShopify(req, o, p);
+  await ShopifyOrder.updateOne({ _id: o._id }, { paymentProofs: o.paymentProofs });
+  return p;
+}
 const proofOut = (p) => ({ _id: p._id, name: p.name, type: p.type, size: p.size, reference: p.reference, by: p.by, at: p.at, inShopify: !!p.shopifyFileId, shopifyUrl: p.shopifyUrl, error: p.error });
 router.get(
   "/orders/:id/payment-proofs",
@@ -832,18 +869,7 @@ router.post(
     const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
     if (!o) throw new HttpError(404, "Order not found");
     ownProofOk(req, o);
-    if (!o.shopifyId || o.channel === "amazon" || o.channel === "flipkart") throw new HttpError(400, "Payment proof can be added to Shopify orders only");
-    const buf = Buffer.from(d.data.replace(/^data:.*?;base64,/, ""), "base64");
-    if (!buf.length) throw new HttpError(400, "The file is empty");
-    if (buf.length > 10 * 1024 * 1024) throw new HttpError(400, "Files can be up to 10 MB");
-    if (!/^(image\/|application\/pdf)/.test(d.type)) throw new HttpError(400, "Add a screenshot (image) or a PDF");
-    const fileId = new mongoose.Types.ObjectId();
-    const { Readable } = require("stream");
-    await new Promise((resolve, reject) => Readable.from(buf).pipe(proofBucket().openUploadStreamWithId(fileId, d.name, { metadata: { organization: req.storeOrg, type: d.type } })).on("finish", resolve).on("error", reject));
-    o.paymentProofs.push({ fileId, name: d.name, type: d.type, size: buf.length, reference: d.reference.trim(), by: req.user?.name || "", at: new Date() });
-    const p = o.paymentProofs[o.paymentProofs.length - 1];
-    await proofToShopify(req, o, p);
-    await ShopifyOrder.updateOne({ _id: o._id }, { paymentProofs: o.paymentProofs });
+    const p = await addProof(req, o, d);
     await audit.log(req, "payment_proof_add", { target: o.name, meta: { name: d.name, reference: d.reference, shopify: !p.error } });
     res.status(201).send(proofOut(p));
   })
