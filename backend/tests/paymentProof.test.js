@@ -28,3 +28,11 @@ test("proof goes to Shopify files, metafield list and note", async () => {
   assert.match(up.note, /^Created in OrdexaGo\nPayment proof \(.*Azeem, ref UTR123\): https:\/\/cdn\/x.png$/);
   assert.ok(calls.some((c) => c.fetch === "https://up/x"));
 });
+
+test("order's payment proofs are entries with a MIME type, not strings", () => {
+  const mg = require("mongoose");
+  const ShopifyOrder = require("../src/models/ShopifyOrder");
+  const d = new ShopifyOrder({ paymentProofs: [{ fileId: new mg.Types.ObjectId(), name: "upi.png", type: "image/png", size: 10 }] });
+  assert.strictEqual(d.paymentProofs[0].type, "image/png");
+  assert.ok(d.paymentProofs[0]._id);
+});

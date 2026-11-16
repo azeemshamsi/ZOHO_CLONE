@@ -130,7 +130,7 @@ const shopifyOrderSchema = new mongoose.Schema(
       {
         fileId: mongoose.Schema.Types.ObjectId,
         name: String,
-        type: String,
+        type: { type: String }, // MIME type (written this way: a bare "type" key would make the whole entry a String)
         size: Number,
         reference: String,
         by: String,
