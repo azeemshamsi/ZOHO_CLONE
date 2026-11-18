@@ -68,6 +68,60 @@ router.get(
 
 router.get("/next-number", (req, res) => res.send({ number: "" }));
 
+// TDS deducted on bills but posted to Rounding & Adjustments (typed in the plain Adjustment box, or imported
+// when Tally's TDS ledger wasn't matched): list them, and move them to a TDS ledger. Only the ledger changes —
+// the bill's amounts and what's owed to the vendor stay the same. A few paise of round-off beside the TDS stay
+// in Rounding & Adjustments.
+const TDS_RATES = [0.1, 1, 2, 5, 10, 20];
+const tdsSplit = (b) => {
+  const taxable = Math.round((b.subTotal || (b.lineItems || []).reduce((t, l) => t + (l.amount || 0), 0)) * 100) / 100;
+  const ded = -(b.adjustment || 0);
+  let best = null;
+  for (const r of TDS_RATES) {
+    const tds = Math.round((taxable * r) / 100 * 100) / 100;
+    const off = Math.round((ded - tds) * 100) / 100;
+    if (Math.abs(off) < 1 && (!best || Math.abs(off) < Math.abs(best.off))) best = { rate: r, tds, off };
+  }
+  return { taxable, rate: best?.rate ?? null, roundOff: best ? -best.off : 0 };
+};
+const isTdsAccount = (a) => a && /tds/i.test(a.name) && ["Other Current Liability", "Other Liability", "Current Liability", "Other Current Asset"].includes(a.group);
+router.get(
+  "/tds-in-rounding",
+  ah(async (req, res) => {
+    const Account = require("../models/Account");
+    const [bills, accounts] = await Promise.all([Bill.find({ organization: req.org }, { billNumber: 1, vendor: 1, vendorName: 1, date: 1, adjustment: 1, adjustmentAccount: 1, adjustmentRoundOff: 1, subTotal: 1, status: 1, "lineItems.amount": 1 }).lean(), Account.find({ organization: req.org }).lean()]);
+    const tdsCodes = new Set(accounts.filter(isTdsAccount).map((a) => String(a._id)));
+    const live = bills.filter((b) => !["draft", "void"].includes(b.status));
+    // A vendor's usual TDS ledger: the one on their other bills.
+    const usual = new Map();
+    for (const b of live) if (tdsCodes.has(b.adjustmentAccount)) usual.set(String(b.vendor), b.adjustmentAccount);
+    const rows = live
+      .filter((b) => !b.adjustmentAccount && (b.adjustment || 0) <= -1)
+      .map((b) => ({ _id: b._id, billNumber: b.billNumber, vendorName: b.vendorName, date: b.date, adjustment: b.adjustment, ...tdsSplit(b), ledger: usual.get(String(b.vendor)) || "" }))
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+    res.send({ rows, ledgers: accounts.filter(isTdsAccount).map((a) => ({ code: String(a._id), name: a.name })) });
+  })
+);
+router.post(
+  "/tds-in-rounding/move",
+  ah(async (req, res) => {
+    const { items } = validate(Joi.object({ items: Joi.array().items(Joi.object({ id: Joi.string().hex().length(24).required(), account: Joi.string().hex().length(24).required() })).min(1).max(500).required() }), req.body);
+    const Account = require("../models/Account");
+    const accounts = new Map((await Account.find({ organization: req.org }).lean()).map((a) => [String(a._id), a]));
+    let moved = 0;
+    for (const it of items) {
+      if (!isTdsAccount(accounts.get(it.account))) throw new HttpError(400, "Choose a TDS ledger");
+      const b = await Bill.findOne({ _id: it.id, organization: req.org }).lean();
+      if (!b || b.adjustmentAccount || (b.adjustment || 0) > -1) continue;
+      const { roundOff } = tdsSplit(b);
+      await Bill.updateOne({ _id: b._id, organization: req.org }, { adjustmentAccount: it.account, adjustmentRoundOff: roundOff });
+      moved++;
+    }
+    await require("../utils/audit").log(req, "tds_moved_from_rounding", { target: `${moved} bills`, meta: { items: items.length } });
+    res.send({ moved });
+  })
+);
+
 router.post(
   "/",
   ah(async (req, res) => {

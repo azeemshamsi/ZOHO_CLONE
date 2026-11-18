@@ -961,6 +961,11 @@ export function DocForm({ kind, recurring = false }) {
                 <input type="number" step="0.01" value={form.adjustment} onChange={set("adjustment")} />
               </div>
             )}
+            {kind.key === "bill" && !form.adjustmentAccount && Number(form.adjustment) <= -1 && (
+              <div className="small text-amber" style={{ textAlign: "right" }}>
+                A deduction here goes to Rounding & Adjustments. If it's TDS, use the TDS row above so it goes to the TDS ledger.
+              </div>
+            )}
             <div className="tot-row tot-total">
               <span>Total ({cur})</span>
               <span>{amount(totals.total)}</span>

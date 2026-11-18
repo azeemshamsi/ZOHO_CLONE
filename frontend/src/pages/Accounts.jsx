@@ -176,6 +176,117 @@ const DOC_LINK = {
 };
 export const docLink = (type, id) => (DOC_LINK[type] ? DOC_LINK[type](id) : "#");
 
+// Rounding & Adjustments: bills whose TDS landed here (typed in the plain Adjustment box, or imported without
+// the TDS ledger) — move them to the TDS ledger. Amounts don't change, only the ledger.
+function TdsInRounding({ onDone }) {
+  const [d, setD] = useState(null);
+  const [pick, setPick] = useState({}); // bill id → TDS ledger code ("" = leave)
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const load = () =>
+    api
+      .get("/bills/tds-in-rounding")
+      .then((r) => {
+        setD(r.data);
+        const one = r.data.ledgers.length === 1 ? r.data.ledgers[0].code : "";
+        setPick(Object.fromEntries(r.data.rows.map((x) => [x._id, x.ledger || one])));
+      })
+      .catch(() => setD(null));
+  useEffect(() => {
+    load();
+  }, []);
+  if (!d || !d.rows.length) return null;
+  const chosen = d.rows.filter((x) => pick[x._id]);
+  const move = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post("/bills/tds-in-rounding/move", { items: chosen.map((x) => ({ id: x._id, account: pick[x._id] })) });
+      toast(`${data.moved} bill${data.moved === 1 ? "" : "s"} moved to TDS`);
+      await load();
+      onDone();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  const setAll = (code) => setPick(Object.fromEntries(d.rows.map((x) => [x._id, code])));
+  return (
+    <div className="alert alert-warn" style={{ marginBottom: 14 }}>
+      <strong>
+        {d.rows.length} bill{d.rows.length === 1 ? "" : "s"} have TDS (₹1 or more deducted) posted here instead of a TDS ledger.
+      </strong>{" "}
+      <button type="button" className="link-btn" onClick={() => setOpen(!open)}>
+        {open ? "Hide" : "Review and move to TDS"}
+      </button>
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          {!d.ledgers.length ? (
+            <p>
+              There's no TDS ledger yet. Create one (e.g. "TDS Payable 194C", group Other Current Liability) in the Chart of Accounts, or from a bill's TDS row, then come back.
+            </p>
+          ) : (
+            <>
+              <p className="small" style={{ margin: "0 0 8px" }}>
+                Only the ledger changes: the bill amounts and what you owe the vendor stay the same. Paise of round-off beside the TDS stay in Rounding & Adjustments. Set all to{" "}
+                <select className="select-inline" value="" onChange={(e) => e.target.value && setAll(e.target.value)}>
+                  <option value="">choose…</option>
+                  {d.ledgers.map((l) => (
+                    <option key={l.code} value={l.code}>
+                      {l.name}
+                    </option>
+                  ))}
+                </select>
+              </p>
+              <div className="card flush" style={{ maxHeight: 380, overflow: "auto" }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Bill</th>
+                      <th>Vendor</th>
+                      <th className="num">Taxable</th>
+                      <th className="num">Deducted</th>
+                      <th>Looks like</th>
+                      <th>Move to</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.rows.map((x) => (
+                      <tr key={x._id}>
+                        <td>{date(x.date)}</td>
+                        <td>
+                          <Link to={`/bills/${x._id}`}>{x.billNumber}</Link>
+                        </td>
+                        <td>{x.vendorName}</td>
+                        <td className="num">{money(x.taxable)}</td>
+                        <td className="num">{money(-x.adjustment)}</td>
+                        <td className="small">{x.rate != null ? `TDS ${x.rate}%` : <span className="muted">not a TDS rate</span>}</td>
+                        <td>
+                          <select value={pick[x._id] || ""} onChange={(e) => setPick({ ...pick, [x._id]: e.target.value })}>
+                            <option value="">— leave —</option>
+                            {d.ledgers.map((l) => (
+                              <option key={l.code} value={l.code}>
+                                {l.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button className="btn btn-primary" style={{ marginTop: 10 }} disabled={busy || !chosen.length} onClick={move}>
+                {busy ? "Moving…" : `Move ${chosen.length} bill${chosen.length === 1 ? "" : "s"} to TDS`}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AccountDetail() {
   const { code } = useParams();
   const [params, setParams] = useSearchParams();
@@ -241,6 +352,7 @@ export function AccountDetail() {
           </>
         )}
       </PageHeader>
+      {a.code === "adjustments" && <TdsInRounding onDone={load} />}
       {data.party && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
           <button className="btn btn-sm" onClick={() => go({ party: "", by: "" })}>
