@@ -307,6 +307,9 @@ export function VendorDetail() {
         <Link to={`/vendors/${id}/edit`} className="btn">
           <Icon name="edit" size={16} /> Edit
         </Link>
+        <Link to={`/reports/party-ledger?party=vendor:${id}`} className="btn" title="Ledger account: print or download">
+          Ledger
+        </Link>
         <Link to={`/purchase-orders/new?vendor=${id}`} className="btn">
           New PO
         </Link>

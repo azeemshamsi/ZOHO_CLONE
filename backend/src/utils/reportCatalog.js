@@ -762,6 +762,50 @@ const REPORTS = {
     return { kind: "table", groupBy: "group", columns: [col("account", "Account"), col("debit", "Debit", "money", { sum: true }), col("credit", "Credit", "money", { sum: true })], rows };
   },
 
+  // A customer's or vendor's ledger account, as Tally's ledger display: opening balance, each voucher with the
+  // other ledger (Particulars), Dr / Cr and running balance, closing balance. ?party=customer:<id> | vendor:<id>
+  "party-ledger": async (req, q) => {
+    const { from, to } = parseRange(q);
+    const [kind, id] = String(q.party || "").split(":");
+    if (!["customer", "vendor"].includes(kind) || !/^[0-9a-f]{24}$/.test(id || "")) return { kind: "party-ledger", party: null, rows: [] };
+    const Model = kind === "customer" ? Customer : Vendor;
+    const [party, accounts, entries] = await Promise.all([Model.findOne({ _id: id, organization: req.org }).lean(), chartOfAccounts(req.org), buildEntries(req.org, { to })]);
+    if (!party) return { kind: "party-ledger", party: null, rows: [] };
+    const nameOf = new Map(accounts.map((a) => [a.code, a.name]));
+    const VCH = { Invoice: "Sales", "Customer Payment": "Receipt", "Credit Note": "Credit Note", "Credit Note Refund": "Payment", Bill: "Purchase", "Vendor Payment": "Payment", "Vendor Credit": "Debit Note", "Vendor Credit Refund": "Receipt", Journal: "Journal", Expense: "Purchase" };
+    let opening = 0;
+    const rows = [];
+    for (const e of entries) {
+      const mine = e.lines.filter((l) => (l.account === "ar" || l.account === "ap") && String(l.partyId || "") === id);
+      if (!mine.length) continue;
+      const dr = round2(mine.reduce((t, l) => t + (l.debit || 0), 0));
+      const cr = round2(mine.reduce((t, l) => t + (l.credit || 0), 0));
+      if (new Date(e.date) < from) {
+        opening = round2(opening + dr - cr);
+        continue;
+      }
+      // Particulars: the main ledger on the other side (Tally shows the first one; here the biggest).
+      const other = e.lines.filter((l) => !mine.includes(l) && (dr >= cr ? l.credit : l.debit));
+      const top = other.sort((a, b) => (b.debit || b.credit || 0) - (a.debit || a.credit || 0))[0];
+      rows.push({ date: e.date, particulars: top ? nameOf.get(top.account) || top.account : "", more: Math.max(0, other.length - 1), vchType: VCH[e.type] || e.type, number: e.number, debit: dr > cr ? round2(dr - cr) : 0, credit: cr > dr ? round2(cr - dr) : 0, ref: { type: e.type, id: e.id } });
+    }
+    rows.sort((a, b) => new Date(a.date) - new Date(b.date));
+    let bal = opening;
+    for (const r of rows) r.balance = bal = round2(bal + r.debit - r.credit);
+    const debit = sum(rows, (r) => r.debit);
+    const credit = sum(rows, (r) => r.credit);
+    const addr = party.billingAddress || {};
+    return {
+      kind: "party-ledger",
+      party: { id, kind, name: party.displayName, company: party.companyName || "", gstin: party.gstin || "", phone: party.phone || "", email: party.email || "", address: [addr.street, addr.city, addr.pincode].filter(Boolean).join(", ") },
+      opening,
+      rows,
+      debit,
+      credit,
+      closing: round2(opening + debit - credit),
+    };
+  },
+
   "day-book": async (req, q) => {
     const { from, to } = parseRange(q);
     const entries = await buildEntries(req.org, { to });

@@ -368,6 +368,9 @@ export function CustomerDetail() {
         <Link to={`/customers/${id}/edit`} className="btn">
           <Icon name="edit" size={16} /> Edit
         </Link>
+        <Link to={`/reports/party-ledger?party=customer:${id}`} className="btn" title="Ledger account: print or download">
+          Ledger
+        </Link>
         <Link to={`/quotes/new?customer=${id}`} className="btn">
           New Quote
         </Link>

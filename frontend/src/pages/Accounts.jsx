@@ -252,6 +252,11 @@ export function AccountDetail() {
               Open {a.code === "ar" ? "customer" : "vendor"}
             </Link>
           )}
+          {data.party !== "other" && (
+            <Link className="btn btn-sm" to={`/reports/party-ledger?party=${a.code === "ar" ? "customer" : "vendor"}:${data.party}`}>
+              Print / download ledger
+            </Link>
+          )}
         </div>
       )}
       {data.by === "party" ? (
