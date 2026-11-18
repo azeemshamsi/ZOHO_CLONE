@@ -248,21 +248,8 @@ const REPORTS = {
     };
   },
 
-  "horizontal-pl": async (req, q) => {
-    const { from, to } = parseRange(q);
-    const [accounts, entries] = await Promise.all([chartOfAccounts(req.org), buildEntries(req.org, { to })]);
-    const p = pl(accounts, movements(entries, { from, to }));
-    const debitSide = [L.section("Cost of Goods Sold"), ...items(p.cogs), L.section("Expenses"), ...items(p.expense), ...items(p.otherExpense)];
-    const creditSide = [L.section("Income"), ...items(p.income), L.section("Other Income"), ...items(p.otherIncome)];
-    if (p.net >= 0) debitSide.push(L.total("Net Profit", p.net));
-    else creditSide.push(L.total("Net Loss", -p.net));
-    const side = round2(p.cogs.total + p.expense.total + p.otherExpense.total + Math.max(p.net, 0));
-    return {
-      kind: "horizontal",
-      left: { title: "Expenses (Dr.)", lines: debitSide, total: side },
-      right: { title: "Income (Cr.)", lines: creditSide, total: round2(p.income.total + p.otherIncome.total + Math.max(-p.net, 0)) },
-    };
-  },
+  // Tally's horizontal Profit & Loss A/c and Balance Sheet (utils/tallyStatements).
+  "horizontal-pl": (req, q) => require("./tallyStatements").profitAndLoss(req.org, q),
 
   "bs-schedule-iii": async (req, q) => {
     const to = asOfDate(q);
@@ -300,24 +287,7 @@ const REPORTS = {
     };
   },
 
-  "horizontal-bs": async (req, q) => {
-    const to = asOfDate(q);
-    const [accounts, entries] = await Promise.all([chartOfAccounts(req.org), buildEntries(req.org, { to })]);
-    const b = bs(accounts, entries, to);
-    return {
-      kind: "horizontal",
-      left: {
-        title: "Liabilities & Equity",
-        lines: [L.section("Equity"), ...items(b.equity), L.section("Long Term Liabilities"), ...items(b.longTerm), L.section("Current Liabilities"), ...items(b.payables), ...items(b.otherCL)],
-        total: b.totalLE,
-      },
-      right: {
-        title: "Assets",
-        lines: [L.section("Fixed Assets"), ...items(b.fixed), L.section("Current Assets"), ...items(b.cash), ...items(b.receivables), ...items(b.otherCA)],
-        total: b.totalAssets,
-      },
-    };
-  },
+  "horizontal-bs": (req, q) => require("./tallyStatements").balanceSheet(req.org, q),
 
   "cash-flow": async (req, q) => {
     const { from, to } = parseRange(q);

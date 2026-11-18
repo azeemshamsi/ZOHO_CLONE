@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import SearchSelect from "../components/SearchSelect";
 import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -215,10 +220,10 @@ export const REPORTS = [
   ),
   R(
     "horizontal-pl",
-    "Horizontal Profit and Loss",
+    "Profit & Loss A/c (Tally horizontal)",
     "Business Overview",
     "range",
-    "Expenses and income side by side (T-format).",
+    "As in Tally: Trading and P&L account side by side, Tally groups with their ledgers, Opening and Closing Stock.",
   ),
   R(
     "cash-flow",
@@ -236,10 +241,10 @@ export const REPORTS = [
   ),
   R(
     "horizontal-bs",
-    "Horizontal Balance Sheet",
+    "Balance Sheet (Tally horizontal)",
     "Business Overview",
     "asof",
-    "Liabilities and assets side by side (T-format).",
+    "As in Tally: Liabilities and Assets side by side, Tally groups (Capital, Current Liabilities, Sundry Debtors…) with their ledgers.",
   ),
   R(
     "bs-schedule-iii",
@@ -798,6 +803,21 @@ export function ReportsHome() {
 export function ReportPage() {
   const { key } = useParams();
   const meta = REPORTS.find((r) => r.key === key);
+  const nav = useNavigate();
+  // P&L / Balance Sheet: vertical or Tally's horizontal layout (remembered on this device).
+  const LAYOUT = {
+    "profit-and-loss": "horizontal-pl",
+    "horizontal-pl": "profit-and-loss",
+    "balance-sheet": "horizontal-bs",
+    "horizontal-bs": "balance-sheet",
+  };
+  const horizontal = key === "horizontal-pl" || key === "horizontal-bs";
+  const switchLayout = (h) => {
+    try {
+      localStorage.setItem("statementLayout", h ? "horizontal" : "vertical");
+    } catch {}
+    if (h !== horizontal) nav(`/reports/${LAYOUT[key]}`, { replace: true });
+  };
   const { organization } = useAuth();
   const [range, setRange] = useState(() => ({
     key: meta?.period || "this_fy",
@@ -928,6 +948,29 @@ export function ReportPage() {
   return (
     <>
       <PageHeader title={meta.title} back="/reports">
+        {LAYOUT[key] && (
+          <div
+            className="seg"
+            role="group"
+            aria-label="Layout"
+            title="Horizontal: as Tally shows it, groups on two sides"
+          >
+            <button
+              type="button"
+              className={!horizontal ? "on" : ""}
+              onClick={() => switchLayout(false)}
+            >
+              Vertical
+            </button>
+            <button
+              type="button"
+              className={horizontal ? "on" : ""}
+              onClick={() => switchLayout(true)}
+            >
+              Horizontal (Tally)
+            </button>
+          </div>
+        )}
         {hasView && (
           <div
             className="seg"
@@ -1995,7 +2038,164 @@ function HorizontalReport({ d, range }) {
     </div>
   );
 }
+// Tally's horizontal P&L A/c / Balance Sheet: groups on two sides, totals level. Click a group to open
+// its ledgers; Detailed (Alt+F5) opens them all.
+function TallyStatement({ d, range }) {
+  const [open, setOpen] = useState({});
+  const [all, setAll] = useState(false);
+  useEffect(() => {
+    const t = () => setAll((x) => !x);
+    window.addEventListener("tally:detail", t);
+    return () => window.removeEventListener("tally:detail", t);
+  }, []);
+  const isOpen = (k) => (open[k] === undefined ? all : open[k]);
+  const amt = (v) => (v || v === 0 ? money(v).replace("₹", "").trim() : "");
+  const ledgerTo = (l) =>
+    l.party
+      ? `/reports/party-ledger?party=${l.party}&from=${range.from}&to=${range.to}`
+      : acctLink(l.code, range);
+  const rowsOf = (groups, side) => {
+    const out = [];
+    for (const g of groups) {
+      const k = `${side}:${g.name}`;
+      const can = (g.ledgers || []).length + (g.subgroups || []).length > 0;
+      out.push({
+        kind: "group",
+        label: g.name,
+        amount: g.amount,
+        k,
+        can,
+        style: g.style,
+      });
+      if (!can || !isOpen(k)) continue;
+      for (const sg of g.subgroups || []) {
+        const sk = `${k}:${sg.name}`;
+        const scan = (sg.ledgers || []).length > 0;
+        out.push({
+          kind: "sub",
+          label: sg.name,
+          inner: sg.amount,
+          k: sk,
+          can: scan,
+        });
+        if (scan && isOpen(sk))
+          for (const l of sg.ledgers)
+            out.push({
+              kind: "ledger2",
+              label: l.name,
+              inner: l.amount,
+              to: ledgerTo(l),
+            });
+      }
+      for (const l of g.ledgers || [])
+        out.push({
+          kind: "ledger",
+          label: l.name,
+          inner: l.amount,
+          to: ledgerTo(l),
+        });
+    }
+    return out;
+  };
+  const cells = (r, sep = "") => {
+    if (!r)
+      return [
+        <td key="a" className={`th-p${sep}`} />,
+        <td key="b" className="num" />,
+        <td key="c" className="num th-amt" />,
+      ];
+    const label = r.to ? <Link to={r.to}>{r.label}</Link> : r.label;
+    const toggle = r.can
+      ? () => setOpen((o) => ({ ...o, [r.k]: !isOpen(r.k) }))
+      : undefined;
+    return [
+      <td
+        key="a"
+        className={`th-p th-${r.kind}${r.style ? ` th-${r.style}` : ""}${toggle ? " th-click" : ""}${sep}`}
+        onClick={toggle}
+        title={toggle ? (isOpen(r.k) ? "Close" : "Show ledgers") : undefined}
+      >
+        {label}
+      </td>,
+      <td key="b" className="num th-inner">
+        {r.inner !== undefined ? amt(r.inner) : ""}
+      </td>,
+      <td
+        key="c"
+        className={`num th-amt${r.kind === "group" ? " th-bold" : ""}`}
+      >
+        {r.amount !== undefined ? amt(r.amount) : ""}
+      </td>,
+    ];
+  };
+  const [lh, rh] = d.headings || ["Particulars", "Particulars"];
+  return (
+    <div data-views>
+      <div className="muted small no-print" style={{ marginBottom: 6 }}>
+        Click a group to see its ledgers ·{" "}
+        <button
+          type="button"
+          className="link-btn"
+          onClick={() => (setOpen({}), setAll((x) => !x))}
+        >
+          {all ? "Condensed" : "Detailed"} (Alt+F5)
+        </button>
+      </div>
+      <table className="tally-h">
+        <colgroup>
+          <col />
+          <col className="c-inner" />
+          <col className="c-amt" />
+          <col />
+          <col className="c-inner" />
+          <col className="c-amt" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>{lh}</th>
+            <th />
+            <th className="num">{d.from ? "" : `as at ${date(d.to)}`}</th>
+            <th className="th-sep">{rh}</th>
+            <th />
+            <th className="num">{d.from ? "" : `as at ${date(d.to)}`}</th>
+          </tr>
+        </thead>
+        {d.blocks.map((b, bi) => {
+          const L = rowsOf(b.left, `l${bi}`);
+          const R = rowsOf(b.right, `r${bi}`);
+          const n = Math.max(L.length, R.length);
+          return (
+            <tbody key={bi}>
+              {Array.from({ length: n }, (_, i) => (
+                <tr key={i}>
+                  {cells(L[i])}
+                  {cells(R[i], " th-sep")}
+                </tr>
+              ))}
+              <tr className="th-total">
+                <td className="th-p">Total</td>
+                <td />
+                <td className="num th-amt">{amt(b.total)}</td>
+                <td className="th-p th-sep">Total</td>
+                <td />
+                <td className="num th-amt">{amt(b.total)}</td>
+              </tr>
+            </tbody>
+          );
+        })}
+      </table>
+      {d.diff ? (
+        <div className="alert alert-error">
+          The balance sheet is out by {money(Math.abs(d.diff))} — please report
+          this.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function GenericReport(p) {
+  if (p.d.kind === "tally") return <TallyStatement {...p} />;
   if (p.d.kind === "statement") return <StatementReport {...p} />;
   if (p.d.kind === "horizontal") return <HorizontalReport {...p} />;
   return (

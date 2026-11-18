@@ -34,12 +34,26 @@ const PAGED = {
   "purchase-orders": "/purchase-orders",
 };
 // Vouchers Alt+2 can duplicate (their /new page takes ?copy=<id>).
-const DUPLICABLE = ["invoices", "bills", "credit-notes", "vendor-credits", "quotes", "sales-orders", "purchase-orders", "journals", "payments", "payments-made", "expenses"];
+const DUPLICABLE = [
+  "invoices",
+  "bills",
+  "credit-notes",
+  "vendor-credits",
+  "quotes",
+  "sales-orders",
+  "purchase-orders",
+  "journals",
+  "payments",
+  "payments-made",
+  "expenses",
+];
 const listCache = new Map(); // kind → ids, newest first
 async function neighbour(kind, id, dir) {
   const load = async () => {
     const { data } = await api.get(PAGED[kind]);
-    const ids = (Array.isArray(data) ? data : data.rows || []).map((d) => String(d._id));
+    const ids = (Array.isArray(data) ? data : data.rows || []).map((d) =>
+      String(d._id),
+    );
     listCache.set(kind, ids);
     return ids;
   };
@@ -50,8 +64,17 @@ async function neighbour(kind, id, dir) {
   return dir === "earlier" ? ids[i + 1] : ids[i - 1];
 }
 const focusables = (root) =>
-  [...root.querySelectorAll("input, select, textarea, button[type=submit]")].filter(
-    (el) => visible(el) && el.tabIndex !== -1 && !el.readOnly && el.type !== "hidden" && el.type !== "file" && !el.closest(".ss-list") && !el.classList.contains("ss-req")
+  [
+    ...root.querySelectorAll("input, select, textarea, button[type=submit]"),
+  ].filter(
+    (el) =>
+      visible(el) &&
+      el.tabIndex !== -1 &&
+      !el.readOnly &&
+      el.type !== "hidden" &&
+      el.type !== "file" &&
+      !el.closest(".ss-list") &&
+      !el.classList.contains("ss-req"),
   );
 const VOUCHERS = {
   F4: ["/banking", "Contra (Banking)"],
@@ -87,10 +110,16 @@ const REPORTS = [
   ["/reports/tax-summary", "GST Summary"],
 ];
 
-const typing = (el) => !!el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
+const typing = (el) =>
+  !!el &&
+  (el.isContentEditable ||
+    ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
 const topModal = () => [...document.querySelectorAll(".modal-backdrop")].pop();
 const visible = (el) => !!el && !el.disabled && el.offsetParent !== null;
-const buttonByText = (root, rx) => [...root.querySelectorAll("button, a.btn")].find((b) => visible(b) && rx.test((b.textContent || "").trim()));
+const buttonByText = (root, rx) =>
+  [...root.querySelectorAll("button, a.btn")].find(
+    (b) => visible(b) && rx.test((b.textContent || "").trim()),
+  );
 
 export default function TallyKeys({ nav = [] }) {
   const navigate = useNavigate();
@@ -121,7 +150,9 @@ export default function TallyKeys({ nav = [] }) {
         if (goto || help) return;
         if (modal) {
           e.preventDefault();
-          const close = modal.querySelector(".modal-head .icon-btn") || buttonByText(modal, /^(cancel|back|close|no)$/i);
+          const close =
+            modal.querySelector(".modal-head .icon-btn") ||
+            buttonByText(modal, /^(cancel|back|close|no)$/i);
           if (close) close.click();
           else modal.click();
           return;
@@ -129,7 +160,11 @@ export default function TallyKeys({ nav = [] }) {
         if (typing(t)) t.blur();
         const path = locRef.current.pathname;
         if (path === "/") return;
-        if (/\/(new|edit)$/.test(path) && !window.confirm("Quit without saving?")) return;
+        if (
+          /\/(new|edit)$/.test(path) &&
+          !window.confirm("Quit without saving?")
+        )
+          return;
         e.preventDefault();
         back();
         return;
@@ -139,11 +174,20 @@ export default function TallyKeys({ nav = [] }) {
       if (e.ctrlKey && !e.altKey && key.toLowerCase() === "a") {
         const scope = modal || document.querySelector("main");
         const form = modal ? null : scope?.querySelector("form");
-        const primary = modal ? [...modal.querySelectorAll(".modal-actions .btn-primary, .modal-actions .btn-danger")].find(visible) : null;
+        const primary = modal
+          ? [
+              ...modal.querySelectorAll(
+                ".modal-actions .btn-primary, .modal-actions .btn-danger",
+              ),
+            ].find(visible)
+          : null;
         if (primary) {
           e.preventDefault();
           primary.click();
-        } else if (form && /\/(new|edit)$|settings/.test(locRef.current.pathname)) {
+        } else if (
+          form &&
+          /\/(new|edit)$|settings/.test(locRef.current.pathname)
+        ) {
           e.preventDefault();
           form.requestSubmit ? form.requestSubmit() : form.submit();
         }
@@ -152,21 +196,36 @@ export default function TallyKeys({ nav = [] }) {
 
       // Page Up / Page Down: previous (earlier) / next (later) voucher.
       if ((key === "PageUp" || key === "PageDown") && !modal && !typing(t)) {
-        const m = locRef.current.pathname.match(/^\/([a-z-]+)\/([0-9a-f]{24})$/);
+        const m = locRef.current.pathname.match(
+          /^\/([a-z-]+)\/([0-9a-f]{24})$/,
+        );
         if (m && PAGED[m[1]]) {
           e.preventDefault();
           neighbour(m[1], m[2], key === "PageUp" ? "earlier" : "later")
-            .then((next) => (next ? go(`/${m[1]}/${next}`) : toast(key === "PageUp" ? "This is the first voucher" : "This is the last voucher")))
+            .then((next) =>
+              next
+                ? go(`/${m[1]}/${next}`)
+                : toast(
+                    key === "PageUp"
+                      ? "This is the first voucher"
+                      : "This is the last voucher",
+                  ),
+            )
             .catch(() => {});
           return;
         }
       }
 
       // Ctrl+H change view, Alt+F5 detailed / condensed: pages with views listen for these.
-      if ((e.ctrlKey && !e.altKey && key.toLowerCase() === "h") || (e.altKey && key === "F5")) {
+      if (
+        (e.ctrlKey && !e.altKey && key.toLowerCase() === "h") ||
+        (e.altKey && key === "F5")
+      ) {
         if (document.querySelector("[data-views]")) {
           e.preventDefault();
-          window.dispatchEvent(new Event(key === "F5" ? "tally:detail" : "tally:view"));
+          window.dispatchEvent(
+            new Event(key === "F5" ? "tally:detail" : "tally:view"),
+          );
         } else if (key === "F5") {
           e.preventDefault();
           toast("Alt+F5 (detailed view) works on ledger lists");
@@ -177,15 +236,19 @@ export default function TallyKeys({ nav = [] }) {
       // Alt+F2: change period (reports and account statements).
       if (key === "F2" && e.altKey && !e.ctrlKey) {
         e.preventDefault();
-        if (document.querySelector("[data-period]")) window.dispatchEvent(new Event("tally:period"));
-        else toast("Alt+F2 changes the period on reports and ledger statements");
+        if (document.querySelector("[data-period]"))
+          window.dispatchEvent(new Event("tally:period"));
+        else
+          toast("Alt+F2 changes the period on reports and ledger statements");
         return;
       }
 
       // F2: change the date.
       if (key === "F2" && !e.ctrlKey && !e.altKey) {
         const root = modal || document.querySelector("main");
-        const d = [...(root?.querySelectorAll('input[type="date"]') || [])].find(visible);
+        const d = [
+          ...(root?.querySelectorAll('input[type="date"]') || []),
+        ].find(visible);
         if (d) {
           e.preventDefault();
           d.focus();
@@ -197,9 +260,19 @@ export default function TallyKeys({ nav = [] }) {
       }
 
       // Enter: next field on a form (Tally). Not in text areas, buttons, or an open dropdown.
-      if (key === "Enter" && !e.ctrlKey && !e.altKey && !e.shiftKey && t && ["INPUT", "SELECT"].includes(t.tagName) && !["checkbox", "radio", "submit", "button"].includes(t.type)) {
+      if (
+        key === "Enter" &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        t &&
+        ["INPUT", "SELECT"].includes(t.tagName) &&
+        !["checkbox", "radio", "submit", "button"].includes(t.type)
+      ) {
         const form = t.closest("form") || t.closest(".modal");
-        const editing = /\/(new|edit)$/.test(locRef.current.pathname) || !!t.closest(".modal");
+        const editing =
+          /\/(new|edit)$/.test(locRef.current.pathname) ||
+          !!t.closest(".modal");
         if (form && editing && !document.querySelector(".ss-list")) {
           const list = focusables(form);
           const i = list.indexOf(t);
@@ -226,7 +299,13 @@ export default function TallyKeys({ nav = [] }) {
       }
 
       // Voucher keys.
-      const fk = /^F\d+$/.test(key) ? (e.ctrlKey ? `Ctrl+${key}` : e.altKey || e.shiftKey ? "" : key) : "";
+      const fk = /^F\d+$/.test(key)
+        ? e.ctrlKey
+          ? `Ctrl+${key}`
+          : e.altKey || e.shiftKey
+            ? ""
+            : key
+        : "";
       if (fk && VOUCHERS[fk]) {
         e.preventDefault();
         go(VOUCHERS[fk][0]);
@@ -234,12 +313,22 @@ export default function TallyKeys({ nav = [] }) {
       }
 
       // Alt+2: duplicate the voucher being viewed / edited.
-      if (e.altKey && !e.ctrlKey && (e.code === "Digit2" || e.code === "Numpad2") && !modal) {
-        const m = locRef.current.pathname.match(/^\/([a-z-]+)\/([0-9a-f]{24})(\/edit)?$/);
+      if (
+        e.altKey &&
+        !e.ctrlKey &&
+        (e.code === "Digit2" || e.code === "Numpad2") &&
+        !modal
+      ) {
+        const m = locRef.current.pathname.match(
+          /^\/([a-z-]+)\/([0-9a-f]{24})(\/edit)?$/,
+        );
         if (m && DUPLICABLE.includes(m[1])) {
           e.preventDefault();
           go(`/${m[1]}/new?copy=${m[2]}`);
-        } else toast("Alt+2 duplicates a voucher: open an invoice, bill, journal, payment, credit note… first");
+        } else
+          toast(
+            "Alt+2 duplicates a voucher: open an invoice, bill, journal, payment, credit note… first",
+          );
         return;
       }
 
@@ -249,7 +338,10 @@ export default function TallyKeys({ nav = [] }) {
         const main = modal || document.querySelector("main");
         if (k === "p") {
           e.preventDefault();
-          const b = buttonByText(main, /^(print|pdf|download pdf|print \/ pdf)/i);
+          const b = buttonByText(
+            main,
+            /^(print|pdf|download pdf|print \/ pdf)/i,
+          );
           if (b) b.click();
           else window.print();
           return;
@@ -273,9 +365,27 @@ export default function TallyKeys({ nav = [] }) {
       }
 
       // Gateway letters, only when not typing and no window is open.
-      if (!e.ctrlKey && !e.altKey && !e.metaKey && !modal && !typing(t) && GATEWAY[key.toLowerCase()] && key.length === 1) {
+      if (
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        !modal &&
+        !typing(t) &&
+        GATEWAY[key.toLowerCase()] &&
+        key.length === 1
+      ) {
         e.preventDefault();
-        go(GATEWAY[key.toLowerCase()][0]);
+        // Balance Sheet / P&L in the layout last chosen (vertical or Tally horizontal).
+        let to = GATEWAY[key.toLowerCase()][0];
+        try {
+          if (localStorage.getItem("statementLayout") === "horizontal")
+            to =
+              {
+                "/reports/balance-sheet": "/reports/horizontal-bs",
+                "/reports/profit-and-loss": "/reports/horizontal-pl",
+              }[to] || to;
+        } catch {}
+        go(to);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -284,7 +394,13 @@ export default function TallyKeys({ nav = [] }) {
 
   return (
     <>
-      {goto && <GoTo nav={nav} onClose={() => setGoto(false)} onGo={(to) => (setGoto(false), navigate(to))} />}
+      {goto && (
+        <GoTo
+          nav={nav}
+          onClose={() => setGoto(false)}
+          onGo={(to) => (setGoto(false), navigate(to))}
+        />
+      )}
       {help && <Help onClose={() => setHelp(false)} />}
     </>
   );
@@ -296,16 +412,22 @@ function GoTo({ nav, onClose, onGo }) {
   const all = useMemo(() => {
     const pages = [];
     for (const n of nav) {
-      if (n.children) for (const c of n.children) pages.push([c.to, `${c.label}`, n.label]);
+      if (n.children)
+        for (const c of n.children) pages.push([c.to, `${c.label}`, n.label]);
       else if (n.to) pages.push([n.to, n.label, ""]);
     }
-    for (const [k, [to, l]] of Object.entries(VOUCHERS)) pages.push([to, `${l} — new`, k]);
+    for (const [k, [to, l]] of Object.entries(VOUCHERS))
+      pages.push([to, `${l} — new`, k]);
     for (const [to, l] of REPORTS) pages.push([to, l, "Report"]);
     const seen = new Set();
     return pages.filter(([to, l]) => !seen.has(to + l) && seen.add(to + l));
   }, [nav]);
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  const list = all.filter(([, l, g]) => words.every((w) => `${l} ${g}`.toLowerCase().includes(w))).slice(0, 12);
+  const list = all
+    .filter(([, l, g]) =>
+      words.every((w) => `${l} ${g}`.toLowerCase().includes(w)),
+    )
+    .slice(0, 12);
   return (
     <Modal open title="Go To" onClose={onClose}>
       <input
@@ -314,8 +436,10 @@ function GoTo({ nav, onClose, onGo }) {
         placeholder="Type a page, voucher or report…"
         onChange={(e) => (setQ(e.target.value), setI(0))}
         onKeyDown={(e) => {
-          if (e.key === "ArrowDown") (e.preventDefault(), setI(Math.min(i + 1, list.length - 1)));
-          if (e.key === "ArrowUp") (e.preventDefault(), setI(Math.max(i - 1, 0)));
+          if (e.key === "ArrowDown")
+            (e.preventDefault(), setI(Math.min(i + 1, list.length - 1)));
+          if (e.key === "ArrowUp")
+            (e.preventDefault(), setI(Math.max(i - 1, 0)));
           if (e.key === "Enter" && list[i]) onGo(list[i][0]);
           if (e.key === "Escape") (e.preventDefault(), onClose());
         }}
@@ -323,7 +447,19 @@ function GoTo({ nav, onClose, onGo }) {
       />
       <div style={{ marginTop: 8 }}>
         {list.map(([to, l, g], k) => (
-          <div key={to + l} onMouseDown={() => onGo(to)} onMouseEnter={() => setI(k)} style={{ padding: "7px 10px", borderRadius: 6, cursor: "pointer", background: k === i ? "var(--blue-50, #eef4ff)" : "transparent", display: "flex", justifyContent: "space-between" }}>
+          <div
+            key={to + l}
+            onMouseDown={() => onGo(to)}
+            onMouseEnter={() => setI(k)}
+            style={{
+              padding: "7px 10px",
+              borderRadius: 6,
+              cursor: "pointer",
+              background: k === i ? "var(--blue-50, #eef4ff)" : "transparent",
+              display: "flex",
+              justifyContent: "space-between",
+            }}
+          >
             <span>{l}</span>
             <span className="muted small">{g}</span>
           </div>
@@ -345,7 +481,10 @@ function Help({ onClose }) {
     ["Ctrl+A", "Accept — save the form or the open window"],
     ["Alt+G or Ctrl+G", "Go To any page, voucher or report"],
     ...Object.entries(VOUCHERS).map(([k, [, l]]) => [k, l]),
-    ["Page Up / Page Down", "Previous (earlier) / next (later) voucher, on a voucher's page"],
+    [
+      "Page Up / Page Down",
+      "Previous (earlier) / next (later) voucher, on a voucher's page",
+    ],
     ["F2", "Change the date (jumps to the date field)"],
     ["Alt+F2", "Change period (reports, ledger statements)"],
     ["Ctrl+H", "Change view: summary / detailed / transactions (ledger lists)"],
@@ -355,7 +494,10 @@ function Help({ onClose }) {
     ["Alt+2", "Duplicate the voucher on screen"],
     ["Alt+P", "Print / PDF"],
     ["Alt+D", "Delete"],
-    ...Object.entries(GATEWAY).map(([k, [, l]]) => [k.toUpperCase(), `${l} (when not typing)`]),
+    ...Object.entries(GATEWAY).map(([k, [, l]]) => [
+      k.toUpperCase(),
+      `${l} (when not typing)`,
+    ]),
     ["Ctrl+/", "This list"],
   ];
   return (
@@ -365,7 +507,17 @@ function Help({ onClose }) {
           {rows.map(([k, l]) => (
             <tr key={k}>
               <td style={{ width: 150 }}>
-                <kbd style={{ fontFamily: "monospace", background: "var(--bg-soft, #f3f4f6)", border: "1px solid var(--border, #e5e7eb)", borderRadius: 4, padding: "1px 6px" }}>{k}</kbd>
+                <kbd
+                  style={{
+                    fontFamily: "monospace",
+                    background: "var(--bg-soft, #f3f4f6)",
+                    border: "1px solid var(--border, #e5e7eb)",
+                    borderRadius: 4,
+                    padding: "1px 6px",
+                  }}
+                >
+                  {k}
+                </kbd>
               </td>
               <td>{l}</td>
             </tr>

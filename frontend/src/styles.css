@@ -971,3 +971,26 @@ tr.clickable:hover td { background: var(--brand-50); }
 .sub-table { background: #fff; border: 1px solid var(--border, #e5e7eb); border-radius: 8px; font-size: 13px; }
 .sub-table th, .sub-table td { padding: 6px 10px; }
 .sub-table .detail-row > td { background: #f3f6fb; }
+
+/* Tally horizontal P&L / Balance Sheet */
+.tally-h { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; table-layout: fixed; border: 1px solid var(--line); }
+.tally-h col.c-inner { width: 13%; }
+.tally-h col.c-amt { width: 14%; }
+.tally-h th { text-align: left; font-size: 12px; font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--bg-2, #f6f7f9); }
+.tally-h th.num, .tally-h td.num { text-align: right; }
+.tally-h td { padding: 4px 10px; vertical-align: top; }
+.tally-h .th-sep { border-left: 1px solid var(--line); }
+.tally-h .th-group { font-weight: 600; }
+.tally-h .th-bold { font-weight: 600; }
+.tally-h .th-sub { padding-left: 22px; font-style: italic; }
+.tally-h .th-ledger { padding-left: 22px; font-style: italic; color: var(--muted); }
+.tally-h .th-ledger2 { padding-left: 38px; font-style: italic; color: var(--muted); }
+.tally-h .th-inner { font-style: italic; color: var(--muted); }
+.tally-h .th-carry { font-weight: 600; }
+.tally-h .th-result { font-weight: 700; }
+.tally-h .th-click { cursor: pointer; }
+.tally-h .th-click:hover { text-decoration: underline; }
+.tally-h tr.th-total td { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-weight: 700; padding: 7px 10px; }
+.tally-h tbody + tbody tr:first-child td { padding-top: 10px; }
+@media print { .no-print { display: none !important; } }
+@media (max-width: 700px) { .tally-h { font-size: 12px; } .tally-h td, .tally-h th { padding: 4px 5px; } }
