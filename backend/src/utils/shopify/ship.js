@@ -84,22 +84,22 @@ async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {}, skipChe
   if (out.labelPdf) order.shipment.labelPdf = out.labelPdf;
   order.status = "ready_to_ship";
   order.statusChangedAt = new Date();
-  let warning = "";
+  let warning = out.refs?.pickupError ? `Booked, but the pickup isn't registered with Blue Dart: ${out.refs.pickupError}. Open the order and click Register pickup.` : "";
   if (order.channel === "amazon") {
     // Amazon order: tell Amazon the courier and AWB, and invoice it if OrdexaGo invoices Amazon orders.
     await order.save();
-    warning = await require("../amazon/ship").afterBooked(order);
+    warning = [warning, await require("../amazon/ship").afterBooked(order)].filter(Boolean).join(" · ");
   } else if (order.channel === "flipkart") {
     // Flipkart self-ship: tell Flipkart the courier and AWB.
     order.flipkart = { ...(order.flipkart || {}), selfShip: true };
     order.markModified("flipkart");
     await order.save();
-    warning = await require("../flipkart/orders").afterSelfShipBooked(order);
+    warning = [warning, await require("../flipkart/orders").afterSelfShipBooked(order)].filter(Boolean).join(" · ");
   } else if (store?.fulfillInShopify) {
     try {
       order.shipment.shopifyFulfilled = await fulfillInShopify(store, order, order.shipment);
     } catch (e) {
-      warning = `Booked, but couldn't mark it fulfilled in Shopify: ${e.message}`;
+      warning = [warning, `Booked, but couldn't mark it fulfilled in Shopify: ${e.message}`].filter(Boolean).join(" · ");
       order.shipment.error = warning;
     }
   }

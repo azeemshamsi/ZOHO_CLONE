@@ -485,7 +485,7 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
               .map((k) =>
                 k === "autoPickup" ? (
                   <label key={k} className="check" style={{ alignSelf: "end" }}>
-                    <input type="checkbox" checked={!!f.options[k]} onChange={(e) => setO(k, e.target.checked)} /> {FIELD_LABEL[k]}
+                    <input type="checkbox" checked={f.carrier === "bluedart" ? f.options[k] !== false : !!f.options[k]} onChange={(e) => setO(k, e.target.checked)} /> {FIELD_LABEL[k]}
                   </label>
                 ) : SELECTS[k] ? (
                   <Field key={k} label={FIELD_LABEL[k]}>

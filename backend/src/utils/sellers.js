@@ -87,7 +87,10 @@ function withPickup(acc, seller) {
   const base = acc.options && typeof acc.options.toObject === "function" ? acc.options.toObject() : { ...(acc.options || {}) };
   const options = { ...base };
   if (["shiprocket", "delhivery"].includes(acc.carrier)) options.pickupLocation = c.pickupLocation || "";
-  if (acc.carrier === "bluedart") for (const k of ["originArea", "customerCode", "vendorCode"]) if (c[k]) options[k] = c[k];
+  if (acc.carrier === "bluedart") {
+    for (const k of ["originArea", "customerCode", "vendorCode"]) if (c[k]) options[k] = c[k];
+    options._sellerArea = !!c.originArea; // else the area is looked up from the seller's pincode
+  }
   return new Proxy(acc, {
     get: (t, k) => (k === "pickup" ? pickup : k === "options" ? options : k === "_sellerView" ? true : Reflect.get(t, k, t)),
     set: (t, k, v) => {

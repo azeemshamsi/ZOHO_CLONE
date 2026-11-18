@@ -786,6 +786,40 @@ router.get(
   })
 );
 
+// Blue Dart: register (again) the pickup of a booked shipment — gives the pickup token.
+router.post(
+  "/orders/:id/pickup",
+  ah(async (req, res) => {
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
+    if (!o) throw new HttpError(404, "Order not found");
+    const sh = o.shipment || {};
+    if (!sh.awb || sh.carrier !== "bluedart") throw new HttpError(400, "Pickup can be registered here for Blue Dart shipments only");
+    if (!["ready_to_ship", "packed", "new"].includes(o.status)) throw new HttpError(400, "This shipment has already left");
+    const realAcc = await CourierAccount.findOne({ _id: sh.account, organization: req.storeOrg });
+    if (!realAcc) throw new HttpError(400, "The Blue Dart account of this shipment wasn't found");
+    const sellers = require("../utils/sellers");
+    const Seller = require("../models/Seller");
+    const seller = sh.seller ? await Seller.findOne({ _id: sh.seller, organization: req.storeOrg }) : null;
+    const acc = sellers.withPickup(realAcc, seller);
+    const bd = CARRIERS.bluedart;
+    let r;
+    try {
+      const area = sh.refs?.area || (await bd.areaFor(acc));
+      r = await bd.registerPickup(acc, { awb: sh.awb, area, weight: sh.weight, reference: o.name, seller: { name: seller?.name || "" } });
+    } catch (e) {
+      o.shipment.refs = { ...(sh.refs || {}), pickupError: e.message };
+      o.markModified("shipment");
+      await o.save();
+      throw new HttpError(400, e.message);
+    }
+    o.shipment.refs = { ...(sh.refs || {}), ...r };
+    o.markModified("shipment");
+    await o.save();
+    await audit.log(req, "pickup_registered", { target: o.name, meta: { awb: sh.awb, token: r.token } });
+    res.send(o.toObject());
+  })
+);
+
 router.post(
   "/orders/:id/cancel-shipment",
   ah(async (req, res) => {
@@ -1243,7 +1277,7 @@ router.moduleOf = function (req) {
   // Payment proof: full store_orders, or the order taker on an order they just created (checked in the route).
   if (/^\/orders\/[^/]+\/payment-proofs/.test(p)) return ["store_orders", "store_orders.new_order"];
   if (/^\/returns\/|^\/orders\/return$/.test(p)) return "store_returns";
-  if (/^\/orders\/(ship|track|labels)$|^\/orders\/[^/]+\/(label|cancel-shipment)$/.test(p)) return "store_shipping";
+  if (/^\/orders\/(ship|track|labels)$|^\/orders\/[^/]+\/(label|cancel-shipment|pickup)$/.test(p)) return "store_shipping";
   if (p === "/orders/quotes" || p === "/couriers/calculate") return ["store_orders", "store_shipping", "store_settings"];
   if (/^\/couriers\/[^/]+\/pincodes/.test(p)) return req.method === "GET" ? ["store_shipping", "store_settings"] : "store_settings";
   if (/^\/package-types/.test(p)) return ["store_shipping", "store_settings", "store_orders"];

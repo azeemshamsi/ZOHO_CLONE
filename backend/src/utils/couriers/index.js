@@ -230,13 +230,16 @@ const bluedart = {
     pickupOk(acc);
     const tok = await this.token(acc);
     const p = acc.pickup;
+    const wantPickup = this.pickupOn(acc);
+    const when = this.pickupDay();
+    const area = await this.areaFor(acc);
     const split = (t) => [t.slice(0, 30), t.slice(30, 60), t.slice(60, 90)];
     const [c1, c2, c3] = split([s.consignee.address1, s.consignee.address2, s.consignee.city].filter(Boolean).join(", "));
     const [p1, p2, p3] = split(p.address);
     const body = {
       Request: {
         Consignee: { ConsigneeName: s.consignee.name.slice(0, 30), ConsigneeAddress1: c1, ConsigneeAddress2: c2, ConsigneeAddress3: c3, ConsigneePincode: s.consignee.pincode, ConsigneeMobile: s.consignee.phone, ConsigneeEmailID: s.consignee.email, ConsigneeAttention: s.consignee.name.slice(0, 30) },
-        Shipper: { CustomerCode: acc.options.customerCode, CustomerName: (p.name || s.seller.name).slice(0, 30), CustomerAddress1: p1, CustomerAddress2: p2, CustomerAddress3: p3, CustomerPincode: p.pincode, CustomerMobile: phone10(p.phone), OriginArea: acc.options.originArea, Sender: s.seller.name.slice(0, 30), VendorCode: acc.options.vendorCode || "", IsToPayCustomer: false, CustomerGSTNumber: s.seller.gstin || "" },
+        Shipper: { CustomerCode: acc.options.customerCode, CustomerName: (p.name || s.seller.name).slice(0, 30), CustomerAddress1: p1, CustomerAddress2: p2, CustomerAddress3: p3, CustomerPincode: p.pincode, CustomerMobile: phone10(p.phone), OriginArea: area, Sender: s.seller.name.slice(0, 30), VendorCode: acc.options.vendorCode || "", IsToPayCustomer: false, CustomerGSTNumber: s.seller.gstin || "" },
         Returnadds: { ReturnAddress1: p1, ReturnAddress2: p2, ReturnAddress3: p3, ReturnPincode: p.pincode, ReturnMobile: phone10(p.phone), ReturnContact: p.name || s.seller.name },
         Services: {
           ProductCode: acc.options.productCode || "A",
@@ -248,9 +251,9 @@ const bluedart = {
           InvoiceNo: s.invoiceNumber || s.reference,
           PieceCount: "1",
           Dimensions: [{ Length: s.length, Breadth: s.breadth, Height: s.height, Count: 1 }],
-          PickupDate: `/Date(${Date.now()})/`,
+          PickupDate: `/Date(${when.ms})/`,
           PickupTime: "1600",
-          RegisterPickup: !!acc.options.autoPickup,
+          RegisterPickup: wantPickup,
           PDFOutputNotRequired: false,
           Commodity: { CommodityDetail1: s.description.slice(0, 30) },
           itemdtl: s.items.map((i) => ({ ItemName: i.name.slice(0, 50), Itemquantity: i.quantity, ItemValue: r2(i.price * i.quantity), HSCode: i.hsn, SKUNumber: i.sku })),
@@ -264,9 +267,92 @@ const bluedart = {
       const why = (r.Status || []).map((x) => x.StatusInformation).join("; ") || data["error-response"]?.[0]?.Status?.[0]?.StatusInformation || short(data);
       throw new Error(`Blue Dart didn't generate a waybill (${status}): ${why}`);
     }
-    const out = { awb: String(r.AWBNo), courierName: "Blue Dart", trackingUrl: `https://www.bluedart.com/web/guest/trackdartresultthirdparty?trackFor=0&trackNo=${r.AWBNo}`, refs: { routing: [r.DestinationArea, r.DestinationLocation].filter(Boolean).join("/"), token: r.TokenNumber } };
+    const out = { awb: String(r.AWBNo), courierName: "Blue Dart", trackingUrl: `https://www.bluedart.com/web/guest/trackdartresultthirdparty?trackFor=0&trackNo=${r.AWBNo}`, refs: { routing: [r.DestinationArea, r.DestinationLocation].filter(Boolean).join("/"), area } };
     if (Array.isArray(r.AWBPrintContent) && r.AWBPrintContent.length) out.labelPdf = Buffer.from(r.AWBPrintContent);
+    // Pickup: the waybill call registers it when it can (token comes back); otherwise it's registered on its own.
+    if (wantPickup) {
+      if (r.TokenNumber && String(r.TokenNumber) !== "0") Object.assign(out.refs, { token: String(r.TokenNumber), pickupDate: when.day });
+      else {
+        try {
+          Object.assign(out.refs, await this.registerPickup(acc, { ...s, awb: out.awb, area }));
+        } catch (e) {
+          out.refs.pickupError = e.message;
+        }
+      }
+    }
     return out;
+  },
+  // On unless switched off in the account (Blue Dart doesn't come for a parcel without a registered pickup).
+  pickupOn: (acc) => acc.options?.autoPickup !== false && acc.options?.autoPickup !== "false",
+  // Today if booked before 2 pm (India), else the next day; never a Sunday. → { ms, day: "YYYY-MM-DD" }
+  pickupDay(now = Date.now()) {
+    const ist = new Date(now + 330 * 60000);
+    if (ist.getUTCHours() >= 14) ist.setUTCDate(ist.getUTCDate() + 1);
+    if (ist.getUTCDay() === 0) ist.setUTCDate(ist.getUTCDate() + 1);
+    const day = ist.toISOString().slice(0, 10);
+    return { ms: Date.parse(`${day}T12:00:00+05:30`), day };
+  },
+  // Blue Dart area code of the pickup: the seller's own code if given, else looked up from the pickup pincode
+  // (a seller elsewhere is served by another Blue Dart branch), else the account's.
+  async areaFor(acc) {
+    if (!acc._sellerView || acc.options._sellerArea) return acc.options.originArea;
+    try {
+      const tok = await this.token(acc);
+      const { data } = await request(`${this.base(acc)}/finder/v1/GetServicesforPincode`, { method: "POST", headers: { JWTToken: tok }, json: { pinCode: acc.pickup.pincode, profile: this.profile(acc) }, timeout: 12000 });
+      const r = data.GetServicesforPincodeResult || data;
+      return (!r.IsError && r.AreaCode) || acc.options.originArea;
+    } catch {
+      return acc.options.originArea;
+    }
+  },
+  // Register the pickup of a booked waybill → { token, pickupDate }.
+  async registerPickup(acc, s) {
+    const tok = await this.token(acc);
+    const p = acc.pickup;
+    const when = this.pickupDay();
+    const split = (t) => [t.slice(0, 30), t.slice(30, 60), t.slice(60, 90)];
+    const [p1, p2, p3] = split(p.address || "");
+    const body = {
+      request: {
+        AWBNo: [s.awb],
+        AreaCode: s.area || acc.options.originArea,
+        CISDDN: false,
+        ContactPersonName: (p.name || s.seller?.name || "").slice(0, 30),
+        CustomerAddress1: p1,
+        CustomerAddress2: p2,
+        CustomerAddress3: p3,
+        CustomerCode: acc.options.customerCode,
+        CustomerName: (p.name || s.seller?.name || "").slice(0, 30),
+        CustomerPincode: p.pincode,
+        CustomerTelephoneNumber: "",
+        DoxNDox: "2",
+        EmailID: "",
+        IsForcePickup: false,
+        IsReversePickup: false,
+        MobileTelNo: phone10(p.phone),
+        NumberofPieces: "1",
+        OfficeCloseTime: "1800",
+        PackType: "",
+        ProductCode: acc.options.productCode || "A",
+        ReferenceNo: s.reference || "",
+        Remarks: "",
+        RouteCode: "",
+        ShipmentPickupDate: `/Date(${when.ms})/`,
+        ShipmentPickupTime: "1600",
+        SubProducts: ["E-Tailing"],
+        VolumeWeight: Number(s.weight) || 0.5,
+        WeightofShipment: Number(s.weight) || 0.5,
+        isToPayShipper: false,
+      },
+      profile: this.profile(acc),
+    };
+    const { status, data } = await request(`${this.base(acc)}/pickup/v1/RegisterPickup`, { method: "POST", headers: { JWTToken: tok }, json: body });
+    const r = data.RegisterPickupResult || data;
+    if (r.IsError || !r.TokenNumber) {
+      const why = (r.Status || []).map((x) => x.StatusInformation).filter(Boolean).join("; ") || data["error-response"]?.[0]?.Status?.[0]?.StatusInformation || short(data);
+      throw new Error(`Blue Dart didn't register the pickup (${status}): ${why}`);
+    }
+    return { token: String(r.TokenNumber), pickupDate: when.day, pickupError: "" };
   },
   async track(acc, sh) {
     need(acc, ["loginId"]);

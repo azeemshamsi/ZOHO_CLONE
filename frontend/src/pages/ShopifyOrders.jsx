@@ -952,6 +952,37 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
               </div>
               {sh.trackStatus && <div className="muted small">{TRACK_LABEL[sh.trackStatus] || sh.trackStatus}{sh.trackedAt ? ` · checked ${new Date(sh.trackedAt).toLocaleString("en-IN")}` : ""}</div>}
               {sh.bookedAt && <div className="muted small">Booked {new Date(sh.bookedAt).toLocaleString("en-IN")}</div>}
+              {sh.carrier === "bluedart" && (
+                <div className="small">
+                  {sh.refs?.token ? (
+                    <span className="text-paid">
+                      Pickup registered · token {sh.refs.token}
+                      {sh.refs.pickupDate ? ` · ${new Date(sh.refs.pickupDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}` : ""}
+                    </span>
+                  ) : (
+                    <span className="text-red">Pickup not registered with Blue Dart{sh.refs?.pickupError ? ` — ${sh.refs.pickupError}` : ""}</span>
+                  )}
+                  {!readOnly && o.status === "ready_to_ship" && (
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      style={{ marginLeft: 8 }}
+                      onClick={async () => {
+                        try {
+                          await api.post(`/shopify/orders/${o._id}/pickup`);
+                          toast("Pickup registered with Blue Dart");
+                        } catch (e) {
+                          toast(errMsg(e), "error");
+                        }
+                        load();
+                        onChanged();
+                      }}
+                    >
+                      {sh.refs?.token ? "Register again" : "Register pickup"}
+                    </button>
+                  )}
+                </div>
+              )}
               {o.awbScannedAt ? (
                 <div className="small text-paid">AWB scanned (handed to courier) {new Date(o.awbScannedAt).toLocaleString("en-IN")}</div>
               ) : (
