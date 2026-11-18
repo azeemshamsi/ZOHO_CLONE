@@ -804,7 +804,7 @@ router.post(
     const bd = CARRIERS.bluedart;
     let r;
     try {
-      const area = sh.refs?.area || (await bd.areaFor(acc));
+      const area = await bd.areaFor(acc);
       r = await bd.registerPickup(acc, { awb: sh.awb, area, weight: sh.weight, reference: o.name, seller: { name: seller?.name || "" } });
     } catch (e) {
       o.shipment.refs = { ...(sh.refs || {}), pickupError: e.message };

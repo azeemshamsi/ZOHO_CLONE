@@ -292,18 +292,10 @@ const bluedart = {
     const day = ist.toISOString().slice(0, 10);
     return { ms: Date.parse(`${day}T12:00:00+05:30`), day };
   },
-  // Blue Dart area code of the pickup: the seller's own code if given, else looked up from the pickup pincode
-  // (a seller elsewhere is served by another Blue Dart branch), else the account's.
+  // Blue Dart area code of the pickup. A customer code works only in its own area, so it's the seller's own
+  // area + customer code when saved on the seller (Store → Sellers → courier codes), else the account's.
   async areaFor(acc) {
-    if (!acc._sellerView || acc.options._sellerArea) return acc.options.originArea;
-    try {
-      const tok = await this.token(acc);
-      const { data } = await request(`${this.base(acc)}/finder/v1/GetServicesforPincode`, { method: "POST", headers: { JWTToken: tok }, json: { pinCode: acc.pickup.pincode, profile: this.profile(acc) }, timeout: 12000 });
-      const r = data.GetServicesforPincodeResult || data;
-      return (!r.IsError && r.AreaCode) || acc.options.originArea;
-    } catch {
-      return acc.options.originArea;
-    }
+    return acc.options.originArea;
   },
   // Register the pickup of a booked waybill → { token, pickupDate }.
   async registerPickup(acc, s) {
@@ -349,7 +341,17 @@ const bluedart = {
     const { status, data } = await request(`${this.base(acc)}/pickup/v1/RegisterPickup`, { method: "POST", headers: { JWTToken: tok }, json: body });
     const r = data.RegisterPickupResult || data;
     if (r.IsError || !r.TokenNumber) {
-      const why = (r.Status || []).map((x) => x.StatusInformation).filter(Boolean).join("; ") || data["error-response"]?.[0]?.Status?.[0]?.StatusInformation || short(data);
+      const errs = [...(r.Status || []), ...(data["error-response"] || []).flatMap((x) => x.Status || [x])];
+      const why = errs.map((x) => x.StatusInformation).filter(Boolean).join("; ") || short(data);
+      // Area code + customer code that don't belong together (e.g. a seller's pickup in another Blue Dart area).
+      if (errs.some((x) => /UnauthorizedUser/i.test(x.StatusCode || "")) || /not authori[sz]ed/i.test(why)) {
+        if (s.area && s.area !== acc.options.originArea) return this.registerPickup(acc, { ...s, area: acc.options.originArea });
+        throw new Error(
+          acc._sellerView && !acc.options._sellerArea
+            ? `Blue Dart won't take a pickup at ${p.pincode} on customer code ${acc.options.customerCode} (area ${body.request.AreaCode}): that code is for your own pickup area. Ask Blue Dart for a customer code and area code for this seller's pickup address, and save them on the seller (Store → Sellers → courier codes).`
+            : `Blue Dart says customer code ${acc.options.customerCode} isn't allowed to book pickups in area ${body.request.AreaCode}. Check the customer code and pickup area code in the Blue Dart account (Store → Settings → Couriers) with Blue Dart.`
+        );
+      }
       throw new Error(`Blue Dart didn't register the pickup (${status}): ${why}`);
     }
     return { token: String(r.TokenNumber), pickupDate: when.day, pickupError: "" };
