@@ -236,6 +236,9 @@ export function VendorCreditView() {
   return (
     <>
       <PageHeader title={cn.number} subtitle={cn.vendorName} back="/vendor-credits">
+        <Link to={`/vendor-credits/new?copy=${id}`} className="btn" title="Duplicate (Alt+2): a new voucher with these details, to change and save">
+          Duplicate
+        </Link>
         {cn.status !== "void" && (
           <Link to={`/vendor-credits/${id}/edit`} className="btn">
             <Icon name="edit" size={16} /> Edit

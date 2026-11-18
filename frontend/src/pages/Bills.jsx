@@ -186,6 +186,9 @@ export function BillView() {
   return (
     <>
       <PageHeader title={`Bill ${bill.billNumber}`} subtitle={bill.vendorName} back="/bills">
+        <Link to={`/bills/new?copy=${id}`} className="btn" title="Duplicate (Alt+2): a new voucher with these details, to change and save">
+          Duplicate
+        </Link>
         {bill.status !== "void" && (
           <Link to={`/bills/${id}/edit`} className="btn">
             <Icon name="edit" size={16} /> Edit

@@ -101,6 +101,15 @@ export function PaymentForm() {
     notes: "",
   });
   const [alloc, setAlloc] = useState({});
+  // Duplicate (?copy=<id>, Tally's Alt+2): party, amount, mode and account of that payment; applied fresh.
+  const copyOf = params.get("copy");
+  useEffect(() => {
+    if (!copyOf) return;
+    api
+      .get(`/payments/${copyOf}`)
+      .then(({ data }) => setForm((f) => ({ ...f, customer: data.customer?._id || data.customer || "", date: isoDate(data.date), amount: data.amount, mode: data.mode || f.mode, bankAccount: data.bankAccount?._id || data.bankAccount || "", notes: data.notes || "" })))
+      .catch(() => {});
+  }, [copyOf]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -170,7 +179,7 @@ export function PaymentForm() {
 
   return (
     <>
-      <PageHeader title="Record Payment" back="/payments" />
+      <PageHeader title={copyOf ? "Record Payment (copy)" : "Record Payment"} back="/payments" />
       <form className="card form" onSubmit={submit}>
         <div className="form-grid">
           <Field label="Customer Name" required>
@@ -330,6 +339,9 @@ export function PaymentView() {
         <button className="btn" onClick={() => window.print()}>
           <Icon name="print" size={16} /> Print / PDF
         </button>
+        <Link to={`/payments/new?copy=${id}`} className="btn" title="Duplicate (Alt+2)">
+          Duplicate
+        </Link>
         <DocEmail kind="payment" id={id} />
         <button className="icon-btn" title="Delete" onClick={() => setConfirm(true)}>
           <Icon name="trash" />

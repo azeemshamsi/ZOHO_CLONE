@@ -237,6 +237,9 @@ export function CreditNoteView() {
   return (
     <>
       <PageHeader title={cn.number} subtitle={cn.customerName} back="/credit-notes">
+        <Link to={`/credit-notes/new?copy=${id}`} className="btn" title="Duplicate (Alt+2): a new voucher with these details, to change and save">
+          Duplicate
+        </Link>
         {cn.status !== "void" && (
           <Link to={`/credit-notes/${id}/edit`} className="btn">
             <Icon name="edit" size={16} /> Edit

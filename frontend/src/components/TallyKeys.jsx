@@ -12,6 +12,7 @@ import { useBack, markJump } from "../lib/backNav";
  *  F4 Contra (Banking) · F5 Payment · F6 Receipt · F7 Journal · F8 Sales · F9 Purchase
  *  Ctrl+F8 Credit Note · Ctrl+F9 Debit Note
  *  Alt+P print · Alt+D delete · Alt+C create (new of the current list)
+ *  Alt+2          duplicate the voucher on screen: a new one with its details, to change and save
  *  Gateway (when not typing): D Day Book · B Balance Sheet · P Profit & Loss · T Trial Balance · L Ledgers
  *  Page Up / Page Down   previous (earlier) / next (later) voucher of the same kind, on a voucher's page
  *  F2             change the date: jumps to the date field
@@ -32,6 +33,8 @@ const PAGED = {
   "sales-orders": "/sales-orders",
   "purchase-orders": "/purchase-orders",
 };
+// Vouchers Alt+2 can duplicate (their /new page takes ?copy=<id>).
+const DUPLICABLE = ["invoices", "bills", "credit-notes", "vendor-credits", "quotes", "sales-orders", "purchase-orders", "journals", "payments", "payments-made", "expenses"];
 const listCache = new Map(); // kind → ids, newest first
 async function neighbour(kind, id, dir) {
   const load = async () => {
@@ -230,6 +233,16 @@ export default function TallyKeys({ nav = [] }) {
         return;
       }
 
+      // Alt+2: duplicate the voucher being viewed / edited.
+      if (e.altKey && !e.ctrlKey && (e.code === "Digit2" || e.code === "Numpad2") && !modal) {
+        const m = locRef.current.pathname.match(/^\/([a-z-]+)\/([0-9a-f]{24})(\/edit)?$/);
+        if (m && DUPLICABLE.includes(m[1])) {
+          e.preventDefault();
+          go(`/${m[1]}/new?copy=${m[2]}`);
+        } else toast("Alt+2 duplicates a voucher: open an invoice, bill, journal, payment, credit note… first");
+        return;
+      }
+
       // Alt+P print, Alt+D delete, Alt+C create.
       if (e.altKey && !e.ctrlKey) {
         const k = key.toLowerCase();
@@ -339,6 +352,7 @@ function Help({ onClose }) {
     ["Alt+F5", "Detailed / condensed (ledger lists)"],
     ["Enter", "Next field on a form; Ctrl+A saves"],
     ["Alt+C", "Create new (on a list)"],
+    ["Alt+2", "Duplicate the voucher on screen"],
     ["Alt+P", "Print / PDF"],
     ["Alt+D", "Delete"],
     ...Object.entries(GATEWAY).map(([k, [, l]]) => [k.toUpperCase(), `${l} (when not typing)`]),

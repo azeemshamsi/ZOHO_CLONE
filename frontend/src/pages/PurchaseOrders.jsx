@@ -70,6 +70,9 @@ export function PurchaseOrderView() {
   return (
     <>
       <PageHeader title={po.number} subtitle={po.vendorName} back="/purchase-orders">
+        <Link to={`/purchase-orders/new?copy=${id}`} className="btn" title="Duplicate (Alt+2): a new voucher with these details, to change and save">
+          Duplicate
+        </Link>
         {open && (
           <Link to={`/purchase-orders/${id}/edit`} className="btn">
             <Icon name="edit" size={16} /> Edit

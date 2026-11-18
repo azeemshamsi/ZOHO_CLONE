@@ -219,6 +219,9 @@ export function InvoiceView() {
   return (
     <>
       <PageHeader title={inv.invoiceNumber} subtitle={inv.customerName} back="/invoices">
+        <Link to={`/invoices/new?copy=${id}`} className="btn" title="Duplicate (Alt+2): a new voucher with these details, to change and save">
+          Duplicate
+        </Link>
         {inv.status !== "void" && (
           <Link to={`/invoices/${id}/edit`} className="btn">
             <Icon name="edit" size={16} /> Edit

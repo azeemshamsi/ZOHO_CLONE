@@ -288,8 +288,11 @@ export function DocForm({ kind, recurring = false }) {
       });
       return;
     }
-    if (id) {
-      api.get(`${kind.api}/${id}`).then(({ data }) => {
+    // Edit (id) or duplicate (?copy=<id>, Tally's Alt+2): the voucher's own fields; a copy gets a new number,
+    // starts as a draft and isn't linked to payments.
+    const copyOf = !id && params.get("copy");
+    if (id || copyOf) {
+      api.get(`${kind.api}/${id || copyOf}`).then(({ data }) => {
         const f = {
           customer: data[party],
           number: data[kind.numberField] || "",
@@ -315,6 +318,10 @@ export function DocForm({ kind, recurring = false }) {
           warehouse: data.warehouse || "",
           exchangeRate: data.exchangeRate || 1,
         };
+        if (copyOf) {
+          // New number (a vendor's bill number is typed in), draft, not tied to the original's PO.
+          Object.assign(f, { number: "", status: "draft", purchaseOrder: "", copiedFrom: data[kind.numberField] || "copy" });
+        }
         setForm(f);
       });
       return;
@@ -515,7 +522,7 @@ export function DocForm({ kind, recurring = false }) {
   };
 
   const isDraft = !recurring && (!id || form.status === "draft");
-  const title = recurring ? (id ? `Edit ${form.sched.name}` : `New Recurring ${kind.label}`) : id ? `Edit ${form.number}` : `New ${kind.label}`;
+  const title = recurring ? (id ? `Edit ${form.sched.name}` : `New Recurring ${kind.label}`) : id ? `Edit ${form.number}` : form.copiedFrom ? `New ${kind.label} (copy of ${form.copiedFrom})` : `New ${kind.label}`;
   const setSched = (k, v) => setForm({ ...form, sched: { ...form.sched, [k]: v } });
 
   return (

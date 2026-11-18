@@ -143,8 +143,9 @@ export function ExpenseForm({ recurring = false }) {
           sched: { name: p.name, every: p.every, unit: p.unit, startDate: isoDate(p.startDate), endDate: p.endDate ? isoDate(p.endDate) : "", never: !p.endDate },
         });
       });
-    } else if (id) {
-      api.get(`/expenses/${id}`).then(({ data }) =>
+    } else if (id || params.get("copy")) {
+      // Edit, or duplicate (?copy=<id>, Tally's Alt+2).
+      api.get(`/expenses/${id || params.get("copy")}`).then(({ data }) =>
         setForm({
           date: isoDate(data.date),
           category: data.category,
@@ -158,6 +159,7 @@ export function ExpenseForm({ recurring = false }) {
           bankAccount: data.bankAccount || "",
           reference: data.reference,
           notes: data.notes,
+          ...(id ? {} : { copiedFrom: "copy", reference: "" }),
         })
       );
     } else {
@@ -199,7 +201,8 @@ export function ExpenseForm({ recurring = false }) {
     setBusy(true);
     setError("");
     try {
-      const body = { ...form, amount: Number(form.amount), taxRate: Number(form.taxRate), vendor: form.vendor || null, branch: form.branch || null };
+      const { copiedFrom, ...fields } = form; // eslint-disable-line no-unused-vars
+      const body = { ...fields, amount: Number(form.amount), taxRate: Number(form.taxRate), vendor: form.vendor || null, branch: form.branch || null };
       if (recurring) {
         const sc = form.sched;
         const template = { ...body };
@@ -235,7 +238,12 @@ export function ExpenseForm({ recurring = false }) {
 
   return (
     <>
-      <PageHeader title={recurring ? (id ? "Edit Recurring Expense" : "New Recurring Expense") : id ? "Edit Expense" : "Record Expense"} back={recurring ? "/recurring-expenses" : "/expenses"}>
+      <PageHeader title={recurring ? (id ? "Edit Recurring Expense" : "New Recurring Expense") : id ? "Edit Expense" : form.copiedFrom ? "Record Expense (copy)" : "Record Expense"} back={recurring ? "/recurring-expenses" : "/expenses"}>
+        {id && !recurring && (
+          <Link to={`/expenses/new?copy=${id}`} className="btn" title="Duplicate (Alt+2)">
+            Duplicate
+          </Link>
+        )}
         {id && !recurring && (
           <button className="icon-btn" title="Delete" onClick={() => setConfirm(true)}>
             <Icon name="trash" />

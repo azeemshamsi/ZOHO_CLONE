@@ -84,6 +84,9 @@ export function QuoteView() {
   return (
     <>
       <PageHeader title={q.number} subtitle={q.customerName} back="/quotes">
+        <Link to={`/quotes/new?copy=${id}`} className="btn" title="Duplicate (Alt+2): a new voucher with these details, to change and save">
+          Duplicate
+        </Link>
         {!done && (
           <Link to={`/quotes/${id}/edit`} className="btn">
             <Icon name="edit" size={16} /> Edit

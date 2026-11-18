@@ -1,6 +1,6 @@
 import Attachments from "../components/Attachments";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { money, amount, date, isoDate, round2 } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, toast, Confirm } from "../components/ui";
@@ -73,6 +73,7 @@ const PARTY = { ar: ["customer", "customers"], ap: ["vendor", "vendors"] };
 export function JournalForm() {
   const { branches } = useLocations();
   const { id } = useParams();
+  const copyOf = useSearchParams()[0].get("copy"); // duplicate (Tally's Alt+2)
   const navigate = useNavigate();
   const goBack = useBack();
   const [accounts, setAccounts] = useState([]);
@@ -88,10 +89,12 @@ export function JournalForm() {
     Promise.all([api.get("/customers", { params: { status: "active" } }), api.get("/vendors", { params: { status: "active" } })])
       .then(([c, v]) => setParties({ customers: c.data, vendors: v.data }))
       .catch(() => {});
-    if (id) {
-      api.get(`/journals/${id}`).then(({ data }) =>
+    if (id || copyOf) {
+      if (copyOf) api.get("/journals/next-number").then((r) => setAuto(r.data.number));
+      api.get(`/journals/${id || copyOf}`).then(({ data }) =>
         setForm({
-          number: data.number,
+          copiedFrom: copyOf ? data.number : "",
+          number: copyOf ? "" : data.number,
           date: isoDate(data.date),
           reference: data.reference,
           branch: data.branch || "",
@@ -103,7 +106,7 @@ export function JournalForm() {
       api.get("/journals/next-number").then((r) => setAuto(r.data.number));
       setForm({ number: "", date: isoDate(), reference: "", branch: "", notes: "", lines: [blank(), blank()] });
     }
-  }, [id]);
+  }, [id, copyOf]);
 
   if (!form) return <Spinner />;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
@@ -119,8 +122,9 @@ export function JournalForm() {
     setBusy(true);
     setError("");
     try {
+      const { copiedFrom, ...fields } = form; // eslint-disable-line no-unused-vars
       const body = {
-        ...form,
+        ...fields,
         branch: form.branch || null,
         lines: form.lines
           .filter((l) => l.account && (Number(l.debit) || Number(l.credit)))
@@ -137,7 +141,7 @@ export function JournalForm() {
 
   return (
     <>
-      <PageHeader title={id ? `Edit ${form.number}` : "New Journal"} back={id ? `/journals/${id}` : "/journals"} />
+      <PageHeader title={id ? `Edit ${form.number}` : form.copiedFrom ? `New Journal (copy of ${form.copiedFrom})` : "New Journal"} back={id ? `/journals/${id}` : "/journals"} />
       <form className="card form" onSubmit={submit}>
         <div className="form-grid">
           <div className="row-3">
@@ -294,6 +298,9 @@ export function JournalView() {
       <PageHeader title={j.number} subtitle={date(j.date)} back="/journals">
         <Link to={`/journals/${id}/edit`} className="btn">
           <Icon name="edit" size={16} /> Edit
+        </Link>
+        <Link to={`/journals/new?copy=${id}`} className="btn" title="Duplicate (Alt+2): a new voucher with these details, to change and save">
+          Duplicate
         </Link>
         <button className="btn" onClick={() => window.print()}>
           <Icon name="print" size={16} /> Print / PDF

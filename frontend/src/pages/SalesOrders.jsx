@@ -80,6 +80,9 @@ export function SalesOrderView() {
   return (
     <>
       <PageHeader title={so.number} subtitle={so.customerName} back="/sales-orders">
+        <Link to={`/sales-orders/new?copy=${id}`} className="btn" title="Duplicate (Alt+2): a new voucher with these details, to change and save">
+          Duplicate
+        </Link>
         {open && (
           <Link to={`/sales-orders/${id}/edit`} className="btn">
             <Icon name="edit" size={16} /> Edit
