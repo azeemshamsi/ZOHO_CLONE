@@ -58,3 +58,14 @@ test("pickup switched off: no registration", async () => {
   const out = await bd.book(a, shipment);
   assert.ok(!out.refs.token && !calls.some((c) => c.url.includes("RegisterPickup")));
 });
+
+test("re-booking: reference and invoice no. in letters and digits", async () => {
+  calls.length = 0;
+  await bd.book(acc(), { ...shipment, reference: "201265-2", invoiceNumber: "" });
+  const sv = calls.find((c) => c.url.includes("GenerateWayBill")).json.Request.Services;
+  assert.strictEqual(sv.CreditReferenceNo, "201265R2");
+  assert.strictEqual(sv.InvoiceNo, "201265");
+  calls.length = 0;
+  await bd.book(acc(), { ...shipment, reference: "201265", invoiceNumber: "SH/26-27/381" });
+  assert.strictEqual(calls.find((c) => c.url.includes("GenerateWayBill")).json.Request.Services.InvoiceNo, "SH2627381");
+});

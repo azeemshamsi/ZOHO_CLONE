@@ -248,8 +248,10 @@ const bluedart = {
           ActualWeight: String(s.weight),
           CollectableAmount: s.cod ? s.codAmount : 0,
           DeclaredValue: s.value,
-          CreditReferenceNo: s.reference,
-          InvoiceNo: s.invoiceNumber || s.reference,
+          // Blue Dart takes letters and digits only here: "201265-2" (a re-booking) → "201265R2"; invoice
+          // "SH/26-27/381" → "SH2627381" (the order number when not invoiced yet).
+          CreditReferenceNo: String(s.reference).replace(/-(\d+)$/, "R$1").replace(/[^A-Za-z0-9]/g, "").slice(0, 20),
+          InvoiceNo: String(s.invoiceNumber || s.reference.replace(/-\d+$/, "")).replace(/[^A-Za-z0-9]/g, "").slice(0, 20),
           PieceCount: "1",
           Dimensions: [{ Length: s.length, Breadth: s.breadth, Height: s.height, Count: 1 }],
           PickupDate: `/Date(${when.ms})/`,
