@@ -45,6 +45,12 @@ function normStatus(text) {
 const HANDED_OVER = /picked up|pickup done|picked|in transit|in-transit|dispatched|received at|bagged|departed|forwarded|reached|arrived/i;
 const handedOver = (events) => (events || []).some((e) => HANDED_OVER.test(String(e.status || "")) && !/not picked|not yet picked|out for pick ?up/i.test(String(e.status || "")));
 
+// The courier account with its pickup address swapped for the customer's (reverse pickups).
+const pickupAt = (acc, c) => {
+  const pickup = { name: c.name, address: [c.address1, c.address2].filter(Boolean).join(", "), pincode: c.pincode, phone: c.phone, city: c.city, state: c.state };
+  return new Proxy(acc, { get: (t, k) => (k === "pickup" ? pickup : k === "_sellerView" ? false : Reflect.get(t, k, t)), set: (t, k, v) => ((t[k] = v), true) });
+};
+
 /* ---------------- Shiprocket ---------------- */
 const shiprocket = {
   title: "Shiprocket",
@@ -112,6 +118,51 @@ const shiprocket = {
     } catch {}
     return { awb: String(awbData.awb_code), courierName: awbData.courier_name || "Shiprocket", labelUrl, trackingUrl: `https://shiprocket.co/tracking/${awbData.awb_code}`, refs };
   },
+  // Reverse pickup (return): picked up from the customer (s.from), delivered to acc.pickup.
+  async reverse(acc, s) {
+    const c = s.from;
+    const to = acc.pickup || {};
+    const [first, ...rest] = (c.name || "Customer").split(" ");
+    const now = new Date(Date.now() + 330 * 60000);
+    const { status, data } = await this.call(acc, "/orders/create/return", {
+      method: "POST",
+      json: {
+        order_id: s.reference,
+        order_date: now.toISOString().slice(0, 10),
+        pickup_customer_name: first,
+        pickup_last_name: rest.join(" "),
+        pickup_address: c.address1,
+        pickup_address_2: c.address2 || "",
+        pickup_city: c.city,
+        pickup_state: c.stateName,
+        pickup_country: "India",
+        pickup_pincode: c.pincode,
+        pickup_email: c.email || "",
+        pickup_phone: c.phone,
+        shipping_customer_name: to.name || s.seller.name,
+        shipping_last_name: "",
+        shipping_address: to.address,
+        shipping_address_2: "",
+        shipping_city: to.city || "",
+        shipping_state: stateName(to.state),
+        shipping_country: "India",
+        shipping_pincode: to.pincode,
+        shipping_phone: phone10(to.phone),
+        order_items: s.items.map((i) => ({ name: i.name, sku: i.sku || i.name.slice(0, 40), units: i.quantity, selling_price: r2(i.price), discount: 0, hsn: i.hsn, qc_enable: false })),
+        payment_method: "PREPAID",
+        sub_total: s.value,
+        length: s.length,
+        breadth: s.breadth,
+        height: s.height,
+        weight: s.weight,
+      },
+    });
+    if (!data.shipment_id) throw new Error(`Shiprocket didn't create the return (${status}): ${data.message || short(data.errors || data)}`);
+    const a = await this.call(acc, "/courier/assign/awb", { method: "POST", json: { shipment_id: data.shipment_id, is_return: 1 } });
+    const awbData = a.data?.response?.data || {};
+    if (!awbData.awb_code) throw new Error(`Shiprocket created return ${data.order_id} but couldn't assign an AWB: ${awbData.awb_assign_error || a.data?.message || short(a.data)}`);
+    return { awb: String(awbData.awb_code), courierName: awbData.courier_name || "Shiprocket", trackingUrl: `https://shiprocket.co/tracking/${awbData.awb_code}`, refs: { orderId: data.order_id, shipmentId: data.shipment_id } };
+  },
   async track(acc, sh) {
     const { data } = await this.call(acc, `/courier/track/awb/${encodeURIComponent(sh.awb)}`);
     const td = data.tracking_data || {};
@@ -151,7 +202,7 @@ const delhivery = {
       country: "India",
       phone: s.consignee.phone,
       order: s.reference,
-      payment_mode: s.cod ? "COD" : "Prepaid",
+      payment_mode: s.reverse ? "Pickup" : s.cod ? "COD" : "Prepaid",
       return_pin: p.pincode || "",
       return_city: p.city || "",
       return_phone: phone10(p.phone),
@@ -184,6 +235,10 @@ const delhivery = {
       throw new Error(`Delhivery didn't book the shipment (${status}): ${why}`);
     }
     return { awb: String(pkg.waybill), courierName: `Delhivery ${acc.options.shippingMode || "Surface"}`, trackingUrl: `https://www.delhivery.com/track-v2/package/${pkg.waybill}`, refs: { refnum: pkg.refnum, routing: pkg.sort_code || "" } };
+  },
+  // Reverse pickup: Delhivery's "Pickup" mode — collected from the customer, back to the pickup location.
+  reverse(acc, s) {
+    return this.book(acc, { ...s, consignee: s.from, cod: false, codAmount: 0, reverse: true });
   },
   async track(acc, sh) {
     const { data } = await request(`${this.base(acc)}/api/v1/packages/json/?waybill=${encodeURIComponent(sh.awb)}`, { headers: this.h(acc) });
@@ -257,6 +312,7 @@ const bluedart = {
           PickupDate: `/Date(${when.ms})/`,
           PickupTime: "1600",
           RegisterPickup: wantPickup,
+          IsReversePickup: !!s.reverse,
           PDFOutputNotRequired: false,
           Commodity: { CommodityDetail1: s.description.slice(0, 30) },
           itemdtl: s.items.map((i) => ({ ItemName: i.name.slice(0, 50), Itemquantity: i.quantity, ItemValue: r2(i.price * i.quantity), HSCode: i.hsn, SKUNumber: i.sku })),
@@ -295,6 +351,14 @@ const bluedart = {
     const day = ist.toISOString().slice(0, 10);
     return { ms: Date.parse(`${day}T12:00:00+05:30`), day };
   },
+  // Reverse pickup: Blue Dart collects from the customer (as the shipper) and delivers to acc.pickup.
+  async reverse(acc, s) {
+    const c = s.from;
+    const accRev = pickupAt(acc, c);
+    const to = acc.pickup || {};
+    const consignee = { name: to.name || s.seller.name, address1: to.address || "", address2: "", city: to.city || "", pincode: to.pincode, phone: phone10(to.phone), email: "", state: to.state, stateName: stateName(to.state) };
+    return this.book(accRev, { ...s, consignee, seller: { ...s.seller, name: c.name || s.seller.name }, cod: false, codAmount: 0, reverse: true });
+  },
   // Blue Dart area code of the pickup. A customer code works only in its own area, so it's the seller's own
   // area + customer code when saved on the seller (Store → Sellers → courier codes), else the account's.
   async areaFor(acc) {
@@ -323,7 +387,7 @@ const bluedart = {
         DoxNDox: "2",
         EmailID: "",
         IsForcePickup: false,
-        IsReversePickup: false,
+        IsReversePickup: !!s.reverse,
         MobileTelNo: phone10(p.phone),
         NumberofPieces: "1",
         OfficeCloseTime: "1800",
@@ -422,8 +486,9 @@ const dtdc = {
       cod_amount: s.cod ? String(s.codAmount) : "",
       invoice_number: s.invoiceNumber || "",
       origin_details: this.addr(origin),
-      return_details: this.addr(origin),
+      return_details: this.addr(s.reverse ? s.consignee : origin),
       destination_details: this.addr(s.consignee),
+      ...(s.reverse ? { consignment_type: "reverse" } : {}),
     };
     const { status, data } = await request(`${this.base(acc)}/api/customer/integration/consignment/softdata`, { method: "POST", headers: { "api-key": acc.credentials.apiKey }, json: { consignments: [consignment] } });
     const r = data.data?.[0];
@@ -433,6 +498,14 @@ const dtdc = {
       throw new Error(`DTDC didn't book the shipment (${status}): ${why}`);
     }
     return { awb: String(r.reference_number), courierName: "DTDC", trackingUrl: `https://www.dtdc.in/trace.asp?strCnno=${r.reference_number}`, refs: {} };
+  },
+  // Reverse pickup: a "reverse" consignment from the customer to acc.pickup.
+  reverse(acc, s) {
+    const c = s.from;
+    const to = acc.pickup || {};
+    const accRev = pickupAt(acc, c);
+    const consignee = { name: to.name || s.seller.name, phone: phone10(to.phone), address1: to.address || "", address2: "", pincode: to.pincode, city: to.city || "", stateName: stateName(to.state) };
+    return this.book(accRev, { ...s, consignee, cod: false, codAmount: 0, reverse: true });
   },
   async track(acc, sh) {
     need(acc, ["trackingToken"]);

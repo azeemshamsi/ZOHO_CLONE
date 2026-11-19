@@ -171,7 +171,7 @@ async function findByCode(org, codes) {
   }
   const found = await ShopifyOrder.find({
     organization: org,
-    $or: [{ "shipment.awb": { $in: [...awbs] } }, { name: { $in: [...names] } }, ...(nums.size ? [{ orderNumber: { $in: [...nums] } }] : [])],
+    $or: [{ "shipment.awb": { $in: [...awbs] } }, { "reverse.awb": { $in: [...awbs] } }, { name: { $in: [...names] } }, ...(nums.size ? [{ orderNumber: { $in: [...nums] } }] : [])],
   }).limit(10);
   if (!found.length) return null;
   // Prefer an AWB match (in the order the codes were given), then an order number.

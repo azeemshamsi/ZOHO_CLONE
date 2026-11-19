@@ -222,6 +222,7 @@ async function trackAll() {
   const since = new Date(Date.now() - 45 * 86400000);
   const orders = await ShopifyOrder.find({ status: { $in: ["ready_to_ship", "shipped"] }, "shipment.awb": { $ne: "" }, "shipment.account": { $exists: true }, "shipment.bookedAt": { $gte: since } }).limit(2000);
   for (const o of orders) await trackOrder(o).catch(() => {});
+  await require("./reverse").trackAllReverse().catch(() => {});
 }
 
 module.exports = { bookOrder, trackOrder, cancelShipment, trackAll, fulfillInShopify };

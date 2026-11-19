@@ -786,6 +786,66 @@ router.get(
   })
 );
 
+// Reverse pickup: the courier collects a delivered order from the customer and brings it back.
+const RV = require("../utils/shopify/reverse");
+router.get("/reverse-reasons", (req, res) => res.send(RV.REASONS));
+router.post(
+  "/orders/:id/reverse",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        accountId: Joi.string().hex().length(24).required(),
+        reason: Joi.string().allow("").max(100).default(""),
+        note: Joi.string().allow("").max(500).default(""),
+        returnTo: Joi.string().allow("").max(40).default(""),
+        pkg: Joi.object().unknown(true).default({}),
+        manual: Joi.object({ awb: Joi.string().trim().allow("").max(40), courierName: Joi.string().allow("").max(60) }).default({}),
+      }),
+      req.body
+    );
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
+    if (!o) throw new HttpError(404, "Order not found");
+    let r;
+    try {
+      r = await RV.bookReverse(ctxOf(req), o, { ...d, by: req.user?.name || "" });
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+    await audit.log(req, "reverse_pickup_booked", { target: o.name, meta: { awb: r.reverse.awb, courier: r.reverse.courierName, reason: d.reason } });
+    require("../utils/shopify/orderIndex").forget(req.storeOrg);
+    res.send({ ...o.toObject(), warning: r.warning });
+  })
+);
+router.post(
+  "/orders/:id/reverse/cancel",
+  ah(async (req, res) => {
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
+    if (!o) throw new HttpError(404, "Order not found");
+    const awb = o.reverse?.awb;
+    try {
+      await RV.cancelReverse(o, { force: req.body?.force === true });
+    } catch (e) {
+      if (e.courierRefused) return res.status(409).send({ message: e.message, courierRefused: true });
+      throw new HttpError(400, e.message);
+    }
+    await audit.log(req, "reverse_pickup_cancelled", { target: o.name, meta: { awb } });
+    res.send(o.toObject());
+  })
+);
+router.post(
+  "/orders/:id/reverse/track",
+  ah(async (req, res) => {
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
+    if (!o) throw new HttpError(404, "Order not found");
+    try {
+      await RV.trackReverse(o);
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+    res.send(o.toObject());
+  })
+);
+
 // Blue Dart: register (again) the pickup of a booked shipment — gives the pickup token.
 router.post(
   "/orders/:id/pickup",
@@ -1278,7 +1338,7 @@ router.moduleOf = function (req) {
   if (/^\/abandoned-checkouts/.test(p)) return "store_orders.abandoned";
   // Payment proof: full store_orders, or the order taker on an order they just created (checked in the route).
   if (/^\/orders\/[^/]+\/payment-proofs/.test(p)) return ["store_orders", "store_orders.new_order"];
-  if (/^\/returns\/|^\/orders\/return$/.test(p)) return "store_returns";
+  if (/^\/returns\/|^\/orders\/return$|^\/orders\/[^/]+\/reverse|^\/reverse-reasons$/.test(p)) return "store_returns";
   if (/^\/orders\/(ship|track|labels)$|^\/orders\/[^/]+\/(label|cancel-shipment|pickup)$/.test(p)) return "store_shipping";
   if (p === "/orders/quotes" || p === "/couriers/calculate") return ["store_orders", "store_shipping", "store_settings"];
   if (/^\/couriers\/[^/]+\/pincodes/.test(p)) return req.method === "GET" ? ["store_shipping", "store_settings"] : "store_settings";

@@ -149,6 +149,8 @@ const shopifyOrderSchema = new mongoose.Schema(
     // Shipments booked and cancelled: a new booking then uses "<order>-2", "-3"… as the courier's order reference
     // (couriers refuse a reference they have seen before).
     cancelledShipments: [{ _id: false, courier: String, awb: String, at: Date }],
+    // Reverse pickup (utils/shopify/reverse.js): the courier brings a delivered order back.
+    reverse: { type: mongoose.Schema.Types.Mixed, default: undefined },
     returnFrom: String, // status before the return was opened (to go back to if it's declined)
     // COD order confirmed / cancel requested by the buyer with the WhatsApp buttons (Marketing → Automations).
     // A cancel request only flags the order for staff; it is never cancelled automatically.

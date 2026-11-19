@@ -1364,9 +1364,286 @@ function B2bBox({ o, onSaved }) {
   );
 }
 
+// Reverse pickup booked on an order: courier, AWB, tracking; refresh or cancel.
+function ReverseBox({ o, readOnly, onChanged }) {
+  const rv = o.reverse;
+  const [busy, setBusy] = useState(false);
+  const run = async (fn) => {
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+    onChanged();
+  };
+  const cancel = () =>
+    window.confirm(`Cancel reverse pickup ${rv.awb}?`) &&
+    run(async () => {
+      try {
+        await api.post(`/shopify/orders/${o._id}/reverse/cancel`);
+      } catch (e) {
+        if (!e.response?.data?.courierRefused) throw e;
+        if (
+          !window.confirm(
+            `${e.response.data.message}\n\nCancel it in OrdexaGo anyway? Cancel it on the courier's portal yourself.`,
+          )
+        )
+          return;
+        await api.post(`/shopify/orders/${o._id}/reverse/cancel`, {
+          force: true,
+        });
+      }
+      toast("Reverse pickup cancelled");
+    });
+  const st = rv.deliveredAt
+    ? "Back with " + (rv.returnToName || "you")
+    : rv.trackText ||
+      (rv.trackStatus
+        ? TRACK_LABEL[rv.trackStatus] || rv.trackStatus
+        : "Waiting for pickup");
+  return (
+    <div
+      className={`alert ${rv.deliveredAt ? "alert-success" : "alert-info"}`}
+      style={{ marginTop: 10 }}
+    >
+      <strong>Reverse pickup</strong> · {rv.courierName}{" "}
+      {rv.trackingUrl ? (
+        <a href={rv.trackingUrl} target="_blank" rel="noreferrer">
+          {rv.awb}
+        </a>
+      ) : (
+        rv.awb
+      )}{" "}
+      · {st}
+      <div className="small">
+        {rv.reason}
+        {rv.note ? ` — ${rv.note}` : ""} · back to {rv.returnToName || "you"} ·
+        booked{" "}
+        {new Date(rv.bookedAt).toLocaleString("en-IN", {
+          day: "2-digit",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        })}
+        {rv.by ? ` by ${rv.by}` : ""}
+        {rv.refs?.token ? ` · pickup token ${rv.refs.token}` : ""}
+        {rv.refs?.pickupError ? (
+          <span className="text-red">
+            {" "}
+            · pickup not registered: {rv.refs.pickupError}
+          </span>
+        ) : (
+          ""
+        )}
+      </div>
+      {rv.deliveredAt && (
+        <div className="small">
+          Check the product, then close the return (Scan Returns, or Mark Return
+          Closed): stock and credit note as usual.
+        </div>
+      )}
+      {!readOnly && !rv.deliveredAt && (
+        <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={busy}
+            onClick={() =>
+              run(() => api.post(`/shopify/orders/${o._id}/reverse/track`))
+            }
+          >
+            Refresh tracking
+          </button>
+          {!["in_transit", "out_for_delivery"].includes(rv.trackStatus) && (
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              disabled={busy}
+              onClick={cancel}
+            >
+              Cancel reverse pickup
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Book a reverse pickup: reason, courier, where it goes back to, package.
+function ReverseModal({ order, couriers, onClose, onDone }) {
+  const active = couriers.filter((c) => c.active);
+  const [reasons, setReasons] = useState([]);
+  const [f, setF] = useState({
+    reason: "",
+    note: "",
+    accountId: active[0]?._id || "",
+    returnTo: "",
+    awb: "",
+    weight: "",
+    length: "",
+    breadth: "",
+    height: "",
+  });
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api
+      .get("/shopify/reverse-reasons")
+      .then((r) => setReasons(r.data))
+      .catch(() => {});
+  }, []);
+  const acc = active.find((c) => c._id === f.accountId);
+  const manualOnly = acc && ["custom", "shadowfax"].includes(acc.carrier);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const a = order.shippingAddress || {};
+  const submit = async () => {
+    if (!f.reason) return toast("Choose the reason", "error");
+    if (manualOnly && !f.awb.trim())
+      return toast(
+        `Book it on ${acc.name}'s portal and enter the AWB`,
+        "error",
+      );
+    setBusy(true);
+    try {
+      const pkg =
+        Number(f.weight) > 0
+          ? {
+              weight: f.weight,
+              length: f.length,
+              breadth: f.breadth,
+              height: f.height,
+            }
+          : {};
+      const { data } = await api.post(`/shopify/orders/${order._id}/reverse`, {
+        accountId: f.accountId,
+        reason: f.reason,
+        note: f.note,
+        returnTo: f.returnTo,
+        pkg,
+        manual: f.awb.trim() ? { awb: f.awb.trim() } : {},
+      });
+      toast(
+        `Reverse pickup booked: ${data.reverse?.courierName || ""} ${data.reverse?.awb || ""}`.trim(),
+      );
+      if (data.warning) toast(data.warning, "error");
+      onDone();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <Modal
+      open
+      title={`Reverse pickup — ${order.name}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Close
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={busy || !f.accountId}
+            onClick={submit}
+          >
+            {busy ? "Booking…" : "Book reverse pickup"}
+          </button>
+        </>
+      }
+    >
+      <p className="small" style={{ marginTop: 0 }}>
+        Picked up from <strong>{a.name || order.customer?.name}</strong>,{" "}
+        {[a.address1, a.city, a.zip].filter(Boolean).join(", ")} ·{" "}
+        {a.phone || order.customer?.phone}. The return is also created in
+        Shopify. When it's back, close the return as usual.
+      </p>
+      <div className="form-grid">
+        <div className="row-2">
+          <Field label="Reason" required>
+            <select value={f.reason} onChange={set("reason")}>
+              <option value="">Choose…</option>
+              {reasons.map((r) => (
+                <option key={r}>{r}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Courier" required>
+            <select value={f.accountId} onChange={set("accountId")}>
+              {active.map((c) => (
+                <option key={c._id} value={c._id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+        <Field label="Note (what the customer said, photos received…)">
+          <input value={f.note} onChange={set("note")} />
+        </Field>
+        <Field
+          label="Goes back to"
+          hint="Seller's products go back to the seller unless you choose your own address"
+        >
+          <select value={f.returnTo} onChange={set("returnTo")}>
+            <option value="">Where it was shipped from (seller or you)</option>
+            <option value="own">Your own pickup address</option>
+          </select>
+        </Field>
+        <details>
+          <summary className="small">
+            Package (leave blank to use the product's package type)
+          </summary>
+          <div className="row-4" style={{ marginTop: 6 }}>
+            <Field label="Weight kg">
+              <input
+                type="number"
+                step="0.1"
+                value={f.weight}
+                onChange={set("weight")}
+              />
+            </Field>
+            <Field label="L cm">
+              <input type="number" value={f.length} onChange={set("length")} />
+            </Field>
+            <Field label="B cm">
+              <input
+                type="number"
+                value={f.breadth}
+                onChange={set("breadth")}
+              />
+            </Field>
+            <Field label="H cm">
+              <input type="number" value={f.height} onChange={set("height")} />
+            </Field>
+          </div>
+        </details>
+        <Field
+          label={
+            manualOnly
+              ? "AWB (booked on the courier's portal)"
+              : "AWB — only if you booked it yourself on the courier's portal"
+          }
+        >
+          <input
+            value={f.awb}
+            onChange={set("awb")}
+            placeholder={
+              manualOnly ? "required" : "leave blank to book through the API"
+            }
+          />
+        </Field>
+      </div>
+    </Modal>
+  );
+}
+
 function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
   const [o, setO] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [reverseOpen, setReverseOpen] = useState(false);
   const [remarks, setRemarks] = useState("");
   const [easyShip, setEasyShip] = useState(false);
   const { user } = useAuth();
@@ -1409,6 +1686,14 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
   const fkEkart = fk && fk.selfShip === false;
   return (
     <>
+      {reverseOpen && (
+        <ReverseModal
+          order={o}
+          couriers={couriers}
+          onClose={() => setReverseOpen(false)}
+          onDone={() => (setReverseOpen(false), load(), onChanged())}
+        />
+      )}
       {easyShip && (
         <EasyShipModal
           order={o}
@@ -1600,6 +1885,18 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
                     Refresh Tracking
                   </button>
                 )}
+              {["shipped", "delivered", "return_created"].includes(o.status) &&
+                (!o.channel || o.channel === "shopify") &&
+                !(o.reverse?.awb && !o.reverse.deliveredAt) && (
+                  <button
+                    className="btn"
+                    disabled={busy}
+                    title="Damaged / wrong product or an approved return: the courier collects it from the customer"
+                    onClick={() => setReverseOpen(true)}
+                  >
+                    Reverse Pickup
+                  </button>
+                )}
               {["shipped", "delivered"].includes(o.status) && (
                 <button
                   className="btn"
@@ -1644,52 +1941,55 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
                   Mark Return Closed
                 </button>
               )}
-              {sh.awb && ["ready_to_ship", "packed", "new"].includes(o.status) && !isEasyShipped && !readOnly && (
-                <button
-                  className="btn btn-ghost"
-                  disabled={busy}
-                  title="Cancels the AWB with the courier and the fulfilment in Shopify; the order goes back to Packed to book again"
-                  onClick={() =>
-                    window.confirm(
-                      `Cancel shipment ${sh.awb}?\n\nIt's cancelled with ${sh.courierName || "the courier"} and the order is marked unfulfilled in Shopify. The order goes back to Packed, ready to book again.`,
-                    ) &&
-                    act(async () => {
-                      let r;
-                      try {
-                        r = await api.post(
-                          `/shopify/orders/${o._id}/cancel-shipment`,
-                        );
-                      } catch (e) {
-                        if (!e.response?.data?.courierRefused) throw e;
-                        if (
-                          !window.confirm(
-                            `${e.response.data.message}\n\nCancel it in OrdexaGo and Shopify anyway? You'll need to cancel the AWB on the courier's portal yourself.`,
+              {sh.awb &&
+                ["ready_to_ship", "packed", "new"].includes(o.status) &&
+                !isEasyShipped &&
+                !readOnly && (
+                  <button
+                    className="btn btn-ghost"
+                    disabled={busy}
+                    title="Cancels the AWB with the courier and the fulfilment in Shopify; the order goes back to Packed to book again"
+                    onClick={() =>
+                      window.confirm(
+                        `Cancel shipment ${sh.awb}?\n\nIt's cancelled with ${sh.courierName || "the courier"} and the order is marked unfulfilled in Shopify. The order goes back to Packed, ready to book again.`,
+                      ) &&
+                      act(async () => {
+                        let r;
+                        try {
+                          r = await api.post(
+                            `/shopify/orders/${o._id}/cancel-shipment`,
+                          );
+                        } catch (e) {
+                          if (!e.response?.data?.courierRefused) throw e;
+                          if (
+                            !window.confirm(
+                              `${e.response.data.message}\n\nCancel it in OrdexaGo and Shopify anyway? You'll need to cancel the AWB on the courier's portal yourself.`,
+                            )
                           )
-                        )
-                          return null;
-                        r = await api.post(
-                          `/shopify/orders/${o._id}/cancel-shipment`,
-                          { force: true },
+                            return null;
+                          r = await api.post(
+                            `/shopify/orders/${o._id}/cancel-shipment`,
+                            { force: true },
+                          );
+                        }
+                        const note = [r.data?.courierNote, r.data?.shopifyNote]
+                          .filter(Boolean)
+                          .join(" · ");
+                        toast(
+                          note
+                            ? `Shipment cancelled · ${note}`
+                            : "Shipment cancelled",
+                          /not cancelled|check it/.test(note)
+                            ? "error"
+                            : undefined,
                         );
-                      }
-                      const note = [r.data?.courierNote, r.data?.shopifyNote]
-                        .filter(Boolean)
-                        .join(" · ");
-                      toast(
-                        note
-                          ? `Shipment cancelled · ${note}`
-                          : "Shipment cancelled",
-                        /not cancelled|check it/.test(note)
-                          ? "error"
-                          : undefined,
-                      );
-                      return r;
-                    })
-                  }
-                >
-                  Cancel Shipment
-                </button>
-              )}
+                        return r;
+                      })
+                    }
+                  >
+                    Cancel Shipment
+                  </button>
+                )}
             </div>
           )
         }
@@ -1713,6 +2013,13 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
             {new Date(o.orderDate).toLocaleString("en-IN")}
           </div>
         </div>
+        {o.reverse?.awb && (
+          <ReverseBox
+            o={o}
+            readOnly={readOnly}
+            onChanged={() => (load(), onChanged())}
+          />
+        )}
         {o.status === "returned" && (
           <div className="alert alert-info">
             Returned{o.returnedAt ? ` on ${date(o.returnedAt)}` : ""}
