@@ -6,7 +6,8 @@ client.gql = async (store, q, v) => {
   calls.push({ q, v });
   if (q.includes("draftOrderCreate")) return { draftOrderCreate: { draftOrder: { id: "gid://shopify/DraftOrder/1", name: "#D1", invoiceUrl: "https://x/pay", totalPriceSet: { shopMoney: { amount: "1099.00" } } }, userErrors: [] } };
   if (q.includes("draftOrderComplete")) return { draftOrderComplete: { draftOrder: { id: v.id, order: { id: "gid://shopify/Order/77", name: "#201" } }, userErrors: [] } };
-  if (q.includes("orderCreateManualPayment")) return { orderCreateManualPayment: { order: { id: v.id }, userErrors: [] } };
+  if (q.includes("orderUpdate")) return { orderUpdate: { order: { id: v.input.id }, userErrors: [] } };
+  if (q.includes("note customAttributes { key value } currentTotalPriceSet")) return { order: { note: "Created in OrdexaGo", customAttributes: [{ key: "x", value: "1" }], currentTotalPriceSet: { shopMoney: { amount: "1099.00" } } } };
   if (q.includes("order(id")) return { order: null };
   throw new Error("unexpected");
 };
@@ -33,15 +34,21 @@ test("payment link keeps the draft open", async () => {
   assert.strictEqual(calls.length, 1);
 });
 
-test("advance: completed as pending, advance recorded, order read by id", async () => {
+test("advance: completed as pending, advance noted on the order, order read by id", async () => {
   calls.length = 0;
-  const r = await CO.createOrder({ organization: "o" }, { customer: { name: "Kamal G", phone: "9876543210" }, address: { name: "Kamal G", address1: "x", city: "Pune", state: "27", zip: "411001" }, lines: [{ variantId: "gid://shopify/ProductVariant/9", quantity: 1, price: 1099, basePrice: 1099 }], payment: "advance", advance: 500 });
+  const r = await CO.createOrder({ organization: "o" }, { customer: { name: "Kamal G", phone: "9876543210" }, address: { name: "Kamal G", address1: "x", city: "Pune", state: "27", zip: "411001" }, lines: [{ variantId: "gid://shopify/ProductVariant/9", quantity: 1, price: 1099, basePrice: 1099 }], payment: "advance", advance: 500, proofReference: "UTR9" });
   assert.strictEqual(r.order.name, "#201");
   assert.strictEqual(r.warning, "");
-  const complete = calls.find((c) => c.q.includes("draftOrderComplete"));
-  assert.strictEqual(complete.v.pending, true);
-  const pay = calls.find((c) => c.q.includes("orderCreateManualPayment"));
-  assert.deepStrictEqual(pay.v.amount, { amount: "500", currencyCode: "INR" });
+  assert.strictEqual(calls.find((c) => c.q.includes("draftOrderComplete")).v.pending, true);
+  const up = calls.find((c) => c.q.includes("orderUpdate")).v.input;
+  assert.deepStrictEqual(up.customAttributes, [{ key: "x", value: "1" }, { key: "Advance received", value: "500" }, { key: "Advance reference", value: "UTR9" }]);
+  assert.match(up.note, /Advance ₹500 received \(ref UTR9\).*Collect ₹599 on delivery/);
   assert.ok(calls[0].v.input.tags.includes("Advance paid") && !calls[0].v.input.tags.includes("COD"));
   assert.ok(calls.some((c) => c.q.includes("order(id") && c.v.id === "gid://shopify/Order/77"));
+});
+
+test("sync reads the advance: partly paid, the rest COD", () => {
+  const { normalise } = require("../src/utils/shopify/sync");
+  const sync = require("../src/utils/shopify/sync");
+  assert.strictEqual(sync.advanceOf({ customAttributes: [{ key: "Advance received", value: "85000" }] }), 85000);
 });

@@ -5,7 +5,7 @@
  * Shopify: draftOrderCreate → then
  *   cod  : draftOrderComplete(paymentPending) — order created, payment pending (shows as COD here)
  *   paid : draftOrderComplete — order created and marked paid (money already received: UPI, bank transfer)
- *   advance: completed as pending, then the advance recorded (orderCreateManualPayment) — the rest is COD
+ *   advance: completed as pending, the advance noted on the order (setAdvance) — the rest is COD
  *   link : the draft stays open; its checkout link goes to the customer, and the order is created when they pay.
  * Needs the read_draft_orders / write_draft_orders scopes.
  */
@@ -249,20 +249,14 @@ async function createOrder(store, body, { user } = {}) {
       `Shopify made draft ${draft.name} but couldn't complete it: ${err2}. Complete it in Shopify → Drafts.`,
     );
   const order = done.draftOrderComplete.draftOrder?.order;
-  // Advance received (UPI / bank): recorded on the order; the rest is collected on delivery.
+  // Advance received (UPI / bank): noted on the order ("Advance received" in its additional details + a note
+  // line), which OrdexaGo reads as paid; the rest is COD. (Shopify records part-payments only on Plus.)
   let warning = "";
   if (order && body.payment === "advance") {
-    const adv = Math.min(Number(body.advance) || 0, total);
     try {
-      const m = await gql(
-        store,
-        `mutation($id: ID!, $amount: MoneyInput, $method: String) { orderCreateManualPayment(id: $id, amount: $amount, paymentMethodName: $method) { order { id displayFinancialStatus } userErrors { field message } } }`,
-        { id: order.id, amount: money(adv), method: "UPI / bank transfer (advance)" },
-      );
-      const e = userErr(m.orderCreateManualPayment?.userErrors);
-      if (e) throw new Error(e);
+      await setAdvance(store, order.id, { amount: Math.min(Number(body.advance) || 0, total), reference: body.proofReference || "", by: user?.name || "" });
     } catch (e) {
-      warning = `Order ${order.name} was created as unpaid, but Shopify didn't take the advance of ₹${adv} (${/access|scope|denied/i.test(e.message) ? "the app needs the write_orders scope" : e.message}). Record it in Shopify → the order → Collect payment.`;
+      warning = `Order ${order.name} was created, but the advance couldn't be noted on it in Shopify (${/access|scope|denied/i.test(e.message) ? "the app needs the write_orders scope" : e.message}). Open the order and enter the advance there.`;
     }
   }
   const saved = order ? await pull(store, order.id, user) : null;
@@ -270,6 +264,24 @@ async function createOrder(store, body, { user } = {}) {
     order: { shopifyId: order?.id, name: order?.name, total, id: saved?._id },
     warning,
   };
+}
+
+// Note an advance on a Shopify order: "Advance received" / "Advance reference" in its additional details
+// (read by sync as paid, so the COD to collect is the rest) and a line in the order note.
+async function setAdvance(store, orderId, { amount, reference = "", by = "" }) {
+  const { ADVANCE_KEY } = require("./sync");
+  const cur = (await gql(store, `query($id: ID!) { order(id: $id) { note customAttributes { key value } currentTotalPriceSet { shopMoney { amount } } } }`, { id: orderId })).order;
+  if (!cur) throw new Error("Order not found in Shopify");
+  const total = Number(cur.currentTotalPriceSet?.shopMoney?.amount) || 0;
+  const amt = Math.round(Math.min(Number(amount) || 0, total) * 100) / 100;
+  const keep = (cur.customAttributes || []).filter((a) => a.key !== ADVANCE_KEY && a.key !== "Advance reference");
+  const attrs = [...keep, ...(amt > 0 ? [{ key: ADVANCE_KEY, value: String(amt) }] : []), ...(amt > 0 && reference ? [{ key: "Advance reference", value: String(reference).slice(0, 100) }] : [])];
+  const when = new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short" });
+  const line = amt > 0 ? `Advance ₹${amt} received${reference ? ` (ref ${reference})` : ""}${by ? ` — ${by}` : ""}, ${when}. Collect ₹${Math.round((total - amt) * 100) / 100} on delivery.` : `Advance removed${by ? ` — ${by}` : ""}, ${when}.`;
+  const r = await gql(store, `mutation($input: OrderInput!) { orderUpdate(input: $input) { order { id } userErrors { field message } } }`, { input: { id: orderId, customAttributes: attrs, note: [cur.note, line].filter(Boolean).join("\n") } });
+  const e = userErr(r.orderUpdate?.userErrors);
+  if (e) throw new Error(e);
+  return { amount: amt, collect: Math.round((total - amt) * 100) / 100 };
 }
 
 // Bring one Shopify order into Store → Orders straight away (items made, list refreshed).
@@ -306,6 +318,7 @@ async function pull(store, shopifyId, user = null) {
 }
 
 module.exports = {
+  setAdvance,
   createOrder,
   searchProducts,
   searchCustomers,

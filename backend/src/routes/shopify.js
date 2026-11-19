@@ -786,6 +786,30 @@ router.get(
   })
 );
 
+// Advance received outside Shopify (UPI / bank) on a COD order: noted on the Shopify order; the COD to
+// collect becomes the rest. amount 0 removes it.
+router.post(
+  "/orders/:id/advance",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ amount: Joi.number().min(0).required(), reference: Joi.string().allow("").max(100).default("") }), req.body);
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
+    if (!o) throw new HttpError(404, "Order not found");
+    if (o.channel && o.channel !== "shopify") throw new HttpError(400, "Only for Shopify orders");
+    if (["shipped", "delivered", "rto", "returned", "cancelled"].includes(o.status) || o.shipment?.awb) throw new HttpError(400, "Set the advance before booking the shipment (cancel the shipment first)");
+    const store = await ShopifyStore.findOne({ organization: req.storeOrg });
+    if (!store?.connected) throw new HttpError(400, "Connect the Shopify store first");
+    let r;
+    try {
+      r = await CO.setAdvance(store, o.shopifyId, { amount: d.amount, reference: d.reference, by: req.user?.name || "" });
+    } catch (e) {
+      throw new HttpError(400, /access|scope|denied/i.test(e.message) ? "The Shopify app needs the write_orders scope to note the advance" : e.message);
+    }
+    const doc = await CO.pull(store, o.shopifyId);
+    await audit.log(req, "order_advance", { target: o.name, meta: { amount: r.amount, reference: d.reference } });
+    res.send({ ...(doc || o).toObject(), collect: r.collect });
+  })
+);
+
 // Reverse pickup: the courier collects a delivered order from the customer and brings it back.
 const RV = require("../utils/shopify/reverse");
 router.get("/reverse-reasons", (req, res) => res.send(RV.REASONS));

@@ -1364,6 +1364,109 @@ function B2bBox({ o, onSaved }) {
   );
 }
 
+// COD order with an advance paid by UPI / bank: note it, so the courier collects only the rest.
+function AdvanceBox({ o, onSaved }) {
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [reference, setReference] = useState("");
+  const [busy, setBusy] = useState(false);
+  const total = o.total || 0;
+  const save = async (value) => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/shopify/orders/${o._id}/advance`, {
+        amount: Number(value) || 0,
+        reference,
+      });
+      toast(
+        Number(value)
+          ? `Advance noted · collect ${money(data.collect)} on delivery`
+          : "Advance removed",
+      );
+      setOpen(false);
+      onSaved();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div className="label-sm">Advance</div>
+      {o.paymentMode === "partial" && (
+        <div className="small">
+          {money(o.prepaidAmount)} received · collect {money(o.codAmount)} on
+          delivery{" "}
+          <button
+            type="button"
+            className="link-btn"
+            disabled={busy}
+            onClick={() =>
+              window.confirm(
+                "Remove the advance? The whole amount becomes COD.",
+              ) && save(0)
+            }
+          >
+            remove
+          </button>
+        </div>
+      )}
+      {!open ? (
+        <button
+          type="button"
+          className="link-btn small"
+          onClick={() => setOpen(true)}
+        >
+          {o.paymentMode === "partial"
+            ? "Change advance"
+            : "+ Advance received (UPI / bank) — COD only for the rest"}
+        </button>
+      ) : (
+        <div
+          style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}
+        >
+          <input
+            type="number"
+            min="1"
+            step="0.01"
+            placeholder="Advance ₹"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            style={{ maxWidth: 130 }}
+            autoFocus
+          />
+          <input
+            placeholder="UTR / reference"
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            style={{ maxWidth: 170 }}
+          />
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            disabled={busy || !(Number(amount) > 0) || Number(amount) >= total}
+            onClick={() => save(amount)}
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => setOpen(false)}
+          >
+            Cancel
+          </button>
+          {Number(amount) > 0 && (
+            <span className="small muted">
+              COD to collect: {money(Math.max(0, total - Number(amount)))}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Reverse pickup booked on an order: courier, AWB, tracking; refresh or cancel.
 function ReverseBox({ o, readOnly, onChanged }) {
   const rv = o.reverse;
@@ -2163,6 +2266,13 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
             {!readOnly && (
               <B2bBox o={o} onSaved={() => (load(), onChanged())} />
             )}
+            {(!o.channel || o.channel === "shopify") &&
+              !readOnly &&
+              ["cod", "partial"].includes(o.paymentMode) &&
+              ["new", "packed"].includes(o.status) &&
+              !o.shipment?.awb && (
+                <AdvanceBox o={o} onSaved={() => (load(), onChanged())} />
+              )}
             {(!o.channel || o.channel === "shopify") && (
               <PaymentProofs
                 orderId={o._id}

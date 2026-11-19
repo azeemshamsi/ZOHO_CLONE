@@ -18,6 +18,7 @@ const ORDERS_QUERY = `query Orders($first: Int!, $after: String, $query: String)
       id name number createdAt updatedAt processedAt cancelledAt cancelReason
       displayFinancialStatus displayFulfillmentStatus returnStatus
       email phone note tags paymentGatewayNames currencyCode
+      customAttributes { key value }
       customer { displayName email phone }
       shippingAddress { ${ADDR} }
       billingAddress { ${ADDR} }
@@ -67,6 +68,13 @@ function address(a) {
 const COD_RX = /\bcod\b|cash on delivery|cash_on_delivery|cash-on-delivery/i;
 
 // Prepaid, COD, or partly paid (part prepaid online, the rest collected on delivery).
+const ADVANCE_KEY = "Advance received";
+const advanceOf = (o) => {
+  const a = (o.customAttributes || []).find((x) => x.key === ADVANCE_KEY);
+  const n = Number(String(a?.value || "").replace(/[^\d.]/g, ""));
+  return Number.isFinite(n) && n > 0 ? r2(n) : 0;
+};
+
 function payment(o, total) {
   const gws = o.paymentGatewayNames || [];
   // COD: a COD payment method, a COD tag (checkout apps such as Cashfree tag "CASHFREE - COD" and use the
@@ -77,7 +85,12 @@ function payment(o, total) {
   const online = (t) => !COD_RX.test(t.gateway || "") && !(hasCod && /^manual$/i.test(t.gateway || ""));
   const paid = ok.filter((t) => ["SALE", "CAPTURE"].includes(t.kind) && online(t)).reduce((s, t) => s + amt(t.amountSet), 0);
   const refunded = ok.filter((t) => t.kind === "REFUND" && online(t)).reduce((s, t) => s + amt(t.amountSet), 0);
-  let prepaid = r2(Math.max(0, paid - refunded));
+  // Advance taken outside Shopify (UPI / bank) and noted on the order by OrdexaGo ("Advance received" in the
+  // order's additional details): paid; the rest is collected on delivery. (Shopify records part-payments
+  // only on Shopify Plus.)
+  const advance = advanceOf(o);
+  let prepaid = r2(Math.max(0, paid - refunded) + advance);
+  if (advance > 0 && prepaid < total - 0.5 && !(o.displayFinancialStatus === "PAID")) return { paymentMode: "partial", prepaidAmount: prepaid, codAmount: r2(total - prepaid) };
   if (!hasCod) {
     // No COD gateway: prepaid. (Shopify's own "partially paid" without COD stays prepaid; the rest is outstanding.)
     return { paymentMode: o.displayFinancialStatus === "PARTIALLY_PAID" && prepaid < total ? "partial" : "prepaid", prepaidAmount: prepaid || (o.displayFinancialStatus === "PAID" ? total : 0), codAmount: o.displayFinancialStatus === "PARTIALLY_PAID" ? r2(Math.max(0, total - prepaid)) : 0 };
@@ -442,7 +455,9 @@ async function autoSyncAll() {
   }
 }
 
-module.exports = { reconcileReturns, syncStore, autoSyncAll, normalise, upsert, ORDERS_QUERY, undoCancelledFulfilment, refreshDeliveries, refreshAllDeliveries, deliveryOf, applyDelivery };
+module.exports = {
+  ADVANCE_KEY,
+  advanceOf, reconcileReturns, syncStore, autoSyncAll, normalise, upsert, ORDERS_QUERY, undoCancelledFulfilment, refreshDeliveries, refreshAllDeliveries, deliveryOf, applyDelivery };
 
 // Real-time: Shopify calls OrdexaGo when orders are created or updated (Dev Dashboard apps; signed with the client secret).
 async function registerWebhooks(store, baseUrl) {
