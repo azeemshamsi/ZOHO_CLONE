@@ -831,7 +831,10 @@ export function ReportPage() {
     asOfFrom <= asOf;
   const { branches } = useLocations();
   const [branch, setBranch] = useState("");
-  const [data, setData] = useState(null);
+  const [loaded, setData] = useState(null);
+  // Only the data of the report on screen: switching report (e.g. Vertical → Horizontal) renders before the new
+  // data comes, and the other report's data would break the new layout (blank page).
+  const data = loaded && loaded._key === key ? loaded : null;
   const [error, setError] = useState("");
   const paper = useRef(null);
   // Party Ledger: the customer / vendor, kept in the URL (?party=customer:<id>).
@@ -913,12 +916,12 @@ export function ReportPage() {
     if (key === "trial-balance" && detail) params.detail = "1";
     if (key === "party-ledger") {
       if (!party)
-        return setData({ kind: "party-ledger", party: null, rows: [] });
+        return setData({ kind: "party-ledger", party: null, rows: [], _key: key });
       params.party = party;
     }
     api
       .get(`/reports/${key}`, { params })
-      .then((r) => setData(r.data))
+      .then((r) => setData({ ...r.data, _key: key }))
       .catch((e) => setError(errMsg(e)));
   }, [
     key,
