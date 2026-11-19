@@ -1644,7 +1644,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
                   Mark Return Closed
                 </button>
               )}
-              {sh.awb && o.status === "ready_to_ship" && !isEasyShipped && (
+              {sh.awb && ["ready_to_ship", "packed", "new"].includes(o.status) && !isEasyShipped && !readOnly && (
                 <button
                   className="btn btn-ghost"
                   disabled={busy}

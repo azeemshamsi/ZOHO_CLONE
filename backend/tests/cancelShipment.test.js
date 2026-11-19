@@ -51,3 +51,23 @@ test("courier refuses: stops, unless forced", async () => {
   assert.strictEqual(o.status, "packed");
   refuse = false;
 });
+
+test("'pickup cancelled' is not a cancelled AWB", () => {
+  const { normStatus } = require("../src/utils/couriers");
+  if (!normStatus) return;
+  assert.strictEqual(normStatus("PICKUP CANCELLED"), "pending");
+  assert.strictEqual(normStatus("Shipment Cancelled"), "cancelled");
+});
+
+test("courier already cancelled it (tracking): cleared here and in Shopify, no courier call", async () => {
+  refuse = true; // a courier call would fail
+  fulfillments = [{ id: "F9", status: "SUCCESS", trackingInfo: [{ number: "509" }] }];
+  calls.length = 0;
+  const o = order();
+  o.status = "packed";
+  const r = await cancelShipment(o, { courierDone: "cancelled by Blue Dart" });
+  assert.strictEqual(r.courier, "cancelled by Blue Dart");
+  assert.deepStrictEqual(calls.filter((c) => c.q.includes("fulfillmentCancel")).map((c) => c.v.id), ["F9"]);
+  assert.deepStrictEqual(o.shipment, {});
+  refuse = false;
+});

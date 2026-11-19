@@ -30,7 +30,8 @@ const pickupOk = (acc) => {
 function normStatus(text) {
   const t = String(text || "").toLowerCase();
   if (/rto|return(ed)? to origin|returned|return delivered|rt[- ]?(in|delivered)/.test(t)) return "rto";
-  if (/cancel/.test(t)) return "cancelled";
+  // "Pickup cancelled" is the pickup, not the AWB: still booked, waiting for a pickup.
+  if (/cancel/.test(t) && !/pick ?up|pickup/.test(t)) return "cancelled";
   if (/^delivered|delivered$|\bdelivered\b/.test(t) && !/not delivered|undelivered/.test(t)) return "delivered";
   if (/out for delivery|ofd/.test(t)) return "out_for_delivery";
   // Booked but not yet with the courier — checked before the "picked / transit" words ("Not Picked", "Out for pickup").

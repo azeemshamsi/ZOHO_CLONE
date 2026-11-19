@@ -31,6 +31,16 @@ async function bookOrder(ctx, order, { accountId, pkg = {}, manual = {}, skipChe
   if (order.shipment?.awb && order.status !== "new" && order.status !== "packed") throw new Error(`Already booked: ${order.shipment.courierName} ${order.shipment.awb}`);
   const realAcc = await CourierAccount.findOne({ _id: accountId, organization: ctx.storeOrg || ctx.org, active: true });
   if (!realAcc) throw new Error("Choose a courier");
+  // An earlier AWB still on the order (the courier cancelled it): clear it and its Shopify fulfilment first,
+  // so Shopify gets the new AWB.
+  if (order.shipment?.awb) {
+    const old = order.shipment;
+    const note = order.channel && order.channel !== "shopify" ? "" : await cancelInShopify(order, old.awb);
+    order.cancelledShipments = [...(order.cancelledShipments || []), { courier: old.courierName || "", awb: old.awb, at: new Date() }];
+    order.remarks = `${order.remarks ? `${order.remarks}\n` : ""}Shipment ${`${old.courierName || ""} ${old.awb}`.trim()} replaced on ${new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}${note ? ` · ${note}` : ""}`;
+    order.shipment = {};
+    await order.save();
+  }
   // Marketplace seller's products: picked up from the seller's address (registered with the courier if it keeps pickup locations).
   const sellers = require("../sellers");
   const seller = await sellers.pickupFor(ctx.storeOrg || ctx.org, order, pickupFrom);
@@ -120,9 +130,15 @@ async function trackOrder(order) {
   sh.trackedAt = new Date();
   if (t.events?.length) sh.events = t.events.filter((e) => e.at && !isNaN(e.at)).slice(0, 50);
   const next = STATUS_FROM_TRACK[t.status];
-  if (t.status === "cancelled" && order.status === "ready_to_ship") {
-    // Courier cancelled the AWB: back to packed so it can be re-booked.
-    order.status = "packed";
+  if (t.status === "cancelled" && ["ready_to_ship", "packed", "new"].includes(order.status)) {
+    // Courier cancelled the AWB: clear it (and the Shopify fulfilment) so the order can be booked again.
+    order.markModified("shipment");
+    await order.save();
+    await cancelShipment(order, { courierDone: `cancelled by ${sh.courierName || "the courier"}${t.text ? ` (${t.text})` : ""}` });
+    return t;
+  } else if (t.status !== "cancelled" && ["packed", "new"].includes(order.status) && sh.account) {
+    // Still booked (an earlier status said cancelled, e.g. only the pickup was): back to Ready to Ship.
+    order.status = next || "ready_to_ship";
     order.statusChangedAt = new Date();
   } else if (next && next !== order.status && !["delivered", "rto", "cancelled"].includes(order.status)) {
     order.status = next;
@@ -166,15 +182,17 @@ async function cancelInShopify(order, awb) {
 }
 
 // force: the courier wouldn't cancel (already cancelled on its portal, manifested…) — cancel here and in Shopify anyway.
-async function cancelShipment(order, { force = false } = {}) {
+// courierDone: the courier has cancelled it already (seen in tracking) — only clear it here and in Shopify.
+async function cancelShipment(order, { force = false, courierDone = "" } = {}) {
   const sh = order.shipment;
   if (!sh?.awb) throw new Error("No shipment to cancel");
   if (sh.carrier === "amazon_easyship") throw new Error("Easy Ship pickups are cancelled or rescheduled in Seller Central");
   if (["shipped", "delivered", "rto"].includes(order.status)) throw new Error("The shipment has already left; raise it with the courier");
   const acc = sh.account ? await CourierAccount.findById(sh.account) : null;
   const was = `${sh.courierName || ""} ${sh.awb}`.trim();
-  let courierNote = "";
-  if (acc) {
+  if (!courierDone && sh.trackStatus === "cancelled") courierDone = `already cancelled by ${sh.courierName || "the courier"}`;
+  let courierNote = courierDone;
+  if (acc && !courierDone) {
     try {
       await CARRIERS[acc.carrier].cancel(acc, sh);
     } catch (e) {
