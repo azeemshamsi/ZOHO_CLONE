@@ -827,11 +827,13 @@ router.post(
     if (!o) throw new HttpError(404, "Order not found");
     let r;
     try {
-      r = await cancelShipment(o);
+      r = await cancelShipment(o, { force: req.body?.force === true });
     } catch (e) {
+      if (e.courierRefused) return res.status(409).send({ message: e.message, courierRefused: true });
       throw new HttpError(400, e.message);
     }
-    res.send({ ...o.toObject(), shopifyNote: r?.shopify || "" });
+    await audit.log(req, "shipment_cancelled", { target: o.name, meta: { shopify: r?.shopify || "", courier: r?.courier || "", force: req.body?.force === true } });
+    res.send({ ...o.toObject(), shopifyNote: r?.shopify || "", courierNote: r?.courier || "" });
   })
 );
 

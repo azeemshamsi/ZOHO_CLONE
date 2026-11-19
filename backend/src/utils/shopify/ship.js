@@ -147,8 +147,13 @@ async function cancelInShopify(order, awb) {
     if (!store || !order.shopifyId?.startsWith("gid://shopify/Order/")) return "";
     const d = await gql(store, `query($id: ID!) { order(id: $id) { fulfillments(first: 20) { id status trackingInfo { number } } } }`, { id: order.shopifyId });
     const live = (d.order?.fulfillments || []).filter((f) => f.status === "SUCCESS" || f.status === "OPEN" || f.status === "PENDING");
-    const mine = live.filter((f) => (f.trackingInfo || []).some((t) => String(t.number || "").trim() === String(awb).trim()));
-    if (!mine.length) return live.length ? "Shopify fulfilment has another tracking number — check it in Shopify" : "";
+    let mine = live.filter((f) => (f.trackingInfo || []).some((t) => String(t.number || "").trim() === String(awb).trim()));
+    // No fulfilment with this AWB: one made without a tracking number (or the order's only one) is this shipment's.
+    if (!mine.length) {
+      const untracked = live.filter((f) => !(f.trackingInfo || []).some((t) => String(t.number || "").trim()));
+      mine = untracked.length ? untracked : live.length === 1 ? live : [];
+    }
+    if (!mine.length) return live.length ? "Shopify fulfilment has other tracking numbers — check it in Shopify" : "";
     for (const f of mine) {
       const r = await gql(store, `mutation($id: ID!) { fulfillmentCancel(id: $id) { fulfillment { id status } userErrors { field message } } }`, { id: f.id });
       const errs = r.fulfillmentCancel?.userErrors || [];
@@ -160,25 +165,38 @@ async function cancelInShopify(order, awb) {
   }
 }
 
-async function cancelShipment(order) {
+// force: the courier wouldn't cancel (already cancelled on its portal, manifested…) — cancel here and in Shopify anyway.
+async function cancelShipment(order, { force = false } = {}) {
   const sh = order.shipment;
   if (!sh?.awb) throw new Error("No shipment to cancel");
   if (sh.carrier === "amazon_easyship") throw new Error("Easy Ship pickups are cancelled or rescheduled in Seller Central");
   if (["shipped", "delivered", "rto"].includes(order.status)) throw new Error("The shipment has already left; raise it with the courier");
   const acc = sh.account ? await CourierAccount.findById(sh.account) : null;
   const was = `${sh.courierName || ""} ${sh.awb}`.trim();
-  if (acc) await CARRIERS[acc.carrier].cancel(acc, sh);
+  let courierNote = "";
+  if (acc) {
+    try {
+      await CARRIERS[acc.carrier].cancel(acc, sh);
+    } catch (e) {
+      if (!force) {
+        const err = new Error(`${acc.name || sh.courierName} didn't cancel ${sh.awb}: ${e.message}`);
+        err.courierRefused = true;
+        throw err;
+      }
+      courierNote = `not cancelled with ${sh.courierName || "the courier"} (${e.message.slice(0, 120)}) — cancel it there`;
+    }
+  }
   // Undo the Shopify fulfilment with this AWB too, so Shopify shows the order unfulfilled and it can be booked again.
   const shopifyNote = order.channel !== "shopify" && order.channel ? "" : await cancelInShopify(order, sh.awb);
   order.cancelledShipments = [...(order.cancelledShipments || []), { courier: sh.courierName || "", awb: sh.awb, at: new Date() }];
   order.shipment = {};
   order.awbScannedAt = undefined; // the scan belonged to the cancelled AWB (it stays in awbScans)
   order.awbScannedBy = undefined;
-  order.remarks = `${order.remarks ? `${order.remarks}\n` : ""}Shipment ${was} cancelled on ${new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}${shopifyNote ? ` · ${shopifyNote}` : ""}`;
+  order.remarks = `${order.remarks ? `${order.remarks}\n` : ""}Shipment ${was} cancelled on ${new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}${courierNote ? ` · ${courierNote}` : ""}${shopifyNote ? ` · ${shopifyNote}` : ""}`;
   order.status = "packed";
   order.statusChangedAt = new Date();
   await order.save();
-  return { shopify: shopifyNote };
+  return { shopify: shopifyNote, courier: courierNote };
 }
 
 // Every couple of hours: shipments that are on the way, booked in the last 45 days.
