@@ -290,3 +290,28 @@ test("a seller's already-shipped product doesn't make the rest a mixed-pickup or
     sellers.pickupFor = was;
   }
 });
+
+test("the sync saving the order meanwhile doesn't lose the booked AWBs", async () => {
+  unfulfilled = { LA: 3, LB: 1 };
+  const ShopifyOrder = require("../src/models/ShopifyOrder");
+  const was = ShopifyOrder.updateOne;
+  let written = null;
+  ShopifyOrder.updateOne = async (f, u) => ((written = u), {});
+  try {
+    const o = order();
+    o.save = async () => {
+      const e = new Error('No matching document found for id "x" version 5');
+      e.name = "VersionError";
+      throw e;
+    };
+    o.get = (p) => o[p];
+    const r = await SH.bookOrder({ org: "o", storeOrg: "o" }, o, {
+      accountId: "a1",
+    });
+    assert.ok(r.awb);
+    assert.strictEqual(written.$set.shipment.awb, r.awb);
+    assert.strictEqual(written.$set.status, "ready_to_ship");
+  } finally {
+    ShopifyOrder.updateOne = was;
+  }
+});

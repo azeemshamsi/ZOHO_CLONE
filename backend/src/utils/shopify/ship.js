@@ -102,6 +102,40 @@ function shippableView(order, unf) {
   );
 }
 
+// Save a booking. The order may have been changed meanwhile (the 15-minute sync saved it), which makes a normal
+// save fail on its version — after the courier already made the AWBs. Then write just these fields directly, so a
+// booked shipment is never lost.
+async function saveBooking(order, paths) {
+  try {
+    await order.save();
+  } catch (e) {
+    if (!(
+      e.name === "VersionError" || /No matching document/i.test(e.message || "")
+    ))
+      throw e;
+    const plain = (v) =>
+      v && typeof v.toObject === "function"
+        ? v.toObject()
+        : Array.isArray(v)
+          ? v.map(plain)
+          : v;
+    const $set = {};
+    const $unset = {};
+    for (const p of paths) {
+      const v = order.get(p);
+      if (v === undefined) $unset[p] = 1;
+      else $set[p] = plain(v);
+    }
+    await ShopifyOrder.updateOne(
+      { _id: order._id },
+      {
+        ...(Object.keys($set).length ? { $set } : {}),
+        ...(Object.keys($unset).length ? { $unset } : {}),
+      },
+    );
+  }
+}
+
 /* ---------------- several boxes ---------------- */
 
 // Validate a box split → [{ lines: [{ lineId, title, sku, quantity, unit }], pkg }] or null for one box of everything.
@@ -367,7 +401,13 @@ async function bookBoxes({
   order.markModified("shipment");
   order.markModified("extraShipments");
   order.markModified("boxes");
-  await order.save();
+  await saveBooking(order, [
+    "shipment",
+    "extraShipments",
+    "boxes",
+    "status",
+    "statusChangedAt",
+  ]);
   return {
     awb: booked.map((x) => x.awb).join(", "),
     courierName: booked[0].courierName,
@@ -579,7 +619,13 @@ async function bookOrder(
     order.shipment = {};
     order.extraShipments = undefined;
     order.boxes = undefined;
-    await order.save();
+    await saveBooking(order, [
+      "shipment",
+      "extraShipments",
+      "boxes",
+      "cancelledShipments",
+      "remarks",
+    ]);
   }
   // Marketplace seller's products: picked up from the seller's address (registered with the courier if it keeps pickup locations).
   const sellers = require("../sellers");
@@ -752,7 +798,12 @@ async function bookOrder(
       order.shipment.error = warning;
     }
   }
-  await order.save();
+  await saveBooking(order, [
+    "shipment",
+    "status",
+    "statusChangedAt",
+    "flipkart",
+  ]);
   return {
     awb: out.awb,
     courierName: out.courierName,

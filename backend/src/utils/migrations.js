@@ -9,7 +9,10 @@ const MIGRATIONS = [
     id: "2026-11-item-shopify-sync-off",
     run: async () => {
       const Item = require("../models/Item");
-      await Item.updateMany({ shopifySync: { $ne: false }, shopifySyncByUser: { $ne: true } }, { $set: { shopifySync: false } });
+      await Item.updateMany(
+        { shopifySync: { $ne: false }, shopifySyncByUser: { $ne: true } },
+        { $set: { shopifySync: false } },
+      );
     },
   },
   {
@@ -18,10 +21,23 @@ const MIGRATIONS = [
     run: async () => {
       const ShopifyOrder = require("../models/ShopifyOrder");
       const rx = /\bcod\b|cash on delivery|cash_on_delivery|cash-on-delivery/i;
-      const list = await ShopifyOrder.find({ paymentMode: "prepaid", $or: [{ tags: { $regex: rx } }, { financialStatus: "PENDING" }] }, { total: 1, outstanding: 1, prepaidAmount: 1 }).lean();
+      const list = await ShopifyOrder.find(
+        {
+          paymentMode: "prepaid",
+          $or: [{ tags: { $regex: rx } }, { financialStatus: "PENDING" }],
+        },
+        { total: 1, outstanding: 1, prepaidAmount: 1 },
+      ).lean();
       for (const o of list) {
         if ((o.prepaidAmount || 0) >= 0.5) continue;
-        await ShopifyOrder.updateOne({ _id: o._id }, { paymentMode: "cod", codAmount: o.outstanding || o.total || 0, prepaidAmount: 0 });
+        await ShopifyOrder.updateOne(
+          { _id: o._id },
+          {
+            paymentMode: "cod",
+            codAmount: o.outstanding || o.total || 0,
+            prepaidAmount: 0,
+          },
+        );
       }
       console.log(`COD fix: ${list.length} order(s) checked`);
     },
@@ -32,9 +48,24 @@ const MIGRATIONS = [
     run: async () => {
       const Item = require("../models/Item");
       const ShopifyOrder = require("../models/ShopifyOrder");
-      const skus = await ShopifyOrder.aggregate([{ $unwind: "$lines" }, { $match: { "lines.variantId": { $nin: ["", null] }, "lines.sku": { $nin: ["", null] } } }, { $group: { _id: "$lines.variantId", sku: { $first: "$lines.sku" } } }]);
+      const skus = await ShopifyOrder.aggregate([
+        { $unwind: "$lines" },
+        {
+          $match: {
+            "lines.variantId": { $nin: ["", null] },
+            "lines.sku": { $nin: ["", null] },
+          },
+        },
+        { $group: { _id: "$lines.variantId", sku: { $first: "$lines.sku" } } },
+      ]);
       const by = new Map(skus.map((s) => [s._id, s.sku]));
-      const items = await Item.find({ shopifyVariantId: { $nin: ["", null] }, $or: [{ sku: "" }, { sku: null }, { sku: { $exists: false } }] }, { shopifyVariantId: 1 }).lean();
+      const items = await Item.find(
+        {
+          shopifyVariantId: { $nin: ["", null] },
+          $or: [{ sku: "" }, { sku: null }, { sku: { $exists: false } }],
+        },
+        { shopifyVariantId: 1 },
+      ).lean();
       let n = 0;
       for (const it of items) {
         const sku = by.get(it.shopifyVariantId);
@@ -53,7 +84,13 @@ const MIGRATIONS = [
       const { splitMergedItems } = require("./shopify/splitSkus");
       const r = await splitMergedItems();
       const db = mongoose.connection.db;
-      await db.collection("migration_reports").updateOne({ _id: "split-items-by-sku" }, { $set: { at: new Date(), ...r } }, { upsert: true });
+      await db
+        .collection("migration_reports")
+        .updateOne(
+          { _id: "split-items-by-sku" },
+          { $set: { at: new Date(), ...r } },
+          { upsert: true },
+        );
     },
   },
   {
@@ -62,10 +99,25 @@ const MIGRATIONS = [
     run: async () => {
       const ShopifyOrder = require("../models/ShopifyOrder");
       const { undoCancelledFulfilment } = require("./shopify/sync");
-      const list = await ShopifyOrder.find({ status: { $in: ["shipped", "ready_to_ship"] }, fulfillmentStatus: { $in: ["UNFULFILLED", "OPEN", "PENDING_FULFILLMENT", "ON_HOLD", "SCHEDULED"] } });
+      const list = await ShopifyOrder.find({
+        status: { $in: ["shipped", "ready_to_ship"] },
+        fulfillmentStatus: {
+          $in: [
+            "UNFULFILLED",
+            "OPEN",
+            "PENDING_FULFILLMENT",
+            "ON_HOLD",
+            "SCHEDULED",
+          ],
+        },
+      });
       let n = 0;
       // Fulfilments were stored without their status, so a stored one on an unfulfilled order was cancelled.
-      for (const o of list) if (undoCancelledFulfilment(o, (o.shopifyFulfillments || []).length > 0)) (await o.save(), n++);
+      for (const o of list)
+        if (
+          undoCancelledFulfilment(o, (o.shopifyFulfillments || []).length > 0)
+        )
+          (await o.save(), n++);
       console.log(`Cancelled Shopify fulfilments: ${n} order(s) put back`);
     },
   },
@@ -74,7 +126,9 @@ const MIGRATIONS = [
     id: "2026-11-ledger-kinds-from-use",
     run: async () => {
       const r = await require("./import/ledgerKinds").markLedgerKinds();
-      console.log(`Ledger kinds: ${r.sales} sales and ${r.purchase} purchase ledger(s) marked`);
+      console.log(
+        `Ledger kinds: ${r.sales} sales and ${r.purchase} purchase ledger(s) marked`,
+      );
     },
   },
   {
@@ -82,8 +136,16 @@ const MIGRATIONS = [
     id: "2026-11-ledger-kinds-from-use-2",
     run: async () => {
       const r = await require("./import/ledgerKinds").markLedgerKinds();
-      console.log(`Ledger kinds: ${r.sales} sales and ${r.purchase} purchase ledger(s) marked (${r.accounts} accounts, ${r.usedBySales} used by invoices)`);
-      await mongoose.connection.db.collection("migration_reports").updateOne({ _id: "ledger-kinds" }, { $set: { at: new Date(), ...r } }, { upsert: true });
+      console.log(
+        `Ledger kinds: ${r.sales} sales and ${r.purchase} purchase ledger(s) marked (${r.accounts} accounts, ${r.usedBySales} used by invoices)`,
+      );
+      await mongoose.connection.db
+        .collection("migration_reports")
+        .updateOne(
+          { _id: "ledger-kinds" },
+          { $set: { at: new Date(), ...r } },
+          { upsert: true },
+        );
     },
   },
   {
@@ -92,13 +154,36 @@ const MIGRATIONS = [
     run: async () => {
       const Account = require("../models/Account");
       const LedgerGroup = require("../models/LedgerGroup");
-      const accounts = await Account.find({ ledgerKind: "sales" }, { name: 1, organization: 1 }).lean();
+      const accounts = await Account.find(
+        { ledgerKind: "sales" },
+        { name: 1, organization: 1 },
+      ).lean();
       const byOrg = new Map();
-      for (const a of accounts) if (/^invoice\s+sale/i.test(a.name || "")) byOrg.set(String(a.organization), [...(byOrg.get(String(a.organization)) || []), String(a._id)]);
+      for (const a of accounts)
+        if (/^invoice\s+sale/i.test(a.name || ""))
+          byOrg.set(String(a.organization), [
+            ...(byOrg.get(String(a.organization)) || []),
+            String(a._id),
+          ]);
       for (const [org, members] of byOrg) {
-        if (members.length < 2 || (await LedgerGroup.exists({ organization: org, kind: "sales", name: "Invoice Sale" }))) continue;
-        await LedgerGroup.create({ organization: org, kind: "sales", name: "Invoice Sale", members });
-        console.log(`Master ledger "Invoice Sale": ${members.length} ledgers (org ${org})`);
+        if (
+          members.length < 2 ||
+          (await LedgerGroup.exists({
+            organization: org,
+            kind: "sales",
+            name: "Invoice Sale",
+          }))
+        )
+          continue;
+        await LedgerGroup.create({
+          organization: org,
+          kind: "sales",
+          name: "Invoice Sale",
+          members,
+        });
+        console.log(
+          `Master ledger "Invoice Sale": ${members.length} ledgers (org ${org})`,
+        );
       }
     },
   },
@@ -111,21 +196,49 @@ const MIGRATIONS = [
       const Organization = require("../models/Organization");
       const User = require("../models/User");
       let owner = await Subscriber.findOne({ owner: true });
-      if (!owner) owner = await Subscriber.create({ name: "OrdexaGo (owner)", owner: true, status: "active" });
+      if (!owner)
+        owner = await Subscriber.create({
+          name: "OrdexaGo (owner)",
+          owner: true,
+          status: "active",
+        });
       const orgs = await Organization.find({}, { subscriber: 1 }).lean();
       let n = 0;
       for (const o of orgs.filter((x) => !x.subscriber)) {
-        await Organization.updateOne({ _id: o._id }, { $set: { subscriber: owner._id } });
+        await Organization.updateOne(
+          { _id: o._id },
+          { $set: { subscriber: owner._id } },
+        );
         n++;
       }
-      const emails = String(process.env.SUPERADMIN_EMAILS || "azeem@zikrziba.com").toLowerCase().split(/[,\s]+/).filter(Boolean);
-      const users = await User.find({}, { email: 1, createdAt: 1, superadmin: 1 }).lean();
+      const emails = String(
+        process.env.SUPERADMIN_EMAILS || "azeem@zikrziba.com",
+      )
+        .toLowerCase()
+        .split(/[,\s]+/)
+        .filter(Boolean);
+      const users = await User.find(
+        {},
+        { email: 1, createdAt: 1, superadmin: 1 },
+      ).lean();
       let supers = users.filter((u) => emails.includes(u.email));
-      if (!supers.length) supers = users.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)).slice(0, 1);
-      for (const u of supers) await User.updateOne({ _id: u._id }, { $set: { superadmin: true } });
+      if (!supers.length)
+        supers = users
+          .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+          .slice(0, 1);
+      for (const u of supers)
+        await User.updateOne({ _id: u._id }, { $set: { superadmin: true } });
       const r = { companies: n, superadmins: supers.map((u) => u.email) };
-      await mongoose.connection.db.collection("migration_reports").updateOne({ _id: "subscribers-owner" }, { $set: { at: new Date(), ...r } }, { upsert: true });
-      console.log(`Subscribers: ${n} companies on the owner account; superadmin ${r.superadmins.join(", ")}`);
+      await mongoose.connection.db
+        .collection("migration_reports")
+        .updateOne(
+          { _id: "subscribers-owner" },
+          { $set: { at: new Date(), ...r } },
+          { upsert: true },
+        );
+      console.log(
+        `Subscribers: ${n} companies on the owner account; superadmin ${r.superadmins.join(", ")}`,
+      );
     },
   },
   {
@@ -137,11 +250,25 @@ const MIGRATIONS = [
       const db = mongoose.connection.db;
       for (const a of await Account.find({ role: "seller_penalties" })) {
         const code = String(a._id);
-        const used = (await db.collection("bills").countDocuments({ adjustmentAccount: code })) + (await db.collection("purchaseorders").countDocuments({ adjustmentAccount: code }));
+        const used =
+          (await db
+            .collection("bills")
+            .countDocuments({ adjustmentAccount: code })) +
+          (await db
+            .collection("purchaseorders")
+            .countDocuments({ adjustmentAccount: code }));
         if (!used) await a.deleteOne();
         else {
-          await db.collection("purchaseorders").updateMany({ adjustmentAccount: code, status: { $ne: "billed" } }, { $set: { adjustmentAccount: "ledger" } });
-          await Account.updateOne({ _id: a._id }, { $set: { name: "Seller Deductions", role: "" } });
+          await db
+            .collection("purchaseorders")
+            .updateMany(
+              { adjustmentAccount: code, status: { $ne: "billed" } },
+              { $set: { adjustmentAccount: "ledger" } },
+            );
+          await Account.updateOne(
+            { _id: a._id },
+            { $set: { name: "Seller Deductions", role: "" } },
+          );
         }
       }
     },
@@ -151,7 +278,12 @@ const MIGRATIONS = [
     id: "2026-11-seller-po-from",
     run: async () => {
       const Seller = require("../models/Seller");
-      for (const s of await Seller.find({}, { poFrom: 1 }).lean()) if (!s.poFrom) await Seller.updateOne({ _id: s._id }, { $set: { poFrom: new Date("2026-09-30T18:30:00Z") } });
+      for (const s of await Seller.find({}, { poFrom: 1 }).lean())
+        if (!s.poFrom)
+          await Seller.updateOne(
+            { _id: s._id },
+            { $set: { poFrom: new Date("2026-09-30T18:30:00Z") } },
+          );
     },
   },
   {
@@ -163,10 +295,125 @@ const MIGRATIONS = [
       let n = 0;
       for (const u of await User.find({}, { passwordChangedAt: 1 }).lean()) {
         if (u.passwordChangedAt) continue;
-        await User.collection.updateOne({ _id: u._id }, { $set: { passwordChangedAt: now } });
+        await User.collection.updateOne(
+          { _id: u._id },
+          { $set: { passwordChangedAt: now } },
+        );
         n++;
       }
       console.log(`Password policy: ${n} user(s) start their 365 days today`);
+    },
+  },
+  {
+    // #200962 was booked in 14 Blue Dart boxes on 21 Nov 2026 and fulfilled in Shopify, but the 15-minute sync saved
+    // the order at the same moment, so OrdexaGo couldn't save the AWBs. Put them back (from Shopify's fulfilments).
+    // Box 12 (AFR10077 part 2 of 2) made no Shopify fulfilment; its AWB is the one Blue Dart issued between box 11
+    // and box 13 — check it in Blue Dart.
+    id: "2026-11-restore-200962-boxes",
+    run: async () => {
+      const ShopifyOrder = require("../models/ShopifyOrder");
+      const CourierAccount = require("../models/CourierAccount");
+      const { codOf } = require("./couriers");
+      const o = await ShopifyOrder.findOne({ name: "#200962" }).lean();
+      if (!o || o.shipment?.awb)
+        return console.log("#200962: nothing to restore");
+      const acc = await CourierAccount.findOne({
+        organization: o.organization,
+        carrier: "bluedart",
+        active: true,
+      }).lean();
+      const plan = [
+        ["AFR8141", "68510700694"],
+        ["AFR8141", "68510700705"],
+        ["AFR8141", "68510700716"],
+        ["AFR8141", "68510700720"],
+        ["AFR8141", "68510700731"],
+        ["AFR8140", "68510700742"],
+        ["AFR8140", "68510700753"],
+        ["AFR8140", "68510700764"],
+        ["AFR8140", "68510700775"],
+        ["AFR8140", "68510700786"],
+        ["AFR10077", "68510700790", 1, 2],
+        ["AFR10077", "68510700801", 2, 2],
+        ["AFR7065", "68510700812", 0, 0, 5],
+        ["AFR4408", "68510700823"],
+      ];
+      const line = (sku) =>
+        (o.lines || []).find((l) => String(l.sku || "").toUpperCase() === sku);
+      if (plan.some(([sku]) => !line(sku)))
+        return console.log("#200962: products don't match — not restored");
+      const unit = (l) => (l.quantity ? l.total / l.quantity : 0);
+      const boxes = plan.map(([sku, awb, part, of, qty]) => {
+        const l = line(sku);
+        const q = qty || 1;
+        return { awb, l, q, part, of, value: (unit(l) * q) / (of || 1) };
+      });
+      // COD: the order's COD for our products (the seller shipped wave-10 themselves), shared by value.
+      const full = (o.lines || [])
+        .filter((l) => l.quantity > 0)
+        .reduce((t, l) => t + (l.total || 0), 0);
+      const ours = boxes.reduce((t, b) => t + b.value, 0);
+      const codTotal =
+        full > 0 ? Math.round(((codOf(o) * ours) / full) * 100) / 100 : 0;
+      let left = codTotal;
+      const n = boxes.length;
+      const now = new Date("2026-11-21T09:48:20Z");
+      const ships = boxes.map((b, i) => {
+        const c =
+          i === n - 1
+            ? Math.round(left * 100) / 100
+            : Math.round(((codTotal * b.value) / ours) * 100) / 100;
+        left -= c;
+        const title =
+          (b.l.variantTitle
+            ? `${b.l.title} - ${b.l.variantTitle}`
+            : b.l.title) + (b.of ? ` (part ${b.part} of ${b.of})` : "");
+        return {
+          ...(acc ? { account: acc._id } : {}),
+          carrier: "bluedart",
+          courierName: "Blue Dart",
+          awb: b.awb,
+          labelUrl: "",
+          trackingUrl: acc?.trackingUrl
+            ? acc.trackingUrl.replace("{awb}", b.awb)
+            : "",
+          refs: {},
+          codAmount: c,
+          bookedAt: now,
+          trackStatus: "pending",
+          events: [],
+          box: i + 1,
+          of: n,
+          shopifyFulfilled: !(b.part > 1),
+          lines: [
+            {
+              lineId: String(b.l.lineId),
+              title,
+              sku: b.l.sku || "",
+              quantity: b.q,
+              ...(b.of ? { part: b.part, of: b.of } : {}),
+            },
+          ],
+        };
+      });
+      await ShopifyOrder.updateOne(
+        { _id: o._id },
+        {
+          $set: {
+            shipment: ships[0],
+            extraShipments: ships.slice(1),
+            boxes: ships.map((x) => ({
+              box: x.box,
+              lines: x.lines,
+              booked: true,
+            })),
+            status: "ready_to_ship",
+            statusChangedAt: now,
+            remarks: `${o.remarks ? `${o.remarks}\n` : ""}14 Blue Dart boxes restored from Shopify after a save clash on 21 Nov 2026 — box 12 AWB 68510700801 (AFR10077 part 2) to be checked in Blue Dart`,
+          },
+        },
+      );
+      console.log(`#200962: ${n} boxes restored, COD ₹${codTotal}`);
     },
   },
 ];
