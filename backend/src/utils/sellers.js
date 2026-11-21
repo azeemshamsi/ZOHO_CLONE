@@ -569,4 +569,4 @@ async function pendingOrders(seller, month) {
     .sort((a, b) => new Date(a.deliveredAt) - new Date(b.deliveredAt));
 }
 
-module.exports = { releasePo, releaseDeletedPos, orderForPo, settleOnPo, pendingOrders, HOLD_DAYS, norm, brandMap, clearCache, sellerOfLine, sellersOfLines, assignAll, pickupFor, withPickup, pickupProblems, registerPickup, sellerProducts, setSellerStock, runMonthly, monthlyTick, monthRange, prevMonth, linePurchase, unitPurchase, priceNote, costsFor, lineValue, deliveredOn };
+module.exports = { locationOf, releasePo, releaseDeletedPos, orderForPo, settleOnPo, pendingOrders, HOLD_DAYS, norm, brandMap, clearCache, sellerOfLine, sellersOfLines, assignAll, pickupFor, withPickup, pickupProblems, registerPickup, sellerProducts, setSellerStock, runMonthly, monthlyTick, monthRange, prevMonth, linePurchase, unitPurchase, priceNote, costsFor, lineValue, deliveredOn };

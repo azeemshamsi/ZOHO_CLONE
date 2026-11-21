@@ -19,26 +19,57 @@ const S = require("../utils/sellers");
 
 router.use(
   ah(async (req, res, next) => {
-    if (await ShopifyStore.exists({ organization: req.org, shop: { $nin: ["", null] } })) req.storeOrg = req.org;
+    if (
+      await ShopifyStore.exists({
+        organization: req.org,
+        shop: { $nin: ["", null] },
+      })
+    )
+      req.storeOrg = req.org;
     else {
-      const shared = await ShopifyStore.findOne({ sharedWith: req.org, connected: true }, { organization: 1 }).lean();
+      const shared = await ShopifyStore.findOne(
+        { sharedWith: req.org, connected: true },
+        { organization: 1 },
+      ).lean();
       req.storeOrg = shared ? shared.organization : req.org;
     }
     next();
-  })
+  }),
 );
 
 const sellerJoi = Joi.object({
   name: Joi.string().trim().min(2).max(150).required().label("Seller name"),
-  brands: Joi.array().items(Joi.string().trim().min(1).max(150)).min(1).required().label("Brands (Shopify vendor)"),
+  brands: Joi.array()
+    .items(Joi.string().trim().min(1).max(150))
+    .min(1)
+    .required()
+    .label("Brands (Shopify vendor)"),
   rate: Joi.number().min(0).max(100).required().label("Purchase rate %"),
   poFrom: Joi.date().allow(null, "").label("Purchase orders from"),
   contactName: Joi.string().allow("").max(100),
   email: Joi.string().email().allow("").label("Email"),
   phone: Joi.string().allow("").max(20),
-  gstin: Joi.string().allow("").uppercase().pattern(/^$|^\d{2}[A-Z0-9]{13}$/).message("GSTIN must be 15 characters"),
-  pan: Joi.string().allow("").uppercase().pattern(/^$|^[A-Z]{5}[0-9]{4}[A-Z]$/).message("PAN must look like ABCDE1234F"),
-  pickup: Joi.object({ name: Joi.string().allow(""), phone: Joi.string().allow(""), address: Joi.string().allow(""), city: Joi.string().allow(""), state: Joi.string().allow(""), pincode: Joi.string().allow("").pattern(/^$|^\d{6}$/).message("Pincode must be 6 digits") }).default({}),
+  gstin: Joi.string()
+    .allow("")
+    .uppercase()
+    .pattern(/^$|^\d{2}[A-Z0-9]{13}$/)
+    .message("GSTIN must be 15 characters"),
+  pan: Joi.string()
+    .allow("")
+    .uppercase()
+    .pattern(/^$|^[A-Z]{5}[0-9]{4}[A-Z]$/)
+    .message("PAN must look like ABCDE1234F"),
+  pickup: Joi.object({
+    name: Joi.string().allow(""),
+    phone: Joi.string().allow(""),
+    address: Joi.string().allow(""),
+    city: Joi.string().allow(""),
+    state: Joi.string().allow(""),
+    pincode: Joi.string()
+      .allow("")
+      .pattern(/^$|^\d{6}$/)
+      .message("Pincode must be 6 digits"),
+  }).default({}),
   active: Joi.boolean(),
   notes: Joi.string().allow("").max(2000),
 });
@@ -46,21 +77,55 @@ const sellerJoi = Joi.object({
 // No other seller may already claim one of these brands.
 async function checkBrands(org, brands, id) {
   const taken = new Map();
-  for (const s of await Seller.find({ organization: org, ...(id ? { _id: { $ne: id } } : {}) }).lean()) for (const b of s.brands || []) taken.set(S.norm(b), s.name);
-  for (const b of brands) if (taken.has(S.norm(b))) throw new HttpError(409, `"${b}" is already ${taken.get(S.norm(b))}'s brand`);
+  for (const s of await Seller.find({
+    organization: org,
+    ...(id ? { _id: { $ne: id } } : {}),
+  }).lean())
+    for (const b of s.brands || []) taken.set(S.norm(b), s.name);
+  for (const b of brands)
+    if (taken.has(S.norm(b)))
+      throw new HttpError(
+        409,
+        `"${b}" is already ${taken.get(S.norm(b))}'s brand`,
+      );
 }
 
-const cleanBrands = (list) => [...new Map(list.map((b) => [S.norm(b), b.trim()])).values()];
+const cleanBrands = (list) => [
+  ...new Map(list.map((b) => [S.norm(b), b.trim()])).values(),
+];
 
 router.get(
   "/",
   ah(async (req, res) => {
-    const sellers = await Seller.find({ organization: req.storeOrg }).sort({ active: -1, name: 1 }).lean();
+    const sellers = await Seller.find({ organization: req.storeOrg })
+      .sort({ active: -1, name: 1 })
+      .lean();
     const ids = sellers.map((s) => s._id);
     const [orders, penalties, logins] = await Promise.all([
-      ids.length ? ShopifyOrder.find({ organization: req.storeOrg, sellers: { $in: ids } }, { sellers: 1, status: 1, sellerSettled: 1, deliveredAt: 1, statusChangedAt: 1 }).lean() : [],
-      ids.length ? SellerPenalty.find({ organization: req.storeOrg, seller: { $in: ids } }, { seller: 1, amount: 1, purchaseOrder: 1 }).lean() : [],
-      ids.length ? Membership.find({ organization: req.storeOrg, seller: { $in: ids } }, { seller: 1 }).lean() : [],
+      ids.length
+        ? ShopifyOrder.find(
+            { organization: req.storeOrg, sellers: { $in: ids } },
+            {
+              sellers: 1,
+              status: 1,
+              sellerSettled: 1,
+              deliveredAt: 1,
+              statusChangedAt: 1,
+            },
+          ).lean()
+        : [],
+      ids.length
+        ? SellerPenalty.find(
+            { organization: req.storeOrg, seller: { $in: ids } },
+            { seller: 1, amount: 1, purchaseOrder: 1 },
+          ).lean()
+        : [],
+      ids.length
+        ? Membership.find(
+            { organization: req.storeOrg, seller: { $in: ids } },
+            { seller: 1 },
+          ).lean()
+        : [],
     ]);
     res.send(
       sellers.map((s) => {
@@ -70,15 +135,24 @@ router.get(
           ...s,
           stats: {
             orders: mine.length,
-            open: mine.filter((o) => ["new", "packed", "ready_to_ship", "shipped"].includes(o.status)).length,
-            deliveredUnsettled: mine.filter((o) => o.status === "delivered" && (!s.poFrom || S.deliveredOn(o) >= s.poFrom) && !(o.sellerSettled || []).some((x) => String(x.seller) === id)).length,
-            penaltiesPending: penalties.filter((p) => String(p.seller) === id && !p.purchaseOrder).reduce((t, p) => t + p.amount, 0),
+            open: mine.filter((o) =>
+              ["new", "packed", "ready_to_ship", "shipped"].includes(o.status),
+            ).length,
+            deliveredUnsettled: mine.filter(
+              (o) =>
+                o.status === "delivered" &&
+                (!s.poFrom || S.deliveredOn(o) >= s.poFrom) &&
+                !(o.sellerSettled || []).some((x) => String(x.seller) === id),
+            ).length,
+            penaltiesPending: penalties
+              .filter((p) => String(p.seller) === id && !p.purchaseOrder)
+              .reduce((t, p) => t + p.amount, 0),
             logins: logins.filter((m) => String(m.seller) === id).length,
           },
         };
-      })
+      }),
     );
-  })
+  }),
 );
 
 // Shopify vendors seen on orders, with the seller each belongs to (for picking brands).
@@ -87,7 +161,10 @@ router.get(
   ah(async (req, res) => {
     const map = await S.brandMap(req.storeOrg);
     const count = new Map();
-    for (const o of await ShopifyOrder.find({ organization: req.storeOrg }, { "lines.vendor": 1 }).lean())
+    for (const o of await ShopifyOrder.find(
+      { organization: req.storeOrg },
+      { "lines.vendor": 1 },
+    ).lean())
       for (const l of o.lines || []) {
         if (!l.vendor) continue;
         const k = S.norm(l.vendor);
@@ -95,12 +172,24 @@ router.get(
         c.orders++;
         count.set(k, c);
       }
-    const all = await Seller.find({ organization: req.storeOrg }, { name: 1, brands: 1 }).lean();
-    const owner = new Map(all.flatMap((s) => s.brands.map((b) => [S.norm(b), s.name])));
-    for (const s of all) for (const b of s.brands) if (!count.has(S.norm(b))) count.set(S.norm(b), { brand: b, orders: 0 });
+    const all = await Seller.find(
+      { organization: req.storeOrg },
+      { name: 1, brands: 1 },
+    ).lean();
+    const owner = new Map(
+      all.flatMap((s) => s.brands.map((b) => [S.norm(b), s.name])),
+    );
+    for (const s of all)
+      for (const b of s.brands)
+        if (!count.has(S.norm(b)))
+          count.set(S.norm(b), { brand: b, orders: 0 });
     void map;
-    res.send([...count.entries()].map(([k, c]) => ({ ...c, seller: owner.get(k) || "" })).sort((a, b) => b.orders - a.orders || a.brand.localeCompare(b.brand)));
-  })
+    res.send(
+      [...count.entries()]
+        .map(([k, c]) => ({ ...c, seller: owner.get(k) || "" }))
+        .sort((a, b) => b.orders - a.orders || a.brand.localeCompare(b.brand)),
+    );
+  }),
 );
 
 router.post(
@@ -112,36 +201,80 @@ router.post(
     // Purchase orders start from the 1st of last month unless set (older deliveries were settled outside OrdexaGo).
     if (!d.poFrom) {
       const t = new Date(Date.now() + 5.5 * 3600000);
-      d.poFrom = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - 1, 1) - 5.5 * 3600000);
+      d.poFrom = new Date(
+        Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - 1, 1) - 5.5 * 3600000,
+      );
     }
     const s = await Seller.create({ ...d, organization: req.storeOrg });
     const tagged = await S.assignAll(req.storeOrg);
-    res.status(201).send({ seller: s, ordersTagged: tagged });
-  })
+    // The brand's page on Shopify (a collection of its products).
+    const shopifyBrands =
+      await require("../utils/shopify/brands").syncSellerBrands(s);
+    res.status(201).send({ seller: s, ordersTagged: tagged, shopifyBrands });
+  }),
 );
 
 router.get(
   "/:id",
   ah(async (req, res) => {
-    const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg }).lean();
+    const s = await Seller.findOne({
+      _id: req.params.id,
+      organization: req.storeOrg,
+    }).lean();
     if (!s) throw new HttpError(404, "Seller not found");
     const [ms, penalties, accounts] = await Promise.all([
-      Membership.find({ organization: req.storeOrg, seller: s._id }).populate("user", "name email status lastLogin").lean(),
-      SellerPenalty.find({ organization: req.storeOrg, seller: s._id }).sort({ date: -1 }).lean(),
-      CourierAccount.find({ organization: req.storeOrg, active: true }).sort({ isDefault: -1, name: 1 }),
+      Membership.find({ organization: req.storeOrg, seller: s._id })
+        .populate("user", "name email status lastLogin")
+        .lean(),
+      SellerPenalty.find({ organization: req.storeOrg, seller: s._id })
+        .sort({ date: -1 })
+        .lean(),
+      CourierAccount.find({ organization: req.storeOrg, active: true }).sort({
+        isDefault: -1,
+        name: 1,
+      }),
     ]);
     const PurchaseOrder = require("../models/PurchaseOrder");
     const vendorIds = Object.values(s.vendors || {});
-    const pos = vendorIds.length ? await PurchaseOrder.find({ vendor: { $in: vendorIds } }, { number: 1, date: 1, total: 1, status: 1, billNumber: 1, reference: 1, organization: 1 }).sort({ date: -1 }).lean() : [];
+    const pos = vendorIds.length
+      ? await PurchaseOrder.find(
+          { vendor: { $in: vendorIds } },
+          {
+            number: 1,
+            date: 1,
+            total: 1,
+            status: 1,
+            billNumber: 1,
+            reference: 1,
+            organization: 1,
+          },
+        )
+          .sort({ date: -1 })
+          .lean()
+      : [];
     res.send({
       ...s,
-      users: ms.filter((m) => m.user).map((m) => ({ _id: m.user._id, name: m.user.name, email: m.user.email, status: m.user.status === "invited" ? "invited" : m.status, lastLogin: m.user.lastLogin })),
+      users: ms
+        .filter((m) => m.user)
+        .map((m) => ({
+          _id: m.user._id,
+          name: m.user.name,
+          email: m.user.email,
+          status: m.user.status === "invited" ? "invited" : m.status,
+          lastLogin: m.user.lastLogin,
+        })),
       penalties,
       purchaseOrders: pos,
-      couriers: accounts.map((a) => ({ account: String(a._id), name: a.name, carrier: a.carrier, ...((s.couriers || {})[String(a._id)] || {}), needsRegister: ["shiprocket", "delhivery"].includes(a.carrier) })),
+      couriers: accounts.map((a) => ({
+        account: String(a._id),
+        name: a.name,
+        carrier: a.carrier,
+        ...((s.couriers || {})[String(a._id)] || {}),
+        needsRegister: ["shiprocket", "delhivery"].includes(a.carrier),
+      })),
       pickupMissing: S.pickupProblems(s),
     });
-  })
+  }),
 );
 
 router.put(
@@ -149,67 +282,169 @@ router.put(
   ah(async (req, res) => {
     const d = validate(sellerJoi, req.body);
     d.brands = cleanBrands(d.brands);
-    const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
+    const s = await Seller.findOne({
+      _id: req.params.id,
+      organization: req.storeOrg,
+    });
     if (!s) throw new HttpError(404, "Seller not found");
     await checkBrands(req.storeOrg, d.brands, s._id);
     if (d.poFrom === "") d.poFrom = null;
-    const addrChanged = ["address", "city", "state", "pincode", "phone"].some((k) => (d.pickup?.[k] || "") !== (s.pickup?.[k] || ""));
+    const addrChanged = ["address", "city", "state", "pincode", "phone"].some(
+      (k) => (d.pickup?.[k] || "") !== (s.pickup?.[k] || ""),
+    );
     s.set(d);
     // A new pickup address must be registered with the couriers again.
-    if (addrChanged) s.couriers = Object.fromEntries(Object.entries(s.couriers || {}).map(([k, v]) => [k, { ...v, status: v.pickupLocation ? "address_changed" : v.status }]));
+    if (addrChanged)
+      s.couriers = Object.fromEntries(
+        Object.entries(s.couriers || {}).map(([k, v]) => [
+          k,
+          { ...v, status: v.pickupLocation ? "address_changed" : v.status },
+        ]),
+      );
     s.markModified("couriers");
     await s.save();
     const tagged = await S.assignAll(req.storeOrg);
-    res.send({ seller: s, ordersTagged: tagged, addressChanged: addrChanged });
-  })
+    const shopifyBrands =
+      s.status === "approved"
+        ? await require("../utils/shopify/brands").syncSellerBrands(s)
+        : s.shopifyBrands;
+    res.send({
+      seller: s,
+      ordersTagged: tagged,
+      addressChanged: addrChanged,
+      shopifyBrands,
+    });
+  }),
 );
 
 router.delete(
   "/:id",
   ah(async (req, res) => {
-    const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
+    const s = await Seller.findOne({
+      _id: req.params.id,
+      organization: req.storeOrg,
+    });
     if (!s) throw new HttpError(404, "Seller not found");
     await S.releaseDeletedPos(req.storeOrg);
-    const withPo = (await ShopifyOrder.find({ organization: req.storeOrg, "sellerSettled.seller": s._id }, { sellerSettled: 1 }).lean()).some((o) => o.sellerSettled.some((x) => String(x.seller) === String(s._id) && x.purchaseOrder));
-    if (withPo) throw new HttpError(400, "This seller has purchase orders. Mark them inactive instead.");
-    await Membership.deleteMany({ organization: req.storeOrg, seller: s._id, role: "seller" });
-    await SellerPenalty.deleteMany({ seller: s._id, purchaseOrder: { $exists: false } });
+    const withPo = (
+      await ShopifyOrder.find(
+        { organization: req.storeOrg, "sellerSettled.seller": s._id },
+        { sellerSettled: 1 },
+      ).lean()
+    ).some((o) =>
+      o.sellerSettled.some(
+        (x) => String(x.seller) === String(s._id) && x.purchaseOrder,
+      ),
+    );
+    if (withPo)
+      throw new HttpError(
+        400,
+        "This seller has purchase orders. Mark them inactive instead.",
+      );
+    await Membership.deleteMany({
+      organization: req.storeOrg,
+      seller: s._id,
+      role: "seller",
+    });
+    await SellerPenalty.deleteMany({
+      seller: s._id,
+      purchaseOrder: { $exists: false },
+    });
     await s.deleteOne();
     await S.assignAll(req.storeOrg);
     res.send({ ok: true });
-  })
+  }),
 );
 
 /* ---------- orders due on the next PO, and orders excluded (settled outside OrdexaGo) ---------- */
 router.get(
   "/:id/pending",
   ah(async (req, res) => {
-    const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
+    const s = await Seller.findOne({
+      _id: req.params.id,
+      organization: req.storeOrg,
+    });
     if (!s) throw new HttpError(404, "Seller not found");
-    const month = /^\d{4}-\d{2}$/.test(req.query.month || "") ? req.query.month : S.prevMonth();
+    const month = /^\d{4}-\d{2}$/.test(req.query.month || "")
+      ? req.query.month
+      : S.prevMonth();
     await S.releaseDeletedPos(req.storeOrg);
     const rows = await S.pendingOrders(s, month);
-    const excluded = (await ShopifyOrder.find({ organization: req.storeOrg, "sellerSettled.seller": s._id }, { name: 1, orderDate: 1, deliveredAt: 1, sellerSettled: 1 }).lean())
-      .map((o) => ({ o, x: o.sellerSettled.find((y) => String(y.seller) === String(s._id) && y.excluded) }))
+    const excluded = (
+      await ShopifyOrder.find(
+        { organization: req.storeOrg, "sellerSettled.seller": s._id },
+        { name: 1, orderDate: 1, deliveredAt: 1, sellerSettled: 1 },
+      ).lean()
+    )
+      .map((o) => ({
+        o,
+        x: o.sellerSettled.find(
+          (y) => String(y.seller) === String(s._id) && y.excluded,
+        ),
+      }))
       .filter((r) => r.x)
-      .map(({ o, x }) => ({ _id: o._id, name: o.name, orderDate: o.orderDate, deliveredAt: o.deliveredAt, reason: x.reason, at: x.at }))
+      .map(({ o, x }) => ({
+        _id: o._id,
+        name: o.name,
+        orderDate: o.orderDate,
+        deliveredAt: o.deliveredAt,
+        reason: x.reason,
+        at: x.at,
+      }))
       .sort((a, b) => new Date(b.at) - new Date(a.at));
-    res.send({ month, label: S.monthRange(month).label, poFrom: s.poFrom, rows, excluded });
-  })
+    res.send({
+      month,
+      label: S.monthRange(month).label,
+      poFrom: s.poFrom,
+      rows,
+      excluded,
+    });
+  }),
 );
 
 // Exclude orders from this seller's purchase orders for good (already paid outside OrdexaGo): by id or order number.
 router.post(
   "/:id/exclude",
   ah(async (req, res) => {
-    const d = validate(Joi.object({ ids: Joi.array().items(Joi.string()).default([]), names: Joi.string().allow("").default(""), reason: Joi.string().trim().max(200).allow("").default("") }), req.body);
-    const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
+    const d = validate(
+      Joi.object({
+        ids: Joi.array().items(Joi.string()).default([]),
+        names: Joi.string().allow("").default(""),
+        reason: Joi.string().trim().max(200).allow("").default(""),
+      }),
+      req.body,
+    );
+    const s = await Seller.findOne({
+      _id: req.params.id,
+      organization: req.storeOrg,
+    });
     if (!s) throw new HttpError(404, "Seller not found");
-    const wanted = d.names.split(/[\s,;]+/).map((x) => x.trim().replace(/^#?/, "#")).filter((x) => x.length > 1);
+    const wanted = d.names
+      .split(/[\s,;]+/)
+      .map((x) => x.trim().replace(/^#?/, "#"))
+      .filter((x) => x.length > 1);
     const found = [];
-    if (d.ids.length) found.push(...(await ShopifyOrder.find({ _id: { $in: d.ids }, organization: req.storeOrg })));
-    if (wanted.length) found.push(...(await ShopifyOrder.find({ organization: req.storeOrg, name: { $in: [...new Set(wanted)] } })));
-    const out = { excluded: [], alreadyOnPo: [], alreadyExcluded: [], notThisSeller: [], notFound: wanted.filter((n) => !found.some((o) => o.name === n)) };
+    if (d.ids.length)
+      found.push(
+        ...(await ShopifyOrder.find({
+          _id: { $in: d.ids },
+          organization: req.storeOrg,
+        })),
+      );
+    if (wanted.length)
+      found.push(
+        ...(await ShopifyOrder.find({
+          organization: req.storeOrg,
+          name: { $in: [...new Set(wanted)] },
+        })),
+      );
+    const out = {
+      excluded: [],
+      alreadyOnPo: [],
+      alreadyExcluded: [],
+      notThisSeller: [],
+      notFound: wanted.filter((n) => !found.some((o) => o.name === n)),
+    };
     const seen = new Set();
     for (const o of found) {
       if (seen.has(String(o._id))) continue;
@@ -218,104 +453,340 @@ router.post(
         out.notThisSeller.push(o.name);
         continue;
       }
-      const x = (o.sellerSettled || []).find((y) => String(y.seller) === String(s._id));
+      const x = (o.sellerSettled || []).find(
+        (y) => String(y.seller) === String(s._id),
+      );
       if (x) {
-        (x.excluded ? out.alreadyExcluded : out.alreadyOnPo).push(x.excluded ? o.name : `${o.name} (${x.number})`);
+        (x.excluded ? out.alreadyExcluded : out.alreadyOnPo).push(
+          x.excluded ? o.name : `${o.name} (${x.number})`,
+        );
         continue;
       }
-      await ShopifyOrder.updateOne({ _id: o._id }, { $push: { sellerSettled: { seller: s._id, excluded: true, number: "Excluded", reason: d.reason || "Settled outside OrdexaGo", at: new Date(), by: req.user._id } } });
+      await ShopifyOrder.updateOne(
+        { _id: o._id },
+        {
+          $push: {
+            sellerSettled: {
+              seller: s._id,
+              excluded: true,
+              number: "Excluded",
+              reason: d.reason || "Settled outside OrdexaGo",
+              at: new Date(),
+              by: req.user._id,
+            },
+          },
+        },
+      );
       out.excluded.push(o.name);
     }
     res.send(out);
-  })
+  }),
 );
 
 // Undo an exclusion: the order can go on a purchase order again.
 router.delete(
   "/:id/exclude/:orderId",
   ah(async (req, res) => {
-    const o = await ShopifyOrder.findOne({ _id: req.params.orderId, organization: req.storeOrg });
+    const o = await ShopifyOrder.findOne({
+      _id: req.params.orderId,
+      organization: req.storeOrg,
+    });
     if (!o) throw new HttpError(404, "Order not found");
     const before = (o.sellerSettled || []).length;
-    o.sellerSettled = (o.sellerSettled || []).filter((y) => !(String(y.seller) === req.params.id && y.excluded));
-    if (o.sellerSettled.length === before) throw new HttpError(400, "This order isn't excluded");
+    o.sellerSettled = (o.sellerSettled || []).filter(
+      (y) => !(String(y.seller) === req.params.id && y.excluded),
+    );
+    if (o.sellerSettled.length === before)
+      throw new HttpError(400, "This order isn't excluded");
     await o.save();
     res.send({ ok: true });
-  })
+  }),
 );
 
 /* ---------- logins ---------- */
+// A seller login: invite email with a set-password link (14 days). → { link, emailed, existing }
+async function addLogin(req, s, name, rawEmail) {
+  const email = rawEmail.toLowerCase();
+  let user = await User.findOne({ email });
+  if (
+    user &&
+    (await Membership.exists({ user: user._id, organization: req.storeOrg }))
+  )
+    throw new HttpError(
+      409,
+      "This email already has a login in this company. Use a different email for the seller.",
+    );
+  await require("../utils/subscription").checkLimit(req.storeOrg, "users", {
+    userId: user?._id,
+  });
+  if (!user)
+    user = new User({
+      name,
+      email,
+      role: "seller",
+      organization: req.storeOrg,
+      status: "invited",
+      invitedBy: req.user._id,
+      verified: true,
+    });
+  let link = "";
+  let emailed = false;
+  if (user.status === "invited" || user.isNew) {
+    user.inviteToken = crypto.randomBytes(24).toString("hex");
+    user.inviteExpires = new Date(Date.now() + 14 * 86400000);
+    await user.save();
+    const base = req.get("origin") || env.APP_URL;
+    link = `${base.replace(/\/+$/, "")}/invite/${user._id}/${user.inviteToken}`;
+    try {
+      await require("../utils/sendEmail")(
+        email,
+        `Your ${s.name} seller login on OrdexaGo`,
+        `Hi ${name},\n\nYou can now see your orders, download shipping labels, update your stock, upload product listings and see your purchase orders on OrdexaGo.\n\nSet your password: ${link}\n\nThe link works for 14 days. After that, log in at ${base}/login.`,
+      );
+      emailed = true;
+    } catch (e) {
+      console.error(`[seller invite] ${e.message}`);
+    }
+  }
+  await Membership.create({
+    user: user._id,
+    organization: req.storeOrg,
+    role: "seller",
+    seller: s._id,
+    status: user.status === "invited" ? "invited" : "active",
+    invitedBy: req.user._id,
+  });
+  return { link, emailed, existing: !link };
+}
+
 router.post(
   "/:id/users",
   ah(async (req, res) => {
-    const d = validate(Joi.object({ name: Joi.string().trim().min(2).max(100).required().label("Name"), email: Joi.string().email().required().label("Email") }), req.body);
-    const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
+    const d = validate(
+      Joi.object({
+        name: Joi.string().trim().min(2).max(100).required().label("Name"),
+        email: Joi.string().email().required().label("Email"),
+      }),
+      req.body,
+    );
+    const s = await Seller.findOne({
+      _id: req.params.id,
+      organization: req.storeOrg,
+    });
     if (!s) throw new HttpError(404, "Seller not found");
-    const email = d.email.toLowerCase();
-    let user = await User.findOne({ email });
-    if (user && (await Membership.exists({ user: user._id, organization: req.storeOrg }))) throw new HttpError(409, "This email already has a login in this company. Use a different email for the seller.");
-    await require("../utils/subscription").checkLimit(req.storeOrg, "users", { userId: user?._id });
-    if (!user) user = new User({ name: d.name, email, role: "seller", organization: req.storeOrg, status: "invited", invitedBy: req.user._id, verified: true });
-    let link = "";
-    let emailed = false;
-    if (user.status === "invited" || user.isNew) {
-      user.inviteToken = crypto.randomBytes(24).toString("hex");
-      user.inviteExpires = new Date(Date.now() + 14 * 86400000);
-      await user.save();
-      const base = req.get("origin") || env.APP_URL;
-      link = `${base.replace(/\/+$/, "")}/invite/${user._id}/${user.inviteToken}`;
+    res.status(201).send(await addLogin(req, s, d.name, d.email));
+  }),
+);
+
+/* ---------- website registrations: approve / reject ---------- */
+router.post(
+  "/:id/approve",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        name: Joi.string()
+          .trim()
+          .min(2)
+          .max(150)
+          .required()
+          .label("Seller name"),
+        brands: Joi.array()
+          .items(Joi.string().trim().min(1).max(150))
+          .min(1)
+          .required()
+          .label("Brands (Shopify vendor)"),
+        rate: Joi.number().min(0).max(100).required().label("Purchase rate %"),
+        createLogin: Joi.boolean().default(true),
+        notes: Joi.string().allow("").max(2000),
+      }),
+      req.body,
+    );
+    const s = await Seller.findOne({
+      _id: req.params.id,
+      organization: req.storeOrg,
+    });
+    if (!s) throw new HttpError(404, "Seller not found");
+    if (s.status === "approved") throw new HttpError(400, "Already approved");
+    d.brands = cleanBrands(d.brands);
+    await checkBrands(req.storeOrg, d.brands, s._id);
+    const t = new Date(Date.now() + 5.5 * 3600000);
+    s.set({
+      name: d.name,
+      brands: d.brands,
+      rate: d.rate,
+      status: "approved",
+      active: true,
+      poFrom: new Date(
+        Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), 1) - 5.5 * 3600000,
+      ),
+      ...(d.notes !== undefined ? { notes: d.notes } : {}),
+    });
+    s.application = {
+      ...(s.application || {}),
+      decidedAt: new Date(),
+      decidedBy: req.user._id,
+      decidedByName: req.user.name || "",
+      reason: "",
+    };
+    s.markModified("application");
+    await s.save();
+    await S.assignAll(req.storeOrg);
+    const shopifyBrands =
+      await require("../utils/shopify/brands").syncSellerBrands(s);
+    let login = null;
+    if (d.createLogin && s.email) {
       try {
-        await require("../utils/sendEmail")(email, `Your ${s.name} seller login on OrdexaGo`, `Hi ${d.name},\n\nYou can now see your orders, download shipping labels, update your stock and see your purchase orders on OrdexaGo.\n\nSet your password: ${link}\n\nThe link works for 14 days. After that, log in at ${base}/login.`);
-        emailed = true;
+        login = await addLogin(req, s, s.contactName || s.name, s.email);
       } catch (e) {
-        console.error(`[seller invite] ${e.message}`);
+        login = { error: e.message };
       }
     }
-    await Membership.create({ user: user._id, organization: req.storeOrg, role: "seller", seller: s._id, status: user.status === "invited" ? "invited" : "active", invitedBy: req.user._id });
-    res.status(201).send({ link, emailed, existing: !link });
-  })
+    if (s.email && !login?.emailed)
+      await require("../utils/sendEmail")(
+        s.email,
+        `Welcome to WoodenTwist — ${s.name} is approved`,
+        `Hi ${s.contactName || s.name},\n\nYour seller registration for ${s.name} is approved. We'll be in touch about the next steps.`,
+      ).catch(() => {});
+    res.send({ seller: s, shopifyBrands, login });
+  }),
+);
+
+router.post(
+  "/:id/reject",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        reason: Joi.string().trim().max(500).allow("").default(""),
+        notify: Joi.boolean().default(true),
+      }),
+      req.body,
+    );
+    const s = await Seller.findOne({
+      _id: req.params.id,
+      organization: req.storeOrg,
+    });
+    if (!s) throw new HttpError(404, "Seller not found");
+    if (s.status !== "pending")
+      throw new HttpError(400, "Only a pending registration can be rejected");
+    s.status = "rejected";
+    s.active = false;
+    s.application = {
+      ...(s.application || {}),
+      decidedAt: new Date(),
+      decidedBy: req.user._id,
+      decidedByName: req.user.name || "",
+      reason: d.reason,
+    };
+    s.markModified("application");
+    await s.save();
+    if (d.notify && s.email)
+      await require("../utils/sendEmail")(
+        s.email,
+        `Your seller registration on WoodenTwist`,
+        `Hi ${s.contactName || s.name},\n\nThank you for registering ${s.name} to sell on WoodenTwist. We're unable to approve it at this time.${d.reason ? `\n\nReason: ${d.reason}` : ""}\n\nYou're welcome to apply again later.`,
+      ).catch(() => {});
+    res.send({ seller: s });
+  }),
+);
+
+// Create the seller's brands on Shopify again (after adding the scope, or when one failed).
+router.post(
+  "/:id/shopify-brands",
+  ah(async (req, res) => {
+    const s = await Seller.findOne({
+      _id: req.params.id,
+      organization: req.storeOrg,
+    });
+    if (!s) throw new HttpError(404, "Seller not found");
+    if (s.status !== "approved")
+      throw new HttpError(400, "Approve the seller first");
+    res.send(await require("../utils/shopify/brands").syncSellerBrands(s));
+  }),
 );
 
 router.delete(
   "/:id/users/:userId",
   ah(async (req, res) => {
-    const m = await Membership.findOne({ organization: req.storeOrg, seller: req.params.id, user: req.params.userId, role: "seller" });
+    const m = await Membership.findOne({
+      organization: req.storeOrg,
+      seller: req.params.id,
+      user: req.params.userId,
+      role: "seller",
+    });
     if (!m) throw new HttpError(404, "Login not found");
     await m.deleteOne();
     // A login made only for this seller goes too.
-    if (!(await Membership.exists({ user: req.params.userId }))) await User.deleteOne({ _id: req.params.userId });
+    if (!(await Membership.exists({ user: req.params.userId })))
+      await User.deleteOne({ _id: req.params.userId });
     res.send({ ok: true });
-  })
+  }),
 );
 
 /* ---------- courier pickup locations ---------- */
 router.post(
   "/:id/couriers/:account/register",
   ah(async (req, res) => {
-    const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
-    const acc = s && (await CourierAccount.findOne({ _id: req.params.account, organization: req.storeOrg }));
+    const s = await Seller.findOne({
+      _id: req.params.id,
+      organization: req.storeOrg,
+    });
+    const acc =
+      s &&
+      (await CourierAccount.findOne({
+        _id: req.params.account,
+        organization: req.storeOrg,
+      }));
     if (!acc) throw new HttpError(404, "Seller or courier not found");
     try {
       res.send(await S.registerPickup(s, acc));
     } catch (e) {
-      const couriers = { ...(s.couriers || {}), [String(acc._id)]: { ...((s.couriers || {})[String(acc._id)] || {}), error: e.message, at: new Date() } };
+      const couriers = {
+        ...(s.couriers || {}),
+        [String(acc._id)]: {
+          ...((s.couriers || {})[String(acc._id)] || {}),
+          error: e.message,
+          at: new Date(),
+        },
+      };
       await Seller.updateOne({ _id: s._id }, { $set: { couriers } });
       throw new HttpError(400, e.message);
     }
-  })
+  }),
 );
 
 router.put(
   "/:id/couriers/:account",
   ah(async (req, res) => {
-    const d = validate(Joi.object({ pickupLocation: Joi.string().allow("").max(100), originArea: Joi.string().allow("").max(10), customerCode: Joi.string().allow("").max(20), vendorCode: Joi.string().allow("").max(20) }), req.body);
-    const s = await Seller.findOne({ _id: req.params.id, organization: req.storeOrg });
+    const d = validate(
+      Joi.object({
+        pickupLocation: Joi.string().allow("").max(100),
+        originArea: Joi.string().allow("").max(10),
+        customerCode: Joi.string().allow("").max(20),
+        vendorCode: Joi.string().allow("").max(20),
+      }),
+      req.body,
+    );
+    const s = await Seller.findOne({
+      _id: req.params.id,
+      organization: req.storeOrg,
+    });
     if (!s) throw new HttpError(404, "Seller not found");
     const k = req.params.account;
-    const couriers = { ...(s.couriers || {}), [k]: { ...((s.couriers || {})[k] || {}), ...d, status: d.pickupLocation ? "entered" : (s.couriers || {})[k]?.status || "", error: "", at: new Date() } };
+    const couriers = {
+      ...(s.couriers || {}),
+      [k]: {
+        ...((s.couriers || {})[k] || {}),
+        ...d,
+        status: d.pickupLocation
+          ? "entered"
+          : (s.couriers || {})[k]?.status || "",
+        error: "",
+        at: new Date(),
+      },
+    };
     await Seller.updateOne({ _id: s._id }, { $set: { couriers } });
     res.send(couriers[k]);
-  })
+  }),
 );
 
 /* ---------- penalties ---------- */
@@ -324,60 +795,131 @@ router.get(
   ah(async (req, res) => {
     const f = { organization: req.storeOrg };
     if (req.query.seller) f.seller = req.query.seller;
-    const list = await SellerPenalty.find(f).populate("seller", "name").sort({ date: -1 }).limit(1000).lean();
-    res.send(list.filter((p) => !req.query.state || (req.query.state === "pending" ? !p.purchaseOrder : !!p.purchaseOrder)));
-  })
+    const list = await SellerPenalty.find(f)
+      .populate("seller", "name")
+      .sort({ date: -1 })
+      .limit(1000)
+      .lean();
+    res.send(
+      list.filter(
+        (p) =>
+          !req.query.state ||
+          (req.query.state === "pending"
+            ? !p.purchaseOrder
+            : !!p.purchaseOrder),
+      ),
+    );
+  }),
 );
 
 router.post(
   "/penalties",
   ah(async (req, res) => {
-    const d = validate(Joi.object({ seller: Joi.string().required().label("Seller"), date: Joi.date().required().label("Date"), amount: Joi.number().greater(0).required().label("Amount"), reason: Joi.string().trim().min(2).max(300).required().label("Reason"), orderName: Joi.string().allow("").max(30) }), req.body);
-    const s = await Seller.findOne({ _id: d.seller, organization: req.storeOrg });
+    const d = validate(
+      Joi.object({
+        seller: Joi.string().required().label("Seller"),
+        date: Joi.date().required().label("Date"),
+        amount: Joi.number().greater(0).required().label("Amount"),
+        reason: Joi.string().trim().min(2).max(300).required().label("Reason"),
+        orderName: Joi.string().allow("").max(30),
+      }),
+      req.body,
+    );
+    const s = await Seller.findOne({
+      _id: d.seller,
+      organization: req.storeOrg,
+    });
     if (!s) throw new HttpError(400, "Choose a seller");
     let order = null;
     if (d.orderName) {
-      const n = d.orderName.trim().startsWith("#") ? d.orderName.trim() : `#${d.orderName.trim()}`;
-      order = await ShopifyOrder.findOne({ organization: req.storeOrg, name: n }, { name: 1, sellers: 1 });
+      const n = d.orderName.trim().startsWith("#")
+        ? d.orderName.trim()
+        : `#${d.orderName.trim()}`;
+      order = await ShopifyOrder.findOne(
+        { organization: req.storeOrg, name: n },
+        { name: 1, sellers: 1 },
+      );
       if (!order) throw new HttpError(400, `Order ${n} not found`);
-      if (!order.sellers.map(String).includes(String(s._id))) throw new HttpError(400, `${n} has no ${s.name} products`);
+      if (!order.sellers.map(String).includes(String(s._id)))
+        throw new HttpError(400, `${n} has no ${s.name} products`);
     }
-    const p = await SellerPenalty.create({ organization: req.storeOrg, seller: s._id, date: d.date, amount: d.amount, reason: d.reason, order: order?._id, orderName: order?.name || "", createdBy: req.user._id });
+    const p = await SellerPenalty.create({
+      organization: req.storeOrg,
+      seller: s._id,
+      date: d.date,
+      amount: d.amount,
+      reason: d.reason,
+      order: order?._id,
+      orderName: order?.name || "",
+      createdBy: req.user._id,
+    });
     res.status(201).send(p);
-  })
+  }),
 );
 
 router.delete(
   "/penalties/:pid",
   ah(async (req, res) => {
-    const p = await SellerPenalty.findOne({ _id: req.params.pid, organization: req.storeOrg });
+    const p = await SellerPenalty.findOne({
+      _id: req.params.pid,
+      organization: req.storeOrg,
+    });
     if (!p) throw new HttpError(404, "Deduction not found");
-    if (p.purchaseOrder) throw new HttpError(400, `Already deducted on purchase order ${p.purchaseOrderNumber}`);
+    if (p.purchaseOrder)
+      throw new HttpError(
+        400,
+        `Already deducted on purchase order ${p.purchaseOrderNumber}`,
+      );
     await p.deleteOne();
     res.send({ ok: true });
-  })
+  }),
 );
 
 /* ---------- monthly purchase orders ---------- */
-const monthJoi = Joi.string().pattern(/^\d{4}-\d{2}$/).required().label("Month");
+const monthJoi = Joi.string()
+  .pattern(/^\d{4}-\d{2}$/)
+  .required()
+  .label("Month");
 
 router.get(
   "/purchase-orders/preview",
   ah(async (req, res) => {
     const { month } = validate(Joi.object({ month: monthJoi }), req.query);
-    res.send({ month, label: S.monthRange(month).label, results: await S.runMonthly(req.storeOrg, month, req.user, { dryRun: true }) });
-  })
+    res.send({
+      month,
+      label: S.monthRange(month).label,
+      results: await S.runMonthly(req.storeOrg, month, req.user, {
+        dryRun: true,
+      }),
+    });
+  }),
 );
 
 router.post(
   "/purchase-orders/run",
   ah(async (req, res) => {
-    const d = validate(Joi.object({ month: monthJoi, seller: Joi.string().allow("") }), req.body);
-    const results = await S.runMonthly(req.storeOrg, d.month, req.user, { sellerId: d.seller || undefined });
+    const d = validate(
+      Joi.object({ month: monthJoi, seller: Joi.string().allow("") }),
+      req.body,
+    );
+    const results = await S.runMonthly(req.storeOrg, d.month, req.user, {
+      sellerId: d.seller || undefined,
+    });
     const mongoose = require("mongoose");
-    await mongoose.connection.db.collection("seller_po_runs").updateOne({ _id: `${req.storeOrg}:${d.month}` }, { $set: { at: new Date(), manual: true }, $push: { history: { at: new Date(), by: String(req.user._id), results } } }, { upsert: true });
+    await mongoose.connection.db
+      .collection("seller_po_runs")
+      .updateOne(
+        { _id: `${req.storeOrg}:${d.month}` },
+        {
+          $set: { at: new Date(), manual: true },
+          $push: {
+            history: { at: new Date(), by: String(req.user._id), results },
+          },
+        },
+        { upsert: true },
+      );
     res.send({ month: d.month, results });
-  })
+  }),
 );
 
 module.exports = router;

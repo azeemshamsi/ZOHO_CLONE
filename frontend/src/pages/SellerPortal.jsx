@@ -14,6 +14,7 @@ import {
 } from "../components/ui";
 import Icon from "../components/Icon";
 import SellerTickets from "../components/SellerTickets";
+import SellerListings from "../components/SellerListings";
 
 // A marketplace seller's own dashboard: their orders and labels, their Shopify stock, purchase orders and penalties.
 
@@ -135,6 +136,7 @@ export default function SellerPortal() {
         {[
           ["orders", "Orders"],
           ["stock", "Stock"],
+          ["listings", "Listings"],
           ["pos", "Purchase orders"],
           ["penalties", "Deductions"],
           ["profile", "Pickup address"],
@@ -154,6 +156,7 @@ export default function SellerPortal() {
       </div>
       {tab === "orders" && <Orders counts={me.counts} />}
       {tab === "stock" && <Stock />}
+      {tab === "listings" && <SellerListings brands={s.brands} />}
       {tab === "pos" && <Pos />}
       {tab === "penalties" && <Penalties />}
       {tab === "support" && <SellerTickets onCount={loadMe} />}

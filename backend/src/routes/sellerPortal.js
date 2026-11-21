@@ -15,25 +15,52 @@ const S = require("../utils/sellers");
 router.use(
   ah(async (req, res, next) => {
     const m = req.membership;
-    if (!m || m.role !== "seller" || !m.seller) throw new HttpError(403, "This page is for marketplace sellers");
-    const s = await Seller.findOne({ _id: m.seller, organization: m.organization });
-    if (!s) throw new HttpError(403, "Your seller account wasn't found. Contact the marketplace.");
-    if (!s.active) throw new HttpError(403, "Your seller account is inactive. Contact the marketplace.");
+    if (!m || m.role !== "seller" || !m.seller)
+      throw new HttpError(403, "This page is for marketplace sellers");
+    const s = await Seller.findOne({
+      _id: m.seller,
+      organization: m.organization,
+    });
+    if (!s)
+      throw new HttpError(
+        403,
+        "Your seller account wasn't found. Contact the marketplace.",
+      );
+    if (!s.active)
+      throw new HttpError(
+        403,
+        "Your seller account is inactive. Contact the marketplace.",
+      );
     req.seller = s;
     next();
-  })
+  }),
 );
 
 const OPEN = ["new", "packed", "ready_to_ship", "shipped"];
-const STATUSES = ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "return_created", "returned", "cancelled"];
+const STATUSES = [
+  "new",
+  "packed",
+  "ready_to_ship",
+  "shipped",
+  "delivered",
+  "rto",
+  "return_created",
+  "returned",
+  "cancelled",
+];
 
 // What the seller may see of an order.
 function view(o, s, costs) {
   const brands = new Set(s.brands.map(S.norm));
   const lines = (o.lines || []).filter((l) => brands.has(S.norm(l.vendor)));
   const sh = o.shipment || {};
-  const mine = String(sh.seller || "") === String(s._id) || (lines.length && lines.length === (o.lines || []).filter((l) => l.quantity > 0).length);
-  const settled = (o.sellerSettled || []).find((x) => String(x.seller) === String(s._id));
+  const mine =
+    String(sh.seller || "") === String(s._id) ||
+    (lines.length &&
+      lines.length === (o.lines || []).filter((l) => l.quantity > 0).length);
+  const settled = (o.sellerSettled || []).find(
+    (x) => String(x.seller) === String(s._id),
+  );
   const value = lines.reduce((t, l) => t + S.lineValue(l), 0);
   return {
     _id: o._id,
@@ -41,14 +68,46 @@ function view(o, s, costs) {
     orderDate: o.orderDate,
     status: o.status,
     paymentMode: o.paymentMode,
-    shipTo: { name: o.shippingAddress?.name || o.customer?.name || "", city: o.shippingAddress?.city || "", state: o.shippingAddress?.province || "", pincode: o.shippingAddress?.zip || "" },
-    lines: lines.map((l) => ({ title: l.title, variantTitle: l.variantTitle, sku: l.sku, quantity: l.quantity, unitPrice: l.unitPrice, image: l.image, payout: S.linePurchase(s, l, costs) })),
-    otherItems: (o.lines || []).filter((l) => l.quantity > 0).length - lines.filter((l) => l.quantity > 0).length,
+    shipTo: {
+      name: o.shippingAddress?.name || o.customer?.name || "",
+      city: o.shippingAddress?.city || "",
+      state: o.shippingAddress?.province || "",
+      pincode: o.shippingAddress?.zip || "",
+    },
+    lines: lines.map((l) => ({
+      title: l.title,
+      variantTitle: l.variantTitle,
+      sku: l.sku,
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      image: l.image,
+      payout: S.linePurchase(s, l, costs),
+    })),
+    otherItems:
+      (o.lines || []).filter((l) => l.quantity > 0).length -
+      lines.filter((l) => l.quantity > 0).length,
     value: Math.round(value * 100) / 100,
-    payout: Math.round(lines.reduce((t, l) => t + S.linePurchase(s, l, costs), 0) * 100) / 100,
-    shipment: sh.awb ? { courierName: sh.courierName, awb: sh.awb, trackStatus: sh.trackStatus, trackingUrl: sh.trackingUrl, bookedAt: sh.bookedAt, fromYou: !!mine, events: (sh.events || []).slice(0, 10) } : null,
+    payout:
+      Math.round(
+        lines.reduce((t, l) => t + S.linePurchase(s, l, costs), 0) * 100,
+      ) / 100,
+    shipment: sh.awb
+      ? {
+          courierName: sh.courierName,
+          awb: sh.awb,
+          trackStatus: sh.trackStatus,
+          trackingUrl: sh.trackingUrl,
+          bookedAt: sh.bookedAt,
+          fromYou: !!mine,
+          events: (sh.events || []).slice(0, 10),
+        }
+      : null,
     deliveredAt: o.deliveredAt || null,
-    settled: settled ? (settled.excluded ? { excluded: true } : { number: settled.number, amount: settled.amount, at: settled.at }) : null,
+    settled: settled
+      ? settled.excluded
+        ? { excluded: true }
+        : { number: settled.number, amount: settled.amount, at: settled.at }
+      : null,
   };
 }
 
@@ -56,18 +115,52 @@ router.get(
   "/me",
   ah(async (req, res) => {
     const s = req.seller;
-    const orders = await ShopifyOrder.find({ organization: s.organization, sellers: s._id }, { status: 1, orderDate: 1, deliveredAt: 1, statusChangedAt: 1, sellerSettled: 1, lines: 1 }).lean();
+    const orders = await ShopifyOrder.find(
+      { organization: s.organization, sellers: s._id },
+      {
+        status: 1,
+        orderDate: 1,
+        deliveredAt: 1,
+        statusChangedAt: 1,
+        sellerSettled: 1,
+        lines: 1,
+      },
+    ).lean();
     const counts = Object.fromEntries(STATUSES.map((k) => [k, 0]));
     for (const o of orders) counts[o.status] = (counts[o.status] || 0) + 1;
-    const penalties = await SellerPenalty.find({ seller: s._id, purchaseOrder: { $exists: false } }, { amount: 1 }).lean();
-    const tickets = await require("../models/SupportTicket").find({ seller: s._id }, { status: 1, sellerUnread: 1 }).lean();
+    const penalties = await SellerPenalty.find(
+      { seller: s._id, purchaseOrder: { $exists: false } },
+      { amount: 1 },
+    ).lean();
+    const tickets = await require("../models/SupportTicket")
+      .find({ seller: s._id }, { status: 1, sellerUnread: 1 })
+      .lean();
     res.send({
-      tickets: { open: tickets.filter((t) => !["resolved", "closed"].includes(t.status)).length, unread: tickets.reduce((n, t) => n + (t.sellerUnread || 0), 0) },
-      seller: { _id: s._id, name: s.name, brands: s.brands, rate: s.rate, contactName: s.contactName, email: s.email, phone: s.phone, gstin: s.gstin, pickup: s.pickup },
-      counts: { ...counts, open: OPEN.reduce((t, k) => t + counts[k], 0), all: orders.length },
-      penaltiesPending: Math.round(penalties.reduce((t, p) => t + p.amount, 0) * 100) / 100,
+      tickets: {
+        open: tickets.filter((t) => !["resolved", "closed"].includes(t.status))
+          .length,
+        unread: tickets.reduce((n, t) => n + (t.sellerUnread || 0), 0),
+      },
+      seller: {
+        _id: s._id,
+        name: s.name,
+        brands: s.brands,
+        rate: s.rate,
+        contactName: s.contactName,
+        email: s.email,
+        phone: s.phone,
+        gstin: s.gstin,
+        pickup: s.pickup,
+      },
+      counts: {
+        ...counts,
+        open: OPEN.reduce((t, k) => t + counts[k], 0),
+        all: orders.length,
+      },
+      penaltiesPending:
+        Math.round(penalties.reduce((t, p) => t + p.amount, 0) * 100) / 100,
     });
-  })
+  }),
 );
 
 router.get(
@@ -77,52 +170,236 @@ router.get(
     const q = req.query;
     const page = Math.max(1, Number(q.page) || 1);
     const limit = 30;
-    let list = await ShopifyOrder.find({ organization: s.organization, sellers: s._id }).sort({ orderDate: -1 }).lean();
+    let list = await ShopifyOrder.find({
+      organization: s.organization,
+      sellers: s._id,
+    })
+      .sort({ orderDate: -1 })
+      .lean();
     if (q.status === "open") list = list.filter((o) => OPEN.includes(o.status));
-    else if (q.status && q.status !== "all") list = list.filter((o) => o.status === q.status);
-    if (q.from) list = list.filter((o) => new Date(o.orderDate) >= new Date(`${q.from}T00:00:00+05:30`));
-    if (q.to) list = list.filter((o) => new Date(o.orderDate) <= new Date(`${q.to}T23:59:59+05:30`));
+    else if (q.status && q.status !== "all")
+      list = list.filter((o) => o.status === q.status);
+    if (q.from)
+      list = list.filter(
+        (o) => new Date(o.orderDate) >= new Date(`${q.from}T00:00:00+05:30`),
+      );
+    if (q.to)
+      list = list.filter(
+        (o) => new Date(o.orderDate) <= new Date(`${q.to}T23:59:59+05:30`),
+      );
     const brands = new Set(s.brands.map(S.norm));
-    const costs = await S.costsFor(s.organization, list.flatMap((o) => (o.lines || []).filter((l) => brands.has(S.norm(l.vendor)))));
+    const costs = await S.costsFor(
+      s.organization,
+      list.flatMap((o) =>
+        (o.lines || []).filter((l) => brands.has(S.norm(l.vendor))),
+      ),
+    );
     let rows = list.map((o) => view(o, s, costs));
-    const words = String(q.q || "").trim().toLowerCase().replace(/^#/, "").split(/\s+/).filter(Boolean);
-    if (words.length) rows = rows.filter((r) => words.every((w) => [r.name, r.shipTo.name, r.shipTo.city, r.shipTo.pincode, r.shipment?.awb, ...r.lines.flatMap((l) => [l.title, l.sku])].filter(Boolean).join(" ").toLowerCase().includes(w)));
-    res.send({ rows: rows.slice((page - 1) * limit, page * limit), total: rows.length, page, limit });
-  })
+    const words = String(q.q || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^#/, "")
+      .split(/\s+/)
+      .filter(Boolean);
+    if (words.length)
+      rows = rows.filter((r) =>
+        words.every((w) =>
+          [
+            r.name,
+            r.shipTo.name,
+            r.shipTo.city,
+            r.shipTo.pincode,
+            r.shipment?.awb,
+            ...r.lines.flatMap((l) => [l.title, l.sku]),
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(w),
+        ),
+      );
+    res.send({
+      rows: rows.slice((page - 1) * limit, page * limit),
+      total: rows.length,
+      page,
+      limit,
+    });
+  }),
 );
 
 router.get(
   "/orders/:id/label",
   ah(async (req, res) => {
     const s = req.seller;
-    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: s.organization, sellers: s._id }).select("+shipment.labelPdf");
+    const o = await ShopifyOrder.findOne({
+      _id: req.params.id,
+      organization: s.organization,
+      sellers: s._id,
+    }).select("+shipment.labelPdf");
     if (!o) throw new HttpError(404, "Order not found");
-    if (!o.shipment?.awb) throw new HttpError(400, "Not booked yet. The marketplace books the courier; the label appears here after that.");
-    if (!view(o.toObject(), s).shipment.fromYou) throw new HttpError(403, "This order ships from another location, not yours");
-    await require("../utils/shopify/labelOut").sendLabel(res, o, { org: s.organization, storeOrg: s.organization, own: req.query.own === "1" });
-  })
+    if (!o.shipment?.awb)
+      throw new HttpError(
+        400,
+        "Not booked yet. The marketplace books the courier; the label appears here after that.",
+      );
+    if (!view(o.toObject(), s).shipment.fromYou)
+      throw new HttpError(
+        403,
+        "This order ships from another location, not yours",
+      );
+    await require("../utils/shopify/labelOut").sendLabel(res, o, {
+      org: s.organization,
+      storeOrg: s.organization,
+      own: req.query.own === "1",
+    });
+  }),
+);
+
+/* ---------- product listings: upload a listing file → draft products on Shopify, reviewed by the marketplace ---------- */
+const L = require("../utils/sellerListings");
+router.get(
+  "/listings/sample",
+  ah(async (req, res) => {
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="woodentwist-listing-file.xlsx"',
+    );
+    res.send(L.sampleXlsx(req.seller));
+  }),
+);
+
+const fileJoi = Joi.object({
+  file: Joi.string().required(),
+  name: Joi.string().allow("").max(200).default(""),
+  brand: Joi.string().allow("").max(150).default(""),
+});
+// Check the file: every product and every problem, by row (nothing is created).
+router.post(
+  "/listings/check",
+  ah(async (req, res) => {
+    const d = validate(fileJoi, req.body);
+    try {
+      const r = await L.check(req.seller, d.file, d.brand);
+      res.send({
+        rows: r.rows,
+        problems: r.problems.slice(0, 1000),
+        products: r.products.map((p) => ({
+          row: p.row,
+          handle: p.handle,
+          title: p.title,
+          brand: p.brand,
+          variants: p.variants.length,
+          images: p.images.length,
+          image: p.images[0]?.src || "",
+          price: p.variants[0]?.price,
+          ok: p.ok,
+        })),
+      });
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+  }),
+);
+// Submit: the valid products become drafts on Shopify (in the background).
+router.post(
+  "/listings",
+  ah(async (req, res) => {
+    const d = validate(fileJoi, req.body);
+    try {
+      const r = await L.submit(req.seller, req.user, d.file, d.name, d.brand);
+      res
+        .status(201)
+        .send({
+          batch: r.batch,
+          submitted: r.submitted,
+          skipped: r.products.length - r.submitted,
+          problems: r.problems.length,
+        });
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+  }),
+);
+router.get(
+  "/listings",
+  ah(async (req, res) => {
+    const SellerListing = require("../models/SellerListing");
+    const all = await SellerListing.find({ seller: req.seller._id })
+      .sort({ createdAt: -1 })
+      .limit(2000)
+      .lean();
+    if (all.some((l) => l.status === "queued"))
+      L.processQueue(req.seller.organization).catch(() => {});
+    const counts = { all: all.length };
+    for (const l of all) counts[l.status] = (counts[l.status] || 0) + 1;
+    const st = req.query.status;
+    res.send({
+      rows: all
+        .filter(
+          (l) =>
+            !st ||
+            st === "all" ||
+            (st === "review"
+              ? ["queued", "creating", "draft"].includes(l.status)
+              : l.status === st),
+        )
+        .map(L.sellerView),
+      counts,
+    });
+  }),
 );
 
 /* ---------- stock on Shopify ---------- */
 const storeOf = async (s) => {
   const st = await ShopifyStore.findOne({ organization: s.organization });
-  if (!st?.connected) throw new HttpError(400, "The marketplace's Shopify store isn't connected right now");
+  if (!st?.connected)
+    throw new HttpError(
+      400,
+      "The marketplace's Shopify store isn't connected right now",
+    );
   return st;
 };
 
 router.get(
   "/products",
   ah(async (req, res) => {
-    res.send(await S.sellerProducts(await storeOf(req.seller), req.seller, { after: req.query.after, q: req.query.q }));
-  })
+    res.send(
+      await S.sellerProducts(await storeOf(req.seller), req.seller, {
+        after: req.query.after,
+        q: req.query.q,
+      }),
+    );
+  }),
 );
 
 router.post(
   "/products/stock",
   ah(async (req, res) => {
-    const d = validate(Joi.object({ variantId: Joi.string().required(), quantity: Joi.number().integer().min(0).max(1000000).required().label("Quantity") }), req.body);
-    res.send(await S.setSellerStock(await storeOf(req.seller), req.seller, d.variantId, d.quantity));
-  })
+    const d = validate(
+      Joi.object({
+        variantId: Joi.string().required(),
+        quantity: Joi.number()
+          .integer()
+          .min(0)
+          .max(1000000)
+          .required()
+          .label("Quantity"),
+      }),
+      req.body,
+    );
+    res.send(
+      await S.setSellerStock(
+        await storeOf(req.seller),
+        req.seller,
+        d.variantId,
+        d.quantity,
+      ),
+    );
+  }),
 );
 
 /* ---------- purchase orders and penalties ---------- */
@@ -130,14 +407,24 @@ async function myPos(s) {
   const PurchaseOrder = require("../models/PurchaseOrder");
   const vendorIds = Object.values(s.vendors || {});
   if (!vendorIds.length) return [];
-  return PurchaseOrder.find({ vendor: { $in: vendorIds }, status: { $ne: "draft" } }).sort({ date: -1 }).lean();
+  return PurchaseOrder.find({
+    vendor: { $in: vendorIds },
+    status: { $ne: "draft" },
+  })
+    .sort({ date: -1 })
+    .lean();
 }
 
 // Where the seller's invoice stands: under review (draft bill), approved, paid.
 async function billStates(pos) {
   const Bill = require("../models/Bill");
   const ids = pos.map((p) => p.bill).filter(Boolean);
-  const bills = ids.length ? await Bill.find({ _id: { $in: ids } }, { status: 1, billNumber: 1, total: 1, balance: 1, date: 1 }) : [];
+  const bills = ids.length
+    ? await Bill.find(
+        { _id: { $in: ids } },
+        { status: 1, billNumber: 1, total: 1, balance: 1, date: 1 },
+      )
+    : [];
   return new Map(bills.map((b) => [String(b._id), b]));
 }
 const invoiceState = (p, b) => {
@@ -157,10 +444,27 @@ router.get(
     res.send(
       pos.map((p) => {
         const b = p.bill ? bills.get(String(p.bill)) : null;
-        return { _id: p._id, number: p.number, date: p.date, reference: p.reference, status: p.status, total: p.total, lines: p.lineItems.length, invoice: b ? { number: b.billNumber, date: b.date, total: b.total, paid: Math.round((b.total - b.balance) * 100) / 100 } : null, invoiceState: invoiceState(p, b) };
-      })
+        return {
+          _id: p._id,
+          number: p.number,
+          date: p.date,
+          reference: p.reference,
+          status: p.status,
+          total: p.total,
+          lines: p.lineItems.length,
+          invoice: b
+            ? {
+                number: b.billNumber,
+                date: b.date,
+                total: b.total,
+                paid: Math.round((b.total - b.balance) * 100) / 100,
+              }
+            : null,
+          invoiceState: invoiceState(p, b),
+        };
+      }),
     );
-  })
+  }),
 );
 
 // The seller's invoice against a purchase order: becomes a draft bill (with the file attached) in the buying
@@ -170,24 +474,42 @@ router.post(
   ah(async (req, res) => {
     const d = validate(
       Joi.object({
-        invoiceNumber: Joi.string().trim().min(1).max(50).required().label("Invoice number"),
+        invoiceNumber: Joi.string()
+          .trim()
+          .min(1)
+          .max(50)
+          .required()
+          .label("Invoice number"),
         invoiceDate: Joi.date().max("now").required().label("Invoice date"),
         amount: Joi.number().min(0).required().label("Invoice amount"),
         name: Joi.string().max(200).required().label("File"),
-        type: Joi.string().valid("application/pdf", "image/jpeg", "image/png", "image/webp").required().messages({ "any.only": "Upload a PDF or a photo (JPG / PNG)" }),
+        type: Joi.string()
+          .valid("application/pdf", "image/jpeg", "image/png", "image/webp")
+          .required()
+          .messages({ "any.only": "Upload a PDF or a photo (JPG / PNG)" }),
         data: Joi.string().required().label("File"),
         note: Joi.string().allow("").max(500),
       }),
-      req.body
+      req.body,
     );
-    const p = (await myPos(req.seller)).find((x) => String(x._id) === req.params.id);
+    const p = (await myPos(req.seller)).find(
+      (x) => String(x._id) === req.params.id,
+    );
     if (!p) throw new HttpError(404, "Purchase order not found");
-    if (p.status === "cancelled") throw new HttpError(400, "This purchase order is cancelled");
-    if (p.bill) throw new HttpError(400, "An invoice has already been received against this purchase order");
+    if (p.status === "cancelled")
+      throw new HttpError(400, "This purchase order is cancelled");
+    if (p.bill)
+      throw new HttpError(
+        400,
+        "An invoice has already been received against this purchase order",
+      );
     const buf = Buffer.from(d.data.replace(/^data:.*?;base64,/, ""), "base64");
     if (!buf.length) throw new HttpError(400, "The file is empty");
-    if (buf.length > 10 * 1024 * 1024) throw new HttpError(400, "The file can be up to 10 MB");
-    const iso = new Date(new Date(d.invoiceDate).getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
+    if (buf.length > 10 * 1024 * 1024)
+      throw new HttpError(400, "The file can be up to 10 MB");
+    const iso = new Date(new Date(d.invoiceDate).getTime() + 5.5 * 3600000)
+      .toISOString()
+      .slice(0, 10);
     const diff = Math.round((d.amount - p.total) * 100) / 100;
     const ctx = { org: p.organization, user: req.user };
     const { call } = require("../utils/import/commit");
@@ -197,34 +519,75 @@ router.post(
       date: iso,
       dueDate: iso,
       placeOfSupply: p.placeOfSupply || "",
-      lineItems: p.lineItems.map((l) => ({ item: l.item ? String(l.item) : "", name: l.name, description: l.description || "", hsnSac: l.hsnSac || "", unit: l.unit || "", quantity: l.quantity, rate: l.rate, discount: l.discount || 0, taxRate: l.taxRate || 0, account: l.account || "" })),
+      lineItems: p.lineItems.map((l) => ({
+        item: l.item ? String(l.item) : "",
+        name: l.name,
+        description: l.description || "",
+        hsnSac: l.hsnSac || "",
+        unit: l.unit || "",
+        quantity: l.quantity,
+        rate: l.rate,
+        discount: l.discount || 0,
+        taxRate: l.taxRate || 0,
+        account: l.account || "",
+      })),
       adjustment: p.adjustment || 0,
-      ...(p.adjustmentAccount ? { adjustmentAccount: p.adjustmentAccount } : {}),
-      customerNotes: [`Invoice uploaded by ${req.seller.name} (${req.user.name}) on the seller dashboard against PO ${p.number}.`, `Seller's invoice amount ₹${d.amount}${diff ? ` — differs from the PO total ₹${p.total} by ₹${diff}` : " (matches the PO)"}.`, d.note ? `Seller's note: ${d.note}` : ""].filter(Boolean).join("\n"),
+      ...(p.adjustmentAccount
+        ? { adjustmentAccount: p.adjustmentAccount }
+        : {}),
+      customerNotes: [
+        `Invoice uploaded by ${req.seller.name} (${req.user.name}) on the seller dashboard against PO ${p.number}.`,
+        `Seller's invoice amount ₹${d.amount}${diff ? ` — differs from the PO total ₹${p.total} by ₹${diff}` : " (matches the PO)"}.`,
+        d.note ? `Seller's note: ${d.note}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
       status: "draft",
       purchaseOrder: String(p._id),
     });
-    await require("./attachments").store({ org: p.organization, user: req.user }, { docType: "bill", docId: bill._id, name: d.name, type: d.type, buf });
-    res.status(201).send({ ok: true, differs: diff || 0, purchaseOrder: p.number });
-  })
+    await require("./attachments").store(
+      { org: p.organization, user: req.user },
+      { docType: "bill", docId: bill._id, name: d.name, type: d.type, buf },
+    );
+    res
+      .status(201)
+      .send({ ok: true, differs: diff || 0, purchaseOrder: p.number });
+  }),
 );
 
 router.get(
   "/purchase-orders/:id",
   ah(async (req, res) => {
-    const p = (await myPos(req.seller)).find((x) => String(x._id) === req.params.id);
+    const p = (await myPos(req.seller)).find(
+      (x) => String(x._id) === req.params.id,
+    );
     if (!p) throw new HttpError(404, "Purchase order not found");
     const Organization = require("../models/Organization");
-    const org = await Organization.findById(p.organization, { name: 1, gstin: 1, address: 1, state: 1, email: 1, phone: 1, logo: 1 }).lean();
+    const org = await Organization.findById(p.organization, {
+      name: 1,
+      gstin: 1,
+      address: 1,
+      state: 1,
+      email: 1,
+      phone: 1,
+      logo: 1,
+    }).lean();
     res.send({ ...p, buyer: org });
-  })
+  }),
 );
 
 router.get(
   "/penalties",
   ah(async (req, res) => {
-    res.send(await SellerPenalty.find({ seller: req.seller._id }, { date: 1, amount: 1, reason: 1, orderName: 1, purchaseOrderNumber: 1 }).sort({ date: -1 }).lean());
-  })
+    res.send(
+      await SellerPenalty.find(
+        { seller: req.seller._id },
+        { date: 1, amount: 1, reason: 1, orderName: 1, purchaseOrderNumber: 1 },
+      )
+        .sort({ date: -1 })
+        .lean(),
+    );
+  }),
 );
 
 // ---- Support tickets: the seller raises a problem (order, payment, technical…) with screenshots; the team
@@ -232,52 +595,115 @@ router.get(
 const T = require("../utils/tickets");
 const SupportTicket = require("../models/SupportTicket");
 const myTicket = async (req) => {
-  const t = await SupportTicket.findOne({ _id: req.params.id, seller: req.seller._id });
+  const t = await SupportTicket.findOne({
+    _id: req.params.id,
+    seller: req.seller._id,
+  });
   if (!t) throw new HttpError(404, "Ticket not found");
   return t;
 };
-const filesSchema = Joi.array().items(Joi.object({ name: Joi.string().max(200).required(), type: Joi.string().allow("").default(""), data: Joi.string().required() })).max(5).default([]);
+const filesSchema = Joi.array()
+  .items(
+    Joi.object({
+      name: Joi.string().max(200).required(),
+      type: Joi.string().allow("").default(""),
+      data: Joi.string().required(),
+    }),
+  )
+  .max(5)
+  .default([]);
 
-router.get("/tickets/options", (req, res) => res.send({ categories: T.CATEGORIES, statuses: T.STATUSES }));
+router.get("/tickets/options", (req, res) =>
+  res.send({ categories: T.CATEGORIES, statuses: T.STATUSES }),
+);
 router.get(
   "/tickets",
   ah(async (req, res) => {
-    const list = await SupportTicket.find({ seller: req.seller._id }, { messages: 0 }).sort({ lastActivityAt: -1 }).limit(300).lean();
-    const counts = await SupportTicket.find({ seller: req.seller._id }, { messages: 1 }).lean();
-    const replies = new Map(counts.map((t) => [String(t._id), (t.messages || []).filter((m) => !m.internal).length]));
-    res.send(list.map((t) => ({ ...T.sellerView(t), replies: Math.max(0, (replies.get(String(t._id)) || 1) - 1) })));
-  })
+    const list = await SupportTicket.find(
+      { seller: req.seller._id },
+      { messages: 0 },
+    )
+      .sort({ lastActivityAt: -1 })
+      .limit(300)
+      .lean();
+    const counts = await SupportTicket.find(
+      { seller: req.seller._id },
+      { messages: 1 },
+    ).lean();
+    const replies = new Map(
+      counts.map((t) => [
+        String(t._id),
+        (t.messages || []).filter((m) => !m.internal).length,
+      ]),
+    );
+    res.send(
+      list.map((t) => ({
+        ...T.sellerView(t),
+        replies: Math.max(0, (replies.get(String(t._id)) || 1) - 1),
+      })),
+    );
+  }),
 );
 // Their orders, to pick the one the ticket is about.
 router.get(
   "/tickets/orders",
   ah(async (req, res) => {
-    const q = String(req.query.q || "").trim().toLowerCase();
-    const list = await ShopifyOrder.find({ organization: req.seller.organization, sellers: req.seller._id }, { name: 1, orderDate: 1, status: 1 }).sort({ orderDate: -1 }).limit(q ? 2000 : 100).lean();
-    res.send(list.filter((o) => !q || String(o.name).toLowerCase().includes(q)).slice(0, 50).map((o) => ({ _id: o._id, name: o.name, orderDate: o.orderDate, status: o.status })));
-  })
+    const q = String(req.query.q || "")
+      .trim()
+      .toLowerCase();
+    const list = await ShopifyOrder.find(
+      { organization: req.seller.organization, sellers: req.seller._id },
+      { name: 1, orderDate: 1, status: 1 },
+    )
+      .sort({ orderDate: -1 })
+      .limit(q ? 2000 : 100)
+      .lean();
+    res.send(
+      list
+        .filter((o) => !q || String(o.name).toLowerCase().includes(q))
+        .slice(0, 50)
+        .map((o) => ({
+          _id: o._id,
+          name: o.name,
+          orderDate: o.orderDate,
+          status: o.status,
+        })),
+    );
+  }),
 );
 router.post(
   "/tickets",
   ah(async (req, res) => {
     const d = validate(
       Joi.object({
-        category: Joi.string().valid(...T.CATEGORIES.map((c) => c[0])).required(),
+        category: Joi.string()
+          .valid(...T.CATEGORIES.map((c) => c[0]))
+          .required(),
         subject: Joi.string().trim().min(3).max(150).required(),
         text: Joi.string().trim().min(5).max(5000).required(),
         orderId: Joi.string().hex().length(24).allow("", null),
         files: filesSchema,
       }),
-      req.body
+      req.body,
     );
     let order = null;
     if (d.orderId) {
-      order = await ShopifyOrder.findOne({ _id: d.orderId, organization: req.seller.organization, sellers: req.seller._id }, { name: 1 }).lean();
+      order = await ShopifyOrder.findOne(
+        {
+          _id: d.orderId,
+          organization: req.seller.organization,
+          sellers: req.seller._id,
+        },
+        { name: 1 },
+      ).lean();
       if (!order) throw new HttpError(400, "That order isn't one of yours");
     }
-    const t = await T.create(req.seller.organization, req.seller, req.user, { ...d, order });
+    const t = await T.create(req.seller.organization, req.seller, req.user, {
+      ...d,
+      order,
+    });
     res.status(201).send(T.sellerView(t, true));
-  })
+  }),
 );
 router.get(
   "/tickets/:id",
@@ -288,25 +714,43 @@ router.get(
       await t.save();
     }
     res.send(T.sellerView(t, true));
-  })
+  }),
 );
 router.post(
   "/tickets/:id/reply",
   ah(async (req, res) => {
-    const d = validate(Joi.object({ text: Joi.string().trim().allow("").max(5000).default(""), files: filesSchema }), req.body);
+    const d = validate(
+      Joi.object({
+        text: Joi.string().trim().allow("").max(5000).default(""),
+        files: filesSchema,
+      }),
+      req.body,
+    );
     const t = await myTicket(req);
-    if (t.status === "closed") throw new HttpError(400, "This ticket is closed — reopen it or raise a new one");
-    if (!d.text && !d.files.length) throw new HttpError(400, "Write a reply or add a screenshot");
+    if (t.status === "closed")
+      throw new HttpError(
+        400,
+        "This ticket is closed — reopen it or raise a new one",
+      );
+    if (!d.text && !d.files.length)
+      throw new HttpError(400, "Write a reply or add a screenshot");
     const files = await T.saveFiles(t.organization, d.files);
-    t.messages.push({ from: "seller", user: req.user?._id, name: req.user?.name || req.seller.name, text: d.text, files });
+    t.messages.push({
+      from: "seller",
+      user: req.user?._id,
+      name: req.user?.name || req.seller.name,
+      text: d.text,
+      files,
+    });
     // A reply re-opens a resolved ticket and takes "waiting for seller" back to the team.
-    if (["resolved", "waiting"].includes(t.status)) t.status = t.status === "resolved" ? "open" : "in_progress";
+    if (["resolved", "waiting"].includes(t.status))
+      t.status = t.status === "resolved" ? "open" : "in_progress";
     t.lastActivityAt = new Date();
     t.lastFrom = "seller";
     t.teamUnread = (t.teamUnread || 0) + 1;
     await t.save();
     res.send(T.sellerView(t, true));
-  })
+  }),
 );
 // The seller confirms it's sorted (close) or that it isn't (reopen).
 router.post(
@@ -316,20 +760,24 @@ router.post(
     const close = req.params.action === "close";
     t.status = close ? "closed" : "open";
     if (close) t.closedAt = new Date();
-    t.messages.push({ from: "system", name: req.user?.name || req.seller.name, text: close ? "Closed by the seller" : "Reopened by the seller" });
+    t.messages.push({
+      from: "system",
+      name: req.user?.name || req.seller.name,
+      text: close ? "Closed by the seller" : "Reopened by the seller",
+    });
     t.lastActivityAt = new Date();
     t.lastFrom = "seller";
     if (!close) t.teamUnread = (t.teamUnread || 0) + 1;
     await t.save();
     res.send(T.sellerView(t, true));
-  })
+  }),
 );
 router.get(
   "/tickets/:id/files/:fid",
   ah(async (req, res) => {
     const t = await myTicket(req);
     T.streamFile(t, req.params.fid, res, { seller: true });
-  })
+  }),
 );
 
 module.exports = router;

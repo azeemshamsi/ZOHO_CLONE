@@ -4,7 +4,12 @@ const mongoose = require("mongoose");
 // We buy from them at `rate`% of the sale price (GST included, before our discounts) for delivered orders.
 const sellerSchema = new mongoose.Schema(
   {
-    organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true }, // the store's company
+    organization: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Organization",
+      required: true,
+      index: true,
+    }, // the store's company
     name: { type: String, required: true, trim: true },
     brands: { type: [String], default: [] }, // Shopify Vendor values (case-insensitive)
     contactName: { type: String, default: "" },
@@ -29,7 +34,19 @@ const sellerSchema = new mongoose.Schema(
     vendors: { type: mongoose.Schema.Types.Mixed, default: {} },
     active: { type: Boolean, default: true },
     notes: { type: String, default: "" },
+    // approved: a working seller · pending: registered on the website, waiting for our approval · rejected
+    status: {
+      type: String,
+      enum: ["approved", "pending", "rejected"],
+      default: "approved",
+      index: true,
+    },
+    // The website registration: { source, brand, categories, productCount, website, message, appliedAt, ip,
+    // decidedAt, decidedBy, decidedByName, reason }
+    application: { type: mongoose.Schema.Types.Mixed },
+    // Each brand's page on Shopify (a collection of the brand's products): { [brand]: { id, handle, published, error, at } }
+    shopifyBrands: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
-  { timestamps: true, minimize: false }
+  { timestamps: true, minimize: false },
 );
 module.exports = mongoose.model("Seller", sellerSchema);
