@@ -6,9 +6,12 @@ const { labelsPdf } = require("../couriers/label");
 
 async function sendLabel(res, o, { org, storeOrg, own = false }) {
   if (!own) {
-    if (o.shipment.labelPdf?.length) {
+    // A box's label kept in a Mixed field comes back as a BSON Binary.
+    let pdf = o.shipment.labelPdf;
+    if (pdf && !Buffer.isBuffer(pdf)) pdf = pdf.buffer ? Buffer.from(pdf.buffer) : null;
+    if (pdf?.length) {
       res.setHeader("Content-Type", "application/pdf");
-      return res.send(o.shipment.labelPdf);
+      return res.send(pdf);
     }
     const acc = o.shipment.account ? await CourierAccount.findById(o.shipment.account) : null;
     if (acc) {

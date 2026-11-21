@@ -198,7 +198,7 @@ router.post(
 );
 
 /* ---------------- orders ---------------- */
-const LIST_FIELDS = { awbScannedAt: 1, "flipkart.selfShip": 1, "flipkart.dispatchBy": 1, "flipkart.state": 1, returnStatus: 1, "b2b.gstin": 1, channel: 1, "amazon.easyShip": 1, "amazon.confirmedAt": 1, "amazon.confirmError": 1, "amazon.shipBy": 1, "amazon.label": 1, "amazon.slot": 1, "amazon.gstin": 1, "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.vendor": 1, sellers: 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 };
+const LIST_FIELDS = { awbScannedAt: 1, "flipkart.selfShip": 1, "flipkart.dispatchBy": 1, "flipkart.state": 1, returnStatus: 1, "b2b.gstin": 1, channel: 1, "amazon.easyShip": 1, "amazon.confirmedAt": 1, "amazon.confirmError": 1, "amazon.shipBy": 1, "amazon.label": 1, "amazon.slot": 1, "amazon.gstin": 1, "lines.title": 1, "lines.variantTitle": 1, "lines.quantity": 1, "lines.vendor": 1, sellers: 1, "lines.sku": 1, "lines.image": 1, prepaidAmount: 1, codAmount: 1, name: 1, orderNumber: 1, orderDate: 1, customer: 1, "shippingAddress.city": 1, "shippingAddress.state": 1, "shippingAddress.zip": 1, "shippingAddress.province": 1, paymentMode: 1, financialStatus: 1, fulfillmentStatus: 1, total: 1, status: 1, "shipment.courierName": 1, "shipment.awb": 1, "shipment.trackStatus": 1, "shipment.trackingUrl": 1, "shipment.carrier": 1, "shipment.account": 1, "extraShipments.awb": 1, "extraShipments.box": 1, invoice: 1, invoiceNumber: 1, invoiceOrg: 1, tags: 1, cancelledAt: 1 };
 // The order list: filters, counts, sort and search from the in-memory index; only the page shown is read.
 router.get(
   "/orders",
@@ -534,6 +534,7 @@ router.get(
     const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg }).populate("lines.item", "name sku hsnSac taxRate needsReview reviewNote trackInventory packageType").lean();
     if (!o) throw new HttpError(404, "Order not found");
     if (o.channel === "amazon") await devices.amazonData(req, "amazon_order_view", o.name, { orderId: String(o._id) });
+    for (const x of o.extraShipments || []) delete x.labelPdf; // fetched with the label button
     // Where to pick each item from.
     const ids = o.lines.map((l) => l.item?._id).filter(Boolean);
     if (ids.length) {
@@ -676,15 +677,18 @@ router.post(
         invoiceFirst: Joi.boolean().default(false),
         skipCheck: Joi.boolean().default(false),
         pickupFrom: Joi.string().allow("").default(""), // "" automatic | "own" | "seller:<id>"
+        // Several boxes (one order): each booked with its own AWB.
+        boxes: Joi.array().items(Joi.object({ lines: Joi.array().items(Joi.object({ lineId: Joi.string().required(), quantity: Joi.number().integer().min(0).required() })).required(), pkg: pkgJoi })).max(20).allow(null),
       }),
       req.body
     );
+    if (d.boxes?.length > 1 && d.ids.length > 1) throw new HttpError(400, "Split into boxes one order at a time");
     const store = await storeOf(req, false);
     const results = [];
     for (const o of await ordersFor(req, d.ids)) {
       try {
         if (d.invoiceFirst && !o.invoice && store && o.channel !== "amazon" && o.channel !== "flipkart") await invoiceOrder(ctxOf(req), o, store).catch(() => {});
-        const r = await bookOrder(ctxOf(req), o, { accountId: d.account, pkg: d.pkg, manual: d.ids.length === 1 ? d.manual : {}, skipCheck: d.skipCheck, pickupFrom: d.ids.length === 1 ? d.pickupFrom : "" });
+        const r = await bookOrder(ctxOf(req), o, { accountId: d.account, pkg: d.pkg, manual: d.ids.length === 1 ? d.manual : {}, skipCheck: d.skipCheck, pickupFrom: d.ids.length === 1 ? d.pickupFrom : "", boxes: d.ids.length === 1 ? d.boxes : null });
         results.push({ id: o._id, name: o.name, ok: true, ...r });
       } catch (e) {
         await ShopifyOrder.updateOne({ _id: o._id }, { "shipment.error": e.message }).catch(() => {});
@@ -739,20 +743,26 @@ router.post(
     const codes = d.codes?.length ? d.codes : [d.code];
     const o = await R.findByCode(req.storeOrg, codes);
     if (!o) throw new HttpError(404, `No order with AWB or order number "${codes.join('" / "')}"`);
-    const sh = o.shipment || {};
+    // Several boxes: the box whose AWB was scanned.
+    const boxesAll = require("../utils/shopify/ship").allShipments(o);
+    const wanted = new Set(codes.map((c) => String(c).trim().toUpperCase()));
+    const sh = boxesAll.find((x) => wanted.has(String(x.awb).toUpperCase())) || o.shipment || {};
+    const boxNote = boxesAll.length > 1 ? ` (box ${sh.box || 1} of ${boxesAll.length})` : "";
     const fmt = (t) => new Date(t).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
     const summary = { _id: o._id, name: o.name, customer: o.channel === "amazon" ? "" : o.customer?.name, awb: sh.awb, courier: sh.courierName, status: o.status, items: o.lines.filter((l) => l.quantity > 0).map((l) => `${l.quantity} × ${l.title}${l.variantTitle ? ` (${l.variantTitle})` : ""}`) };
     if (o.status === "cancelled") throw new HttpError(400, `${o.name} is cancelled — don't hand it over`);
     if (!sh.awb) throw new HttpError(400, `${o.name} has no shipment booked`);
     if (["returned", "return_created", "rto"].includes(o.status)) throw new HttpError(400, `${o.name} is ${o.status.replace(/_/g, " ")} — not going out`);
-    if (o.awbScannedAt && (o.awbScans || []).some((x) => x.awb === sh.awb)) return res.send({ order: summary, already: true, scannedAt: o.awbScannedAt, message: `${o.name} already scanned on ${fmt(o.awbScannedAt)}` });
+    if (boxesAll.length > 1) summary.items = (sh.lines || []).map((l) => `${l.quantity} × ${l.title}`);
+    if (o.awbScannedAt && (o.awbScans || []).some((x) => x.awb === sh.awb)) return res.send({ order: summary, already: true, scannedAt: o.awbScannedAt, message: `${o.name}${boxNote} already scanned on ${fmt(o.awbScannedAt)}` });
     const now = new Date();
     o.awbScannedAt = now;
     o.awbScannedBy = req.user._id;
     o.awbScans = [...(o.awbScans || []), { awb: sh.awb, courier: sh.courierName || "", at: now, by: req.user._id, byName: req.user.name || "" }];
     await o.save();
     require("../utils/shopify/orderIndex").forget(req.storeOrg);
-    res.send({ order: summary, scanned: true, scannedAt: now, message: `${o.name} scanned · ${sh.courierName || ""} ${sh.awb}`.trim() });
+    const left = boxesAll.filter((x) => !(o.awbScans || []).some((y) => y.awb === x.awb)).length;
+    res.send({ order: summary, scanned: true, scannedAt: now, message: `${o.name}${boxNote} scanned · ${sh.courierName || ""} ${sh.awb}${left ? ` · ${left} more box${left === 1 ? "" : "es"} to scan` : ""}`.trim() });
   })
 );
 
@@ -1077,6 +1087,14 @@ router.get(
       return res.send(buf);
     }
     if (!o.shipment?.awb && o.shipment?.carrier !== "amazon_easyship") throw new HttpError(400, "Book a courier first");
+    // Another box of a several-box order: its own label (?box=2).
+    const boxNo = Number(req.query.box) || 1;
+    if (boxNo > 1 || (o.extraShipments || []).length) {
+      const x = boxNo > 1 ? (o.extraShipments || []).find((b) => b.box === boxNo) : o.shipment;
+      if (!x) throw new HttpError(404, `Box ${boxNo} isn't booked`);
+      const view = { ...require("../utils/shopify/ship").boxOrder(o, { lines: (x.lines || []).map((l) => ({ ...l, unit: ((o.lines || []).find((ol) => String(ol.lineId) === l.lineId)?.total || 0) / Math.max(1, (o.lines || []).find((ol) => String(ol.lineId) === l.lineId)?.quantity || 1) })) }, x.codAmount || 0), shipment: x, name: `${o.name} box ${boxNo}/${x.of}` };
+      return require("../utils/shopify/labelOut").sendLabel(res, view, { org: req.org, storeOrg: req.storeOrg, own: req.query.own === "1" });
+    }
     if (o.channel === "amazon") await devices.amazonData(req, "amazon_label_download", o.name, { orderId: String(o._id), carrier: o.shipment?.carrier || "" });
     await require("../utils/shopify/labelOut").sendLabel(res, o, { org: req.org, storeOrg: req.storeOrg, own: req.query.own === "1" });
   })
@@ -1088,7 +1106,15 @@ router.post(
     const d = validate(Joi.object({ ids: idsJoi, format: Joi.string().valid("4x6", "a4").allow("") }), req.body);
     const all = await ordersFor(req, d.ids);
     // Easy Ship parcels carry Amazon's own label (open it from the order), never OrdexaGo's.
-    const orders = all.filter((o) => o.shipment?.awb && o.shipment.carrier !== "amazon_easyship");
+    const SH = require("../utils/shopify/ship");
+    const unitOf = (o, lineId) => {
+      const l = (o.lines || []).find((x) => String(x.lineId) === lineId);
+      return l?.quantity ? l.total / l.quantity : 0;
+    };
+    // Several-box orders: one label per box.
+    const orders = all
+      .filter((o) => o.shipment?.awb && o.shipment.carrier !== "amazon_easyship")
+      .flatMap((o) => (!(o.extraShipments || []).length ? [o] : SH.allShipments(o).map((x, i) => ({ ...SH.boxOrder(o, { lines: (x.lines || []).map((l) => ({ ...l, unit: unitOf(o, l.lineId) })) }, x.codAmount || 0), shipment: x, name: `${o.name} box ${x.box || i + 1}/${x.of || SH.allShipments(o).length}` }))));
     if (!orders.length) throw new HttpError(400, all.some((o) => o.shipment?.carrier === "amazon_easyship") ? "Easy Ship orders use Amazon's label — open it from each order" : "None of these orders has a shipment booked");
     const org = await Organization.findById(req.org);
     const accs = new Map((await CourierAccount.find({ organization: req.storeOrg })).map((a) => [String(a._id), a]));

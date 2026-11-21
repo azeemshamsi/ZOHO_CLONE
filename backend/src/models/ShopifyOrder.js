@@ -149,6 +149,10 @@ const shopifyOrderSchema = new mongoose.Schema(
     // Shipments booked and cancelled: a new booking then uses "<order>-2", "-3"… as the courier's order reference
     // (couriers refuse a reference they have seen before).
     cancelledShipments: [{ _id: false, courier: String, awb: String, at: Date }],
+    // Shipped in several boxes (each its own AWB): box 1 is `shipment`, boxes 2… are here, each like `shipment`
+    // plus { box, of, lines: [{ lineId, title, sku, quantity }] }. `boxes` keeps the split: [{ box, lines }].
+    extraShipments: { type: [mongoose.Schema.Types.Mixed], default: undefined },
+    boxes: { type: mongoose.Schema.Types.Mixed, default: undefined },
     // Reverse pickup (utils/shopify/reverse.js): the courier brings a delivered order back.
     reverse: { type: mongoose.Schema.Types.Mixed, default: undefined },
     returnFrom: String, // status before the return was opened (to go back to if it's declined)
@@ -162,6 +166,7 @@ shopifyOrderSchema.index({ organization: 1, shopifyId: 1 }, { unique: true });
 shopifyOrderSchema.index({ organization: 1, status: 1, orderDate: -1 });
 shopifyOrderSchema.index({ organization: 1, orderDate: -1 });
 shopifyOrderSchema.index({ organization: 1, "shipment.awb": 1 });
+shopifyOrderSchema.index({ organization: 1, "extraShipments.awb": 1 });
 shopifyOrderSchema.index({ organization: 1, name: 1 });
 shopifyOrderSchema.index({ organization: 1, orderNumber: 1 });
 shopifyOrderSchema.index({ organization: 1, updatedAt: -1 });

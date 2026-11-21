@@ -461,6 +461,200 @@ function CourierRates({ id }) {
   );
 }
 
+// Book in several boxes: everything in one box, each unit in its own box, or your own split (n boxes, each
+// unit put in a box), with each box's weight and size (blank = from its products' package types).
+function BoxesEditor({ orderId, onChange }) {
+  const [lines, setLines] = useState(null);
+  const [mode, setMode] = useState("one"); // one | each | custom
+  const [n, setN] = useState(2);
+  const [assign, setAssign] = useState({}); // "lineId#unit" → box number
+  const [pkgs, setPkgs] = useState({}); // box → { weight, length, breadth, height }
+  useEffect(() => {
+    api
+      .get(`/shopify/orders/${orderId}`)
+      .then((r) => setLines((r.data.lines || []).filter((l) => l.quantity > 0)))
+      .catch(() => setLines([]));
+  }, [orderId]);
+  const units = (lines || []).flatMap((l) =>
+    Array.from({ length: l.quantity }, (_, u) => ({
+      key: `${l.lineId}#${u}`,
+      lineId: l.lineId,
+      title: l.variantTitle ? `${l.title} — ${l.variantTitle}` : l.title,
+      sku: l.sku,
+      u,
+    })),
+  );
+  const totalUnits = units.length;
+  const boxOf = (x, i) =>
+    mode === "each"
+      ? i + 1
+      : mode === "custom"
+        ? Number(assign[x.key]) || 1
+        : 1;
+  const count = mode === "each" ? totalUnits : mode === "custom" ? n : 1;
+  useEffect(() => {
+    if (mode === "one" || totalUnits < 2) return onChange(null);
+    const out = Array.from({ length: count }, (_, b) => {
+      const m = new Map();
+      units.forEach(
+        (x, i) =>
+          boxOf(x, i) === b + 1 && m.set(x.lineId, (m.get(x.lineId) || 0) + 1),
+      );
+      const pk = pkgs[b + 1] || {};
+      const ok = ["weight", "length", "breadth", "height"].every(
+        (k) => Number(pk[k]) > 0,
+      );
+      return {
+        lines: [...m].map(([lineId, quantity]) => ({ lineId, quantity })),
+        pkg: ok
+          ? Object.fromEntries(
+              Object.entries(pk).map(([k, v]) => [k, Number(v)]),
+            )
+          : {},
+      };
+    }).filter((b) => b.lines.length);
+    onChange(out.length > 1 ? out : null);
+  }, [mode, n, JSON.stringify(assign), JSON.stringify(pkgs), lines]);
+  if (!lines || totalUnits < 2) return null;
+  const setPk = (b, k) => (e) =>
+    setPkgs({ ...pkgs, [b]: { ...(pkgs[b] || {}), [k]: e.target.value } });
+  const used = new Set(units.map((x, i) => boxOf(x, i)));
+  return (
+    <div className="card" style={{ background: "var(--bg-2, #f7f8fa)" }}>
+      <div className="label-sm">Boxes</div>
+      <div className="seg" role="group" style={{ margin: "4px 0 8px" }}>
+        {[
+          ["one", "All in one box"],
+          ["each", `Each item in its own box (${totalUnits})`],
+          ["custom", "Split into boxes…"],
+        ].map(([k, l]) => (
+          <button
+            key={k}
+            type="button"
+            className={mode === k ? "on" : ""}
+            onClick={() => setMode(k)}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+      {mode === "custom" && (
+        <>
+          <Field label="Number of boxes">
+            <input
+              type="number"
+              min="2"
+              max={Math.min(20, totalUnits)}
+              value={n}
+              onChange={(e) =>
+                setN(
+                  Math.max(
+                    2,
+                    Math.min(20, totalUnits, Number(e.target.value) || 2),
+                  ),
+                )
+              }
+              style={{ maxWidth: 90 }}
+            />
+          </Field>
+          <table className="table" style={{ marginTop: 6 }}>
+            <tbody>
+              {units.map((x) => (
+                <tr key={x.key}>
+                  <td className="small">
+                    {x.title}
+                    {x.sku && <span className="muted"> · {x.sku}</span>}
+                    {(lines.find((l) => l.lineId === x.lineId)?.quantity || 1) >
+                      1 && <span className="muted"> · unit {x.u + 1}</span>}
+                  </td>
+                  <td style={{ width: 120 }}>
+                    <select
+                      value={assign[x.key] || 1}
+                      onChange={(e) =>
+                        setAssign({
+                          ...assign,
+                          [x.key]: Number(e.target.value),
+                        })
+                      }
+                    >
+                      {Array.from({ length: n }, (_, b) => (
+                        <option key={b} value={b + 1}>
+                          Box {b + 1}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {used.size < n && (
+            <div className="small text-amber">
+              Some boxes are empty — they're left out.
+            </div>
+          )}
+        </>
+      )}
+      {mode !== "one" && (
+        <>
+          <div className="small muted" style={{ margin: "8px 0 4px" }}>
+            Each box is booked with its own AWB and label, and marked fulfilled
+            in Shopify with its own tracking. COD is shared by value. Weight and
+            size per box (blank = from the products' package types):
+          </div>
+          {[...used]
+            .sort((a, b) => a - b)
+            .map((b) => (
+              <div
+                key={b}
+                className="row-4"
+                style={{ alignItems: "end", marginBottom: 4 }}
+              >
+                <div className="small">
+                  <strong>Box {b}</strong>
+                  <div className="muted">
+                    {units
+                      .filter((x, i) => boxOf(x, i) === b)
+                      .map((x) => x.title)
+                      .join(", ")
+                      .slice(0, 80)}
+                  </div>
+                </div>
+                <input
+                  type="number"
+                  step="0.1"
+                  placeholder="kg"
+                  value={pkgs[b]?.weight || ""}
+                  onChange={setPk(b, "weight")}
+                />
+                <input
+                  type="number"
+                  placeholder="L×B×H cm: L"
+                  value={pkgs[b]?.length || ""}
+                  onChange={setPk(b, "length")}
+                />
+                <div style={{ display: "flex", gap: 4 }}>
+                  <input
+                    type="number"
+                    placeholder="B"
+                    value={pkgs[b]?.breadth || ""}
+                    onChange={setPk(b, "breadth")}
+                  />
+                  <input
+                    type="number"
+                    placeholder="H"
+                    value={pkgs[b]?.height || ""}
+                    onChange={setPk(b, "height")}
+                  />
+                </div>
+              </div>
+            ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ShipModal({ ids, couriers, onClose, onDone }) {
   const active = couriers.filter((c) => c.active);
   const single = ids.length === 1;
@@ -483,6 +677,9 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
   const [saved, setSaved] = useState(false);
   const [pickupFrom, setPickupFrom] = useState(""); // "" automatic | "own" | "seller:<id>"
   const [sellerList, setSellerList] = useState([]);
+  // Several boxes (one order): null = one box with everything, else [{ lines: [{ lineId, quantity }], pkg }].
+  const [boxes, setBoxes] = useState(null);
+  const [boxAwbs, setBoxAwbs] = useState([]);
   const manualOk = ["weight", "length", "breadth", "height"].every(
     (k) => Number(manualPkg[k]) > 0,
   );
@@ -590,6 +787,16 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
         invoiceFirst,
         skipCheck,
         pickupFrom,
+        ...(single && boxes
+          ? {
+              boxes,
+              manual: {
+                ...manual,
+                courierId: pick.courierId || "",
+                awbs: boxAwbs,
+              },
+            }
+          : {}),
       });
       onDone(data.results);
     } catch (e) {
@@ -615,7 +822,9 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
               !pick ||
               needPkg ||
               blocked ||
-              (acc?.carrier === "custom" && single && !manual.awb)
+              (acc?.carrier === "custom" &&
+                single &&
+                (boxes ? boxes.some((_, i) => !boxAwbs[i]) : !manual.awb))
             }
             onClick={go}
           >
@@ -956,6 +1165,23 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
                 time.
               </p>
             ))}
+          {single && <BoxesEditor orderId={ids[0]} onChange={setBoxes} />}
+          {single && boxes && acc?.carrier === "custom" && (
+            <div className="row-4">
+              {boxes.map((_, i) => (
+                <Field key={i} label={`Box ${i + 1} AWB`}>
+                  <input
+                    value={boxAwbs[i] || ""}
+                    onChange={(e) =>
+                      setBoxAwbs(
+                        Object.assign([...boxAwbs], { [i]: e.target.value }),
+                      )
+                    }
+                  />
+                </Field>
+              ))}
+            </div>
+          )}
           <label className="check">
             <input
               type="checkbox"
@@ -2322,6 +2548,31 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
                 {sh.bookedAt && (
                   <div className="muted small">
                     Booked {new Date(sh.bookedAt).toLocaleString("en-IN")}
+                  </div>
+                )}
+                {(o.extraShipments || []).length > 0 && (
+                  <div className="small" style={{ margin: "6px 0" }}>
+                    <strong>{(o.extraShipments || []).length + 1} boxes</strong>
+                    {[sh, ...o.extraShipments].map((x, i) => (
+                      <div key={x.awb || i} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 3 }}>
+                        <span>
+                          Box {x.box || i + 1}:{" "}
+                          {x.trackingUrl ? (
+                            <a href={x.trackingUrl} target="_blank" rel="noreferrer">
+                              {x.awb}
+                            </a>
+                          ) : (
+                            x.awb
+                          )}{" "}
+                          · {TRACK_LABEL[x.trackStatus] || x.trackStatus || "booked"}
+                          {x.codAmount ? ` · COD ${money(x.codAmount)}` : ""}
+                          <span className="muted"> · {(x.lines || []).map((l) => `${l.quantity} × ${l.title}`).join(", ")}</span>
+                        </span>
+                        <button type="button" className="btn btn-sm" onClick={() => openPdf(`/shopify/orders/${o._id}/label${(x.box || i + 1) > 1 ? `?box=${x.box || i + 1}` : ""}`)}>
+                          Label
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
                 {sh.carrier === "bluedart" && (
