@@ -54,7 +54,7 @@ app.use("/api/webhooks/meta", express.raw({ type: "*/*", limit: "5mb" }), requir
 app.use("/api/inbox/conversations", express.json({ limit: "25mb" }));
 app.use("/api/import", express.json({ limit: "80mb" }));
 app.use("/api/shopify/new-order", express.json({ limit: "40mb" }));
-app.use(["/api/attachments", "/api/shopify/orders", "/api/bill-scan", "/api/gst/returns/2b", "/api/seller-portal"], express.json({ limit: "15mb" }));
+app.use(["/api/attachments", "/api/shopify/orders", "/api/bill-scan", "/api/gst/returns/2b", "/api/seller-portal", "/api/tickets"], express.json({ limit: "15mb" }));
 app.use("/api/amazon", express.json({ limit: "60mb" }));
 app.use(["/api/flipkart-sales", "/api/pepperfry-sales"], express.json({ limit: "60mb" }));
 app.use(express.json({ limit: "1mb" }));
@@ -110,6 +110,7 @@ app.use("/api/security", auth, require("./routes/security"));
 app.use("/api/superadmin", auth, require("./routes/superadmin"));
 app.use("/api/sellers", auth, permit((req) => (req.method === "GET" && req.path === "/" ? ["store_sellers", "store_orders", "store_shipping"] : "store_sellers")), require("./routes/sellers"));
 app.use("/api/seller-portal", auth, require("./routes/sellerPortal"));
+app.use("/api/tickets", auth, permit("tickets"), require("./routes/tickets"));
 app.use("/api/flipkart-orders", auth, permit((req) => require("./routes/flipkartOrders").moduleOf(req)), require("./routes/flipkartOrders"));
 app.use("/api/amazon-orders", auth, permit((req) => require("./routes/amazonOrders").moduleOf(req)), require("./routes/amazonOrders"));
 app.use("/api/pepperfry-sales", auth, permit((req) => (req.method === "GET" ? ["sales.pepperfry", "gst"] : "sales.pepperfry")), require("./routes/flipkartSales").pepperfry);

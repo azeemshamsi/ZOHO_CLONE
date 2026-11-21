@@ -994,3 +994,15 @@ tr.clickable:hover td { background: var(--brand-50); }
 .tally-h tbody + tbody tr:first-child td { padding-top: 10px; }
 @media print { .no-print { display: none !important; } }
 @media (max-width: 700px) { .tally-h { font-size: 12px; } .tally-h td, .tally-h th { padding: 4px 5px; } }
+
+/* Seller tickets */
+.pill-blue { background: var(--brand-50); color: var(--brand); }
+.ticket-thread { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.ticket-msg { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; max-width: 88%; background: var(--surface, #fff); }
+.ticket-msg.mine { align-self: flex-end; background: var(--brand-50); border-color: transparent; }
+.ticket-msg.internal { background: #fff8e6; border: 1px dashed #e0b84a; }
+.ticket-internal-box { background: #fffdf5; border-color: #e0b84a; }
+.ticket-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; align-items: start; }
+.ticket-side { display: flex; flex-direction: column; gap: 4px; }
+.ticket-side .label-sm { margin-top: 10px; }
+@media (max-width: 900px) { .ticket-layout { grid-template-columns: 1fr; } .ticket-msg { max-width: 100%; } }

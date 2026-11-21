@@ -60,7 +60,7 @@ const NAV = [
   {
     label: "Store",
     icon: "bag",
-    mod: ["store_orders", "store_shipping", "store_returns", "store_settings", "store_sellers"],
+    mod: ["store_orders", "store_shipping", "store_returns", "store_settings", "store_sellers", "tickets"],
     children: [
       { to: "/shopify-orders", label: "Orders", mod: ["store_orders", "store_shipping"] },
       { to: "/awb-scan", label: "Scan AWB", mod: "store_shipping" },
@@ -69,6 +69,7 @@ const NAV = [
       { to: "/package-types", label: "Package Types", mod: ["store_shipping", "store_settings", "store_orders"] },
       { to: "/shipping-calculator", label: "Shipping Calculator", mod: ["store_shipping", "store_settings", "store_orders"] },
       { to: "/sellers", label: "Sellers", mod: "store_sellers" },
+      { to: "/tickets", label: "Seller Tickets", mod: "tickets" },
       { to: "/amazon-settings", label: "Amazon", mod: "store_settings" },
       { to: "/flipkart-settings", label: "Flipkart", mod: "store_settings" },
       { to: "/shopify-settings", label: "Settings", mod: "store_settings" },
@@ -141,6 +142,7 @@ const PATH_MODULES = [
   ["/amazon-settings", "store_settings"],
   ["/flipkart-settings", "store_settings"],
   ["/abandoned-checkouts", "store_orders.abandoned"],
+  ["/tickets", "tickets"],
   ["/returns-scan", "store_returns"],
   ["/awb-scan", "store_shipping"],
   ["/package-types", ["store_shipping", "store_settings", "store_orders"]],

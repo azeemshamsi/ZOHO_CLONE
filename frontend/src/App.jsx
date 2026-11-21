@@ -54,6 +54,7 @@ import AmazonSettings from "./pages/AmazonSettings";
 import FlipkartSettings from "./pages/FlipkartSettings";
 import AbandonedCheckouts from "./pages/AbandonedCheckouts";
 import NewStoreOrder from "./pages/NewStoreOrder";
+import Tickets, { TicketDetail } from "./pages/Tickets";
 import Privacy from "./pages/Privacy";
 import Sellers from "./pages/Sellers";
 import SellerPortal from "./pages/SellerPortal";
@@ -215,6 +216,8 @@ export default function App() {
           <Route path="superadmin" element={<Superadmin />} />
           <Route path="sellers" element={<Sellers />} />
           <Route path="seller" element={<SellerPortal />} />
+          <Route path="tickets" element={<Tickets />} />
+          <Route path="tickets/:id" element={<TicketDetail />} />
           <Route path="inbox" element={<Inbox />} />
           <Route path="marketing" element={<Navigate to="/marketing/campaigns" replace />} />
           <Route path="marketing/integrations" element={<Integrations />} />

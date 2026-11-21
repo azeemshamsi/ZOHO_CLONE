@@ -2,19 +2,58 @@ import { useEffect, useState } from "react";
 import api, { errMsg } from "../lib/api";
 import { stateName } from "../lib/constants";
 import { money, amount, date } from "../lib/format";
-import { PageHeader, Spinner, Empty, Modal, Field, SearchBox, useDebounced, toast } from "../components/ui";
+import {
+  PageHeader,
+  Spinner,
+  Empty,
+  Modal,
+  Field,
+  SearchBox,
+  useDebounced,
+  toast,
+} from "../components/ui";
 import Icon from "../components/Icon";
+import SellerTickets from "../components/SellerTickets";
 
 // A marketplace seller's own dashboard: their orders and labels, their Shopify stock, purchase orders and penalties.
 
-const STATUS = { new: "New", packed: "Packed", ready_to_ship: "Ready to ship", shipped: "Shipped", delivered: "Delivered", rto: "RTO", return_created: "Return requested", returned: "Returned", cancelled: "Cancelled" };
-const STATUS_CLS = { new: "status-draft", packed: "status-sent", ready_to_ship: "status-sent", shipped: "status-open", delivered: "status-paid", rto: "status-overdue", return_created: "status-partially_paid", returned: "status-overdue", cancelled: "status-cancelled" };
-const TRACK = { pending: "Awaiting pickup", in_transit: "In transit", out_for_delivery: "Out for delivery", delivered: "Delivered", rto: "RTO", cancelled: "Cancelled by courier" };
+const STATUS = {
+  new: "New",
+  packed: "Packed",
+  ready_to_ship: "Ready to ship",
+  shipped: "Shipped",
+  delivered: "Delivered",
+  rto: "RTO",
+  return_created: "Return requested",
+  returned: "Returned",
+  cancelled: "Cancelled",
+};
+const STATUS_CLS = {
+  new: "status-draft",
+  packed: "status-sent",
+  ready_to_ship: "status-sent",
+  shipped: "status-open",
+  delivered: "status-paid",
+  rto: "status-overdue",
+  return_created: "status-partially_paid",
+  returned: "status-overdue",
+  cancelled: "status-cancelled",
+};
+const TRACK = {
+  pending: "Awaiting pickup",
+  in_transit: "In transit",
+  out_for_delivery: "Out for delivery",
+  delivered: "Delivered",
+  rto: "RTO",
+  cancelled: "Cancelled by courier",
+};
 
 async function openLabel(id) {
   const w = window.open("", "_blank");
   try {
-    const r = await api.get(`/seller-portal/orders/${id}/label`, { responseType: "blob" });
+    const r = await api.get(`/seller-portal/orders/${id}/label`, {
+      responseType: "blob",
+    });
     if (r.data.type === "application/json") {
       const j = JSON.parse(await r.data.text());
       if (j.url) {
@@ -29,29 +68,68 @@ async function openLabel(id) {
   } catch (e) {
     if (w) w.close();
     let m = errMsg(e);
-    if (e?.response?.data instanceof Blob) m = JSON.parse(await e.response.data.text()).message || m;
+    if (e?.response?.data instanceof Blob)
+      m = JSON.parse(await e.response.data.text()).message || m;
     toast(m, "error");
   }
 }
 
 export default function SellerPortal() {
   const [me, setMe] = useState(null);
-  const [tab, setTab] = useState("orders");
-  useEffect(() => {
+  const [tab, setTab] = useState(() =>
+    new URLSearchParams(window.location.search).get("tab") === "support"
+      ? "support"
+      : "orders",
+  );
+  const loadMe = () =>
     api
       .get("/seller-portal/me")
       .then((r) => setMe(r.data))
       .catch((e) => toast(errMsg(e), "error"));
+  useEffect(() => {
+    loadMe();
   }, []);
   if (!me) return <Spinner />;
   const s = me.seller;
   return (
     <>
-      <PageHeader title={s.name} subtitle={`Seller dashboard · brands: ${s.brands.join(", ")}`} />
-      <div className="seller-stats" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12, marginBottom: 16 }}>
-        <Stat label="Open orders" value={me.counts.open} onClick={() => setTab("orders")} />
-        <Stat label="To ship (not booked)" value={(me.counts.new || 0) + (me.counts.packed || 0)} />
-        <Stat label="Deductions pending" value={money(me.penaltiesPending)} onClick={() => setTab("penalties")} />
+      <PageHeader
+        title={s.name}
+        subtitle={`Seller dashboard · brands: ${s.brands.join(", ")}`}
+      />
+      <div
+        className="seller-stats"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+          gap: 12,
+          marginBottom: 16,
+        }}
+      >
+        <Stat
+          label="Open orders"
+          value={me.counts.open}
+          onClick={() => setTab("orders")}
+        />
+        <Stat
+          label="To ship (not booked)"
+          value={(me.counts.new || 0) + (me.counts.packed || 0)}
+        />
+        <Stat
+          label="Deductions pending"
+          value={money(me.penaltiesPending)}
+          onClick={() => setTab("penalties")}
+        />
+        <Stat
+          label="Support tickets open"
+          value={me.tickets?.open || 0}
+          sub={
+            me.tickets?.unread
+              ? `${me.tickets.unread} new repl${me.tickets.unread === 1 ? "y" : "ies"}`
+              : ""
+          }
+          onClick={() => setTab("support")}
+        />
       </div>
       <div className="tabs">
         {[
@@ -60,9 +138,17 @@ export default function SellerPortal() {
           ["pos", "Purchase orders"],
           ["penalties", "Deductions"],
           ["profile", "Pickup address"],
+          ["support", "Support"],
         ].map(([k, l]) => (
-          <button key={k} className={`tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>
+          <button
+            key={k}
+            className={`tab ${tab === k ? "active" : ""}`}
+            onClick={() => setTab(k)}
+          >
             {l}
+            {k === "support" && me.tickets?.unread > 0 && (
+              <span className="tab-count">{me.tickets.unread}</span>
+            )}
           </button>
         ))}
       </div>
@@ -70,19 +156,38 @@ export default function SellerPortal() {
       {tab === "stock" && <Stock />}
       {tab === "pos" && <Pos />}
       {tab === "penalties" && <Penalties />}
+      {tab === "support" && <SellerTickets onCount={loadMe} />}
       {tab === "profile" && (
         <div className="card">
           <dl className="details">
             <dt>Pickup address</dt>
-            <dd>{s.pickup?.address ? [s.pickup.name, s.pickup.address, s.pickup.city, stateName(s.pickup.state), s.pickup.pincode].filter(Boolean).join(", ") : "Not set"}</dd>
+            <dd>
+              {s.pickup?.address
+                ? [
+                    s.pickup.name,
+                    s.pickup.address,
+                    s.pickup.city,
+                    stateName(s.pickup.state),
+                    s.pickup.pincode,
+                  ]
+                    .filter(Boolean)
+                    .join(", ")
+                : "Not set"}
+            </dd>
             <dt>Pickup phone</dt>
             <dd>{s.pickup?.phone || s.phone || "—"}</dd>
             <dt>GSTIN</dt>
             <dd>{s.gstin || "—"}</dd>
             <dt>Purchase rate</dt>
-            <dd>The cost price agreed for each product; where a product has none, {s.rate}% of the sale price (GST included, before the marketplace's discounts)</dd>
+            <dd>
+              The cost price agreed for each product; where a product has none,{" "}
+              {s.rate}% of the sale price (GST included, before the
+              marketplace's discounts)
+            </dd>
           </dl>
-          <p className="small muted">To change your pickup address or details, contact the marketplace.</p>
+          <p className="small muted">
+            To change your pickup address or details, contact the marketplace.
+          </p>
         </div>
       )}
     </>
@@ -91,7 +196,11 @@ export default function SellerPortal() {
 
 function Stat({ label, value, sub, onClick }) {
   return (
-    <div className="card" style={{ padding: 14, cursor: onClick ? "pointer" : "default" }} onClick={onClick}>
+    <div
+      className="card"
+      style={{ padding: 14, cursor: onClick ? "pointer" : "default" }}
+      onClick={onClick}
+    >
       <div className="small muted">{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700, marginTop: 4 }}>{value}</div>
       {sub && <div className="small muted">{sub}</div>}
@@ -108,7 +217,9 @@ function Orders({ counts }) {
   useEffect(() => {
     let live = true;
     api
-      .get("/seller-portal/orders", { params: { status, q: dq || undefined, page } })
+      .get("/seller-portal/orders", {
+        params: { status, q: dq || undefined, page },
+      })
       .then((r) => live && setData(r.data))
       .catch((e) => toast(errMsg(e), "error"));
     return () => {
@@ -118,8 +229,14 @@ function Orders({ counts }) {
   const pages = data ? Math.ceil(data.total / data.limit) : 1;
   return (
     <>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <select value={status} onChange={(e) => (setStatus(e.target.value), setPage(1))} style={{ width: "auto" }}>
+      <div
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}
+      >
+        <select
+          value={status}
+          onChange={(e) => (setStatus(e.target.value), setPage(1))}
+          style={{ width: "auto" }}
+        >
           <option value="open">Open ({counts.open})</option>
           <option value="all">All ({counts.all})</option>
           {Object.entries(STATUS).map(([k, l]) => (
@@ -128,7 +245,11 @@ function Orders({ counts }) {
             </option>
           ))}
         </select>
-        <SearchBox value={q} onChange={(v) => (setQ(v), setPage(1))} placeholder="Order no, SKU, product, AWB, pincode" />
+        <SearchBox
+          value={q}
+          onChange={(v) => (setQ(v), setPage(1))}
+          placeholder="Order no, SKU, product, AWB, pincode"
+        />
       </div>
       {!data ? (
         <Spinner />
@@ -153,12 +274,34 @@ function Orders({ counts }) {
                   <td>
                     <div className="strong">{o.name}</div>
                     <div className="small muted">{date(o.orderDate)}</div>
-                    <div className="small muted">{o.paymentMode === "cod" ? "COD" : o.paymentMode === "partial" ? "Part COD" : "Prepaid"}</div>
+                    <div className="small muted">
+                      {o.paymentMode === "cod"
+                        ? "COD"
+                        : o.paymentMode === "partial"
+                          ? "Part COD"
+                          : "Prepaid"}
+                    </div>
                   </td>
                   <td>
                     {o.lines.map((l, i) => (
-                      <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
-                        {l.image && <img src={l.image} alt="" width={34} height={34} style={{ objectFit: "cover", borderRadius: 4 }} />}
+                      <div
+                        key={i}
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                          marginBottom: 4,
+                        }}
+                      >
+                        {l.image && (
+                          <img
+                            src={l.image}
+                            alt=""
+                            width={34}
+                            height={34}
+                            style={{ objectFit: "cover", borderRadius: 4 }}
+                          />
+                        )}
                         <div className="small">
                           <div>
                             {l.quantity} × {l.title}
@@ -168,32 +311,61 @@ function Orders({ counts }) {
                         </div>
                       </div>
                     ))}
-                    {o.otherItems > 0 && <div className="small muted">+ {o.otherItems} item(s) from other sellers</div>}
+                    {o.otherItems > 0 && (
+                      <div className="small muted">
+                        + {o.otherItems} item(s) from other sellers
+                      </div>
+                    )}
                   </td>
                   <td className="small">
                     {o.shipTo.name}
-                    <div className="muted">{[o.shipTo.city, o.shipTo.pincode].filter(Boolean).join(" ")}</div>
+                    <div className="muted">
+                      {[o.shipTo.city, o.shipTo.pincode]
+                        .filter(Boolean)
+                        .join(" ")}
+                    </div>
                   </td>
                   <td className="small">
-                    <span className={`status ${STATUS_CLS[o.status] || ""}`}>{STATUS[o.status] || o.status}</span>
+                    <span className={`status ${STATUS_CLS[o.status] || ""}`}>
+                      {STATUS[o.status] || o.status}
+                    </span>
                     {o.shipment && (
                       <div style={{ marginTop: 4 }}>
-                        {o.shipment.courierName} · {o.shipment.trackingUrl ? (
-                          <a href={o.shipment.trackingUrl} target="_blank" rel="noreferrer">
+                        {o.shipment.courierName} ·{" "}
+                        {o.shipment.trackingUrl ? (
+                          <a
+                            href={o.shipment.trackingUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
                             {o.shipment.awb}
                           </a>
                         ) : (
                           o.shipment.awb
                         )}
-                        {o.shipment.trackStatus && <div className="muted">{TRACK[o.shipment.trackStatus] || o.shipment.trackStatus}</div>}
+                        {o.shipment.trackStatus && (
+                          <div className="muted">
+                            {TRACK[o.shipment.trackStatus] ||
+                              o.shipment.trackStatus}
+                          </div>
+                        )}
                       </div>
                     )}
-                    {o.settled && <div className="muted">{o.settled.excluded ? "Settled earlier" : `On PO ${o.settled.number}`}</div>}
+                    {o.settled && (
+                      <div className="muted">
+                        {o.settled.excluded
+                          ? "Settled earlier"
+                          : `On PO ${o.settled.number}`}
+                      </div>
+                    )}
                   </td>
                   <td className="num">{money(o.payout)}</td>
                   <td className="num">
                     {o.shipment?.fromYou ? (
-                      <button className="btn btn-sm" onClick={() => openLabel(o._id)}>
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => openLabel(o._id)}
+                      >
                         <Icon name="down" size={14} /> Label
                       </button>
                     ) : !o.shipment && ["new", "packed"].includes(o.status) ? (
@@ -207,14 +379,29 @@ function Orders({ counts }) {
         </div>
       )}
       {pages > 1 && (
-        <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 12 }}>
-          <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            justifyContent: "center",
+            marginTop: 12,
+          }}
+        >
+          <button
+            className="btn btn-sm"
+            disabled={page <= 1}
+            onClick={() => setPage(page - 1)}
+          >
             Previous
           </button>
           <span className="small muted" style={{ alignSelf: "center" }}>
             Page {page} of {pages}
           </span>
-          <button className="btn btn-sm" disabled={page >= pages} onClick={() => setPage(page + 1)}>
+          <button
+            className="btn btn-sm"
+            disabled={page >= pages}
+            onClick={() => setPage(page + 1)}
+          >
             Next
           </button>
         </div>
@@ -234,7 +421,9 @@ function Stock() {
     api
       .get("/seller-portal/products", { params: { q: dq || undefined, after } })
       .then((r) => {
-        setList((cur) => (after ? [...(cur || []), ...r.data.products] : r.data.products));
+        setList((cur) =>
+          after ? [...(cur || []), ...r.data.products] : r.data.products,
+        );
         setNext(r.data.next);
       })
       .catch((e) => {
@@ -247,11 +436,22 @@ function Stock() {
   }, [dq]);
   const save = async (v) => {
     const qty = Number(edits[v.id]);
-    if (!Number.isInteger(qty) || qty < 0) return toast("Enter a whole number", "error");
+    if (!Number.isInteger(qty) || qty < 0)
+      return toast("Enter a whole number", "error");
     setSaving(v.id);
     try {
-      await api.post("/seller-portal/products/stock", { variantId: v.id, quantity: qty });
-      setList((cur) => cur.map((p) => ({ ...p, variants: p.variants.map((x) => (x.id === v.id ? { ...x, available: qty } : x)) })));
+      await api.post("/seller-portal/products/stock", {
+        variantId: v.id,
+        quantity: qty,
+      });
+      setList((cur) =>
+        cur.map((p) => ({
+          ...p,
+          variants: p.variants.map((x) =>
+            x.id === v.id ? { ...x, available: qty } : x,
+          ),
+        })),
+      );
       setEdits((e) => {
         const n = { ...e };
         delete n[v.id];
@@ -266,15 +466,23 @@ function Stock() {
   return (
     <>
       <div style={{ marginBottom: 12 }}>
-        <SearchBox value={q} onChange={setQ} placeholder="Search your products by name or SKU" />
+        <SearchBox
+          value={q}
+          onChange={setQ}
+          placeholder="Search your products by name or SKU"
+        />
       </div>
       <p className="small muted" style={{ marginTop: 0 }}>
-        The quantity available on the marketplace store. Changing it here updates the store straight away.
+        The quantity available on the marketplace store. Changing it here
+        updates the store straight away.
       </p>
       {!list ? (
         <Spinner />
       ) : !list.length ? (
-        <Empty title="No products found" text="Your products are those whose Vendor on the store is your brand." />
+        <Empty
+          title="No products found"
+          text="Your products are those whose Vendor on the store is your brand."
+        />
       ) : (
         <div className="card" style={{ padding: 0, overflowX: "auto" }}>
           <table className="table">
@@ -292,29 +500,70 @@ function Stock() {
                 p.variants.map((v, i) => (
                   <tr key={v.id}>
                     <td>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        {(v.image || p.image) && <img src={v.image || p.image} alt="" width={34} height={34} style={{ objectFit: "cover", borderRadius: 4, visibility: i && !v.image ? "hidden" : "visible" }} />}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
+                        {(v.image || p.image) && (
+                          <img
+                            src={v.image || p.image}
+                            alt=""
+                            width={34}
+                            height={34}
+                            style={{
+                              objectFit: "cover",
+                              borderRadius: 4,
+                              visibility: i && !v.image ? "hidden" : "visible",
+                            }}
+                          />
+                        )}
                         <div>
-                          <div className={i ? "small" : "strong"}>{i ? "" : p.title}</div>
-                          {v.title && <div className="small muted">{v.title}</div>}
-                          {!i && p.status !== "ACTIVE" && <span className="status status-draft">{String(p.status).toLowerCase()}</span>}
+                          <div className={i ? "small" : "strong"}>
+                            {i ? "" : p.title}
+                          </div>
+                          {v.title && (
+                            <div className="small muted">{v.title}</div>
+                          )}
+                          {!i && p.status !== "ACTIVE" && (
+                            <span className="status status-draft">
+                              {String(p.status).toLowerCase()}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </td>
                     <td className="small">{v.sku || "—"}</td>
                     <td className="num">{amount(v.price)}</td>
                     <td className="num">
-                      <input type="number" min="0" step="1" style={{ width: 90, textAlign: "right" }} value={edits[v.id] ?? (v.available ?? "")} placeholder={v.available === null ? "—" : ""} onChange={(e) => setEdits({ ...edits, [v.id]: e.target.value })} />
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        style={{ width: 90, textAlign: "right" }}
+                        value={edits[v.id] ?? v.available ?? ""}
+                        placeholder={v.available === null ? "—" : ""}
+                        onChange={(e) =>
+                          setEdits({ ...edits, [v.id]: e.target.value })
+                        }
+                      />
                     </td>
                     <td className="num">
-                      {edits[v.id] !== undefined && String(edits[v.id]) !== String(v.available) && (
-                        <button className="btn btn-sm btn-primary" disabled={saving === v.id} onClick={() => save(v)}>
-                          {saving === v.id ? "Saving…" : "Save"}
-                        </button>
-                      )}
+                      {edits[v.id] !== undefined &&
+                        String(edits[v.id]) !== String(v.available) && (
+                          <button
+                            className="btn btn-sm btn-primary"
+                            disabled={saving === v.id}
+                            onClick={() => save(v)}
+                          >
+                            {saving === v.id ? "Saving…" : "Save"}
+                          </button>
+                        )}
                     </td>
                   </tr>
-                ))
+                )),
               )}
             </tbody>
           </table>
@@ -360,7 +609,10 @@ function Pos() {
   return (
     <>
       <p className="small muted" style={{ marginTop: 0 }}>
-        On the 8th of each month a purchase order is raised for your orders delivered by the end of the previous month, at least 7 days ago and not returned. Deductions are already taken off it. Make your invoice for the PO amount and upload it here; payment follows once it's approved.
+        On the 8th of each month a purchase order is raised for your orders
+        delivered by the end of the previous month, at least 7 days ago and not
+        returned. Deductions are already taken off it. Make your invoice for the
+        PO amount and upload it here; payment follows once it's approved.
       </p>
       {!list ? (
         <Spinner />
@@ -381,7 +633,10 @@ function Pos() {
             </thead>
             <tbody>
               {list.map((p) => {
-                const [label, cls] = INVOICE_STATE[p.invoiceState] || [p.invoiceState, ""];
+                const [label, cls] = INVOICE_STATE[p.invoiceState] || [
+                  p.invoiceState,
+                  "",
+                ];
                 return (
                   <tr key={p._id} onClick={() => show(p._id)}>
                     <td className="link strong">{p.number}</td>
@@ -389,12 +644,22 @@ function Pos() {
                     <td className="small">{p.reference}</td>
                     <td className="small">
                       <span className={`status ${cls}`}>{label}</span>
-                      {p.invoice && <div className="muted">Your invoice {p.invoice.number}{p.invoice.paid > 0 ? ` · paid ${money(p.invoice.paid)}` : ""}</div>}
+                      {p.invoice && (
+                        <div className="muted">
+                          Your invoice {p.invoice.number}
+                          {p.invoice.paid > 0
+                            ? ` · paid ${money(p.invoice.paid)}`
+                            : ""}
+                        </div>
+                      )}
                     </td>
                     <td className="num">{money(p.total)}</td>
                     <td className="num" onClick={(e) => e.stopPropagation()}>
                       {p.invoiceState === "awaiting_invoice" && (
-                        <button className="btn btn-sm btn-primary" onClick={() => setUpload(p)}>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          onClick={() => setUpload(p)}
+                        >
                           <Icon name="upload" size={14} /> Upload invoice
                         </button>
                       )}
@@ -431,7 +696,12 @@ const readFile = (file) =>
 
 function UploadInvoice({ po, onClose, onDone }) {
   const today = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
-  const [f, setF] = useState({ invoiceNumber: "", invoiceDate: today, amount: String(po.total), note: "" });
+  const [f, setF] = useState({
+    invoiceNumber: "",
+    invoiceDate: today,
+    amount: String(po.total),
+    note: "",
+  });
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -440,11 +710,18 @@ function UploadInvoice({ po, onClose, onDone }) {
   const save = async () => {
     setError("");
     if (!file) return setError("Choose your invoice file (PDF or photo)");
-    if (file.size > 10 * 1024 * 1024) return setError("The file can be up to 10 MB");
+    if (file.size > 10 * 1024 * 1024)
+      return setError("The file can be up to 10 MB");
     setBusy(true);
     try {
       const data = await readFile(file);
-      await api.post(`/seller-portal/purchase-orders/${po._id}/invoice`, { ...f, amount: Number(f.amount), name: file.name, type: file.type, data });
+      await api.post(`/seller-portal/purchase-orders/${po._id}/invoice`, {
+        ...f,
+        amount: Number(f.amount),
+        name: file.name,
+        type: file.type,
+        data,
+      });
       toast(`Invoice ${f.invoiceNumber} sent against ${po.number}`);
       onDone();
     } catch (e) {
@@ -462,7 +739,11 @@ function UploadInvoice({ po, onClose, onDone }) {
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn btn-primary" disabled={busy || !f.invoiceNumber.trim() || !file} onClick={save}>
+          <button
+            className="btn btn-primary"
+            disabled={busy || !f.invoiceNumber.trim() || !file}
+            onClick={save}
+          >
             {busy ? "Uploading…" : "Send invoice"}
           </button>
         </>
@@ -470,21 +751,53 @@ function UploadInvoice({ po, onClose, onDone }) {
     >
       <div className="form-grid">
         <p className="small" style={{ margin: 0 }}>
-          PO amount: <strong>{money(po.total)}</strong> — your invoice should be for this amount.
+          PO amount: <strong>{money(po.total)}</strong> — your invoice should be
+          for this amount.
         </p>
         <div className="row-2">
           <Field label="Your invoice number" required>
-            <input autoFocus value={f.invoiceNumber} onChange={set("invoiceNumber")} />
+            <input
+              autoFocus
+              value={f.invoiceNumber}
+              onChange={set("invoiceNumber")}
+            />
           </Field>
           <Field label="Invoice date" required>
-            <input type="date" max={today} value={f.invoiceDate} onChange={set("invoiceDate")} />
+            <input
+              type="date"
+              max={today}
+              value={f.invoiceDate}
+              onChange={set("invoiceDate")}
+            />
           </Field>
         </div>
-        <Field label="Invoice amount (₹)" required hint={diff ? `Differs from the PO by ${money(diff)} — the accounts team will check it` : "Matches the PO"}>
-          <input type="number" min="0" step="0.01" value={f.amount} onChange={set("amount")} />
+        <Field
+          label="Invoice amount (₹)"
+          required
+          hint={
+            diff
+              ? `Differs from the PO by ${money(diff)} — the accounts team will check it`
+              : "Matches the PO"
+          }
+        >
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={f.amount}
+            onChange={set("amount")}
+          />
         </Field>
-        <Field label="Invoice file" required hint="PDF or photo (JPG / PNG), up to 10 MB">
-          <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        <Field
+          label="Invoice file"
+          required
+          hint="PDF or photo (JPG / PNG), up to 10 MB"
+        >
+          <input
+            type="file"
+            accept="application/pdf,image/jpeg,image/png,image/webp"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+          />
         </Field>
         <Field label="Note (optional)">
           <input value={f.note} onChange={set("note")} />
@@ -510,10 +823,26 @@ function PoView({ po, onClose }) {
       }
     >
       <div className="print-area">
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
           <div>
             <div className="strong">{b.name}</div>
-            <div className="small muted">{[b.address?.street, b.address?.city, stateName(b.state), b.address?.pincode].filter(Boolean).join(", ")}</div>
+            <div className="small muted">
+              {[
+                b.address?.street,
+                b.address?.city,
+                stateName(b.state),
+                b.address?.pincode,
+              ]
+                .filter(Boolean)
+                .join(", ")}
+            </div>
             {b.gstin && <div className="small">GSTIN {b.gstin}</div>}
           </div>
           <div className="small" style={{ textAlign: "right" }}>
@@ -539,18 +868,25 @@ function PoView({ po, onClose }) {
               <tr key={i}>
                 <td>
                   {l.name}
-                  {l.description && <div className="small muted">{l.description}</div>}
+                  {l.description && (
+                    <div className="small muted">{l.description}</div>
+                  )}
                 </td>
                 <td className="num">{l.quantity}</td>
                 <td className="num">{amount(l.rate)}</td>
                 <td className="num">{l.taxRate}%</td>
-                <td className="num">{amount(l.amount ?? l.quantity * l.rate)}</td>
+                <td className="num">
+                  {amount(l.amount ?? l.quantity * l.rate)}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <table className="table compact" style={{ width: "auto", minWidth: 260 }}>
+          <table
+            className="table compact"
+            style={{ width: "auto", minWidth: 260 }}
+          >
             <tbody>
               <tr>
                 <td>Sub total</td>
@@ -587,7 +923,11 @@ function PoView({ po, onClose }) {
             </tbody>
           </table>
         </div>
-        {po.customerNotes && <p className="small" style={{ whiteSpace: "pre-wrap" }}>{po.customerNotes}</p>}
+        {po.customerNotes && (
+          <p className="small" style={{ whiteSpace: "pre-wrap" }}>
+            {po.customerNotes}
+          </p>
+        )}
       </div>
     </Modal>
   );
@@ -621,7 +961,11 @@ function Penalties() {
               <td>{date(p.date)}</td>
               <td>{p.reason}</td>
               <td>{p.orderName || "—"}</td>
-              <td className="small">{p.purchaseOrderNumber ? `Deducted on PO ${p.purchaseOrderNumber}` : "To be deducted from your next PO"}</td>
+              <td className="small">
+                {p.purchaseOrderNumber
+                  ? `Deducted on PO ${p.purchaseOrderNumber}`
+                  : "To be deducted from your next PO"}
+              </td>
               <td className="num">{money(p.amount)}</td>
             </tr>
           ))}

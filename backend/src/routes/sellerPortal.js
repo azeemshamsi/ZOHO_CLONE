@@ -60,7 +60,9 @@ router.get(
     const counts = Object.fromEntries(STATUSES.map((k) => [k, 0]));
     for (const o of orders) counts[o.status] = (counts[o.status] || 0) + 1;
     const penalties = await SellerPenalty.find({ seller: s._id, purchaseOrder: { $exists: false } }, { amount: 1 }).lean();
+    const tickets = await require("../models/SupportTicket").find({ seller: s._id }, { status: 1, sellerUnread: 1 }).lean();
     res.send({
+      tickets: { open: tickets.filter((t) => !["resolved", "closed"].includes(t.status)).length, unread: tickets.reduce((n, t) => n + (t.sellerUnread || 0), 0) },
       seller: { _id: s._id, name: s.name, brands: s.brands, rate: s.rate, contactName: s.contactName, email: s.email, phone: s.phone, gstin: s.gstin, pickup: s.pickup },
       counts: { ...counts, open: OPEN.reduce((t, k) => t + counts[k], 0), all: orders.length },
       penaltiesPending: Math.round(penalties.reduce((t, p) => t + p.amount, 0) * 100) / 100,
@@ -222,6 +224,111 @@ router.get(
   "/penalties",
   ah(async (req, res) => {
     res.send(await SellerPenalty.find({ seller: req.seller._id }, { date: 1, amount: 1, reason: 1, orderName: 1, purchaseOrderNumber: 1 }).sort({ date: -1 }).lean());
+  })
+);
+
+// ---- Support tickets: the seller raises a problem (order, payment, technical…) with screenshots; the team
+// answers at Store → Tickets. Internal team notes are never sent here.
+const T = require("../utils/tickets");
+const SupportTicket = require("../models/SupportTicket");
+const myTicket = async (req) => {
+  const t = await SupportTicket.findOne({ _id: req.params.id, seller: req.seller._id });
+  if (!t) throw new HttpError(404, "Ticket not found");
+  return t;
+};
+const filesSchema = Joi.array().items(Joi.object({ name: Joi.string().max(200).required(), type: Joi.string().allow("").default(""), data: Joi.string().required() })).max(5).default([]);
+
+router.get("/tickets/options", (req, res) => res.send({ categories: T.CATEGORIES, statuses: T.STATUSES }));
+router.get(
+  "/tickets",
+  ah(async (req, res) => {
+    const list = await SupportTicket.find({ seller: req.seller._id }, { messages: 0 }).sort({ lastActivityAt: -1 }).limit(300).lean();
+    const counts = await SupportTicket.find({ seller: req.seller._id }, { messages: 1 }).lean();
+    const replies = new Map(counts.map((t) => [String(t._id), (t.messages || []).filter((m) => !m.internal).length]));
+    res.send(list.map((t) => ({ ...T.sellerView(t), replies: Math.max(0, (replies.get(String(t._id)) || 1) - 1) })));
+  })
+);
+// Their orders, to pick the one the ticket is about.
+router.get(
+  "/tickets/orders",
+  ah(async (req, res) => {
+    const q = String(req.query.q || "").trim().toLowerCase();
+    const list = await ShopifyOrder.find({ organization: req.seller.organization, sellers: req.seller._id }, { name: 1, orderDate: 1, status: 1 }).sort({ orderDate: -1 }).limit(q ? 2000 : 100).lean();
+    res.send(list.filter((o) => !q || String(o.name).toLowerCase().includes(q)).slice(0, 50).map((o) => ({ _id: o._id, name: o.name, orderDate: o.orderDate, status: o.status })));
+  })
+);
+router.post(
+  "/tickets",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        category: Joi.string().valid(...T.CATEGORIES.map((c) => c[0])).required(),
+        subject: Joi.string().trim().min(3).max(150).required(),
+        text: Joi.string().trim().min(5).max(5000).required(),
+        orderId: Joi.string().hex().length(24).allow("", null),
+        files: filesSchema,
+      }),
+      req.body
+    );
+    let order = null;
+    if (d.orderId) {
+      order = await ShopifyOrder.findOne({ _id: d.orderId, organization: req.seller.organization, sellers: req.seller._id }, { name: 1 }).lean();
+      if (!order) throw new HttpError(400, "That order isn't one of yours");
+    }
+    const t = await T.create(req.seller.organization, req.seller, req.user, { ...d, order });
+    res.status(201).send(T.sellerView(t, true));
+  })
+);
+router.get(
+  "/tickets/:id",
+  ah(async (req, res) => {
+    const t = await myTicket(req);
+    if (t.sellerUnread) {
+      t.sellerUnread = 0;
+      await t.save();
+    }
+    res.send(T.sellerView(t, true));
+  })
+);
+router.post(
+  "/tickets/:id/reply",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ text: Joi.string().trim().allow("").max(5000).default(""), files: filesSchema }), req.body);
+    const t = await myTicket(req);
+    if (t.status === "closed") throw new HttpError(400, "This ticket is closed — reopen it or raise a new one");
+    if (!d.text && !d.files.length) throw new HttpError(400, "Write a reply or add a screenshot");
+    const files = await T.saveFiles(t.organization, d.files);
+    t.messages.push({ from: "seller", user: req.user?._id, name: req.user?.name || req.seller.name, text: d.text, files });
+    // A reply re-opens a resolved ticket and takes "waiting for seller" back to the team.
+    if (["resolved", "waiting"].includes(t.status)) t.status = t.status === "resolved" ? "open" : "in_progress";
+    t.lastActivityAt = new Date();
+    t.lastFrom = "seller";
+    t.teamUnread = (t.teamUnread || 0) + 1;
+    await t.save();
+    res.send(T.sellerView(t, true));
+  })
+);
+// The seller confirms it's sorted (close) or that it isn't (reopen).
+router.post(
+  "/tickets/:id/:action(close|reopen)",
+  ah(async (req, res) => {
+    const t = await myTicket(req);
+    const close = req.params.action === "close";
+    t.status = close ? "closed" : "open";
+    if (close) t.closedAt = new Date();
+    t.messages.push({ from: "system", name: req.user?.name || req.seller.name, text: close ? "Closed by the seller" : "Reopened by the seller" });
+    t.lastActivityAt = new Date();
+    t.lastFrom = "seller";
+    if (!close) t.teamUnread = (t.teamUnread || 0) + 1;
+    await t.save();
+    res.send(T.sellerView(t, true));
+  })
+);
+router.get(
+  "/tickets/:id/files/:fid",
+  ah(async (req, res) => {
+    const t = await myTicket(req);
+    T.streamFile(t, req.params.fid, res, { seller: true });
   })
 );
 
