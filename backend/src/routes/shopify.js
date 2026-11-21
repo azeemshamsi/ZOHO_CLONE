@@ -1461,6 +1461,9 @@ router.post(
                   Joi.object({
                     lineId: Joi.string().required(),
                     quantity: Joi.number().integer().min(0).required(),
+                    // One unit packed in several boxes: this box holds part `part` of `of`.
+                    part: Joi.number().integer().min(1).max(10),
+                    of: Joi.number().integer().min(1).max(10),
                   }),
                 )
                 .required(),

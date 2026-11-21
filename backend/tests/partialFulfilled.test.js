@@ -28,7 +28,7 @@ client.gql = async (store, q, v) => {
               status: "OPEN",
               lineItems: {
                 nodes: [
-                  { id: "FOL-A", remainingQuantity: 3, lineItem: { id: "LA" } },
+                  { id: "FOL-A", remainingQuantity: 3, lineItem: { id: "LA" } }, { id: "FOL-B", remainingQuantity: 1, lineItem: { id: "LB" } },
                 ],
               },
             },
@@ -180,5 +180,54 @@ test("boxes can't include an already-fulfilled product; nothing left → clear e
   await assert.rejects(
     SH.bookOrder({ org: "o", storeOrg: "o" }, order(), { accountId: "a1" }),
     /already fulfilled in Shopify/,
+  );
+});
+
+test("one item packed in 2 boxes: value and COD halved, fulfilled once, sizes required", async () => {
+  unfulfilled = { LA: 3, LB: 1 };
+  booked.length = 0;
+  gqlCalls.length = 0;
+  const parts = (pkg) => [
+    { lines: [{ lineId: "LA", quantity: 3 }] },
+    { lines: [{ lineId: "LB", quantity: 1, part: 1, of: 2 }], pkg },
+    { lines: [{ lineId: "LB", quantity: 1, part: 2, of: 2 }], pkg },
+  ];
+  await assert.rejects(
+    SH.bookOrder({ org: "o", storeOrg: "o" }, order(), {
+      accountId: "a1",
+      boxes: parts({}),
+    }),
+    /Box 2 holds part of an item/,
+  );
+  assert.throws(
+    () =>
+      SH.splitBoxes(order(), [
+        { lines: [{ lineId: "LA", quantity: 3 }] },
+        {
+          lines: [{ lineId: "LB", quantity: 1, part: 1, of: 2 }],
+          pkg: { weight: 9, length: 1, breadth: 1, height: 1 },
+        },
+      ]),
+    /Armillary: 0.5 of 1/,
+  );
+  const o = order();
+  const pkg = { weight: 9, length: 100, breadth: 50, height: 40 };
+  const r = await SH.bookOrder({ org: "o", storeOrg: "o" }, o, {
+    accountId: "a1",
+    boxes: parts(pkg),
+  });
+  assert.strictEqual(r.boxes, 3);
+  assert.deepStrictEqual(
+    booked.map((s) => s.codAmount),
+    [600, 200, 200],
+  );
+  assert.deepStrictEqual(
+    o.extraShipments.map((x) => x.lines[0].title),
+    ["Armillary (part 1 of 2)", "Armillary (part 2 of 2)"],
+  );
+  assert.strictEqual(o.extraShipments[1].shopifyFulfilled, false); // part 2 makes no second fulfilment
+  assert.strictEqual(
+    gqlCalls.filter((c) => c.q.includes("fulfillmentCreate")).length,
+    2,
   );
 });

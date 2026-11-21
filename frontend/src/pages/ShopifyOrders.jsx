@@ -468,7 +468,8 @@ function BoxesEditor({ orderId, onChange }) {
   const [mode, setMode] = useState("one"); // one | each | custom
   const [n, setN] = useState(2);
   const [nText, setNText] = useState("2");
-  const [assign, setAssign] = useState({}); // "lineId#unit" → box number
+  const [assign, setAssign] = useState({}); // "lineId#unit" (or "lineId#unit~part") → box number
+  const [pieces, setPieces] = useState({}); // "lineId#unit" → packed in this many boxes (one big item in 2 cartons)
   const [pkgs, setPkgs] = useState({}); // box → { weight, length, breadth, height }
   const [done, setDone] = useState({ alreadyFulfilled: [], fulfillments: [] });
   useEffect(() => {
@@ -485,7 +486,7 @@ function BoxesEditor({ orderId, onChange }) {
       })
       .catch(() => setLines([]));
   }, [orderId]);
-  const units = (lines || []).flatMap((l) =>
+  const baseUnits = (lines || []).flatMap((l) =>
     Array.from({ length: l.quantity }, (_, u) => ({
       key: `${l.lineId}#${u}`,
       lineId: l.lineId,
@@ -494,28 +495,49 @@ function BoxesEditor({ orderId, onChange }) {
       u,
     })),
   );
-  const totalUnits = units.length;
+  const totalUnits = baseUnits.length;
+  // Each unit, or each part of a unit packed in several boxes, goes in one box.
+  const units =
+    mode === "one"
+      ? baseUnits
+      : baseUnits.flatMap((x) => {
+          const of = Number(pieces[x.key]) || 1;
+          return Array.from({ length: of }, (_, p) => ({
+            ...x,
+            unitKey: x.key,
+            key: p ? `${x.key}~${p + 1}` : x.key,
+            part: p + 1,
+            of,
+          }));
+        });
+  const totalParts = units.length;
   const boxOf = (x, i) =>
     mode === "each"
       ? i + 1
       : mode === "custom"
-        ? Number(assign[x.key]) || 1
+        ? Number(assign[x.key]) || (x.part > 1 ? Math.min(n, x.part) : 1)
         : 1;
-  const count = mode === "each" ? totalUnits : mode === "custom" ? n : 1;
+  const count = mode === "each" ? totalParts : mode === "custom" ? n : 1;
   useEffect(() => {
-    if (mode === "one" || totalUnits < 2) return onChange(null);
+    if (mode === "one" || totalParts < 2) return onChange(null);
     const out = Array.from({ length: count }, (_, b) => {
       const m = new Map();
-      units.forEach(
-        (x, i) =>
-          boxOf(x, i) === b + 1 && m.set(x.lineId, (m.get(x.lineId) || 0) + 1),
-      );
+      const parts = [];
+      units.forEach((x, i) => {
+        if (boxOf(x, i) !== b + 1) return;
+        if (x.of > 1)
+          parts.push({ lineId: x.lineId, quantity: 1, part: x.part, of: x.of });
+        else m.set(x.lineId, (m.get(x.lineId) || 0) + 1);
+      });
       const pk = pkgs[b + 1] || {};
       const ok = ["weight", "length", "breadth", "height"].every(
         (k) => Number(pk[k]) > 0,
       );
       return {
-        lines: [...m].map(([lineId, quantity]) => ({ lineId, quantity })),
+        lines: [
+          ...[...m].map(([lineId, quantity]) => ({ lineId, quantity })),
+          ...parts,
+        ],
         pkg: ok
           ? Object.fromEntries(
               Object.entries(pk).map(([k, v]) => [k, Number(v)]),
@@ -524,7 +546,14 @@ function BoxesEditor({ orderId, onChange }) {
       };
     }).filter((b) => b.lines.length);
     onChange(out.length > 1 ? out : null);
-  }, [mode, n, JSON.stringify(assign), JSON.stringify(pkgs), lines]);
+  }, [
+    mode,
+    n,
+    JSON.stringify(assign),
+    JSON.stringify(pieces),
+    JSON.stringify(pkgs),
+    lines,
+  ]);
   const doneNote = (done.alreadyFulfilled || []).length > 0 && (
     <div className="alert alert-info small" style={{ marginBottom: 8 }}>
       Already fulfilled in Shopify — not booked again:{" "}
@@ -542,7 +571,7 @@ function BoxesEditor({ orderId, onChange }) {
         : "Nothing is left to ship on this order."}
     </div>
   );
-  if (!lines || totalUnits < 2) return doneNote || null;
+  if (!lines || !totalUnits) return doneNote || null;
   const setPk = (b, k) => (e) =>
     setPkgs({ ...pkgs, [b]: { ...(pkgs[b] || {}), [k]: e.target.value } });
   const used = new Set(units.map((x, i) => boxOf(x, i)));
@@ -553,7 +582,9 @@ function BoxesEditor({ orderId, onChange }) {
       <div className="seg" role="group" style={{ margin: "4px 0 8px" }}>
         {[
           ["one", "All in one box"],
-          ["each", `Each item in its own box (${totalUnits})`],
+          ...(totalParts > 1
+            ? [["each", `Each item in its own box (${totalParts})`]]
+            : []),
           ["custom", "Split into boxes…"],
         ].map(([k, l]) => (
           <button
@@ -572,19 +603,16 @@ function BoxesEditor({ orderId, onChange }) {
             <input
               type="number"
               min="2"
-              max={Math.min(20, totalUnits)}
+              max={Math.min(20, Math.max(2, totalParts))}
               value={nText}
               onChange={(e) => {
                 // Type freely (e.g. "14"); the count is used once it's a valid number, and tidied on leaving the box.
                 setNText(e.target.value);
                 const v = Number(e.target.value);
-                if (v >= 2 && v <= Math.min(20, totalUnits)) setN(v);
+                if (v >= 2 && v <= 20) setN(v);
               }}
               onBlur={() => {
-                const v = Math.max(
-                  2,
-                  Math.min(20, totalUnits, Number(nText) || n),
-                );
+                const v = Math.max(2, Math.min(20, Number(nText) || n));
                 setN(v);
                 setNText(String(v));
               }}
@@ -600,6 +628,36 @@ function BoxesEditor({ orderId, onChange }) {
                     {x.sku && <span className="muted"> · {x.sku}</span>}
                     {(lines.find((l) => l.lineId === x.lineId)?.quantity || 1) >
                       1 && <span className="muted"> · unit {x.u + 1}</span>}
+                    {x.of > 1 && (
+                      <strong>
+                        {" "}
+                        · part {x.part} of {x.of}
+                      </strong>
+                    )}
+                    {x.part === 1 && (
+                      <div>
+                        <select
+                          className="small"
+                          value={x.of}
+                          title="One item packed in several cartons: each carton is its own box with its own AWB"
+                          onChange={(e) =>
+                            setPieces({
+                              ...pieces,
+                              [x.unitKey]: Number(e.target.value),
+                            })
+                          }
+                          style={{ marginTop: 2, width: "auto" }}
+                        >
+                          {[1, 2, 3, 4, 5].map((k) => (
+                            <option key={k} value={k}>
+                              {k === 1
+                                ? "Packed in 1 box"
+                                : `Packed in ${k} boxes`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </td>
                   <td style={{ width: 120 }}>
                     <select
@@ -633,8 +691,10 @@ function BoxesEditor({ orderId, onChange }) {
         <>
           <div className="small muted" style={{ margin: "8px 0 4px" }}>
             Each box is booked with its own AWB and label, and marked fulfilled
-            in Shopify with its own tracking. COD is shared by value. Weight and
-            size per box (blank = from the products' package types):
+            in Shopify with its own tracking (an item packed in several boxes is
+            marked fulfilled with its part 1). COD is shared by value. Weight
+            and size per box (blank = from the products' package types — enter
+            them for the parts of a split item):
           </div>
           {[...used]
             .sort((a, b) => a - b)
@@ -649,7 +709,11 @@ function BoxesEditor({ orderId, onChange }) {
                   <div className="muted">
                     {units
                       .filter((x, i) => boxOf(x, i) === b)
-                      .map((x) => x.title)
+                      .map((x) =>
+                        x.of > 1
+                          ? `${x.title} (part ${x.part}/${x.of})`
+                          : x.title,
+                      )
                       .join(", ")
                       .slice(0, 80)}
                   </div>

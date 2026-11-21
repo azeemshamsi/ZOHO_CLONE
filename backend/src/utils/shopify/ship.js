@@ -149,27 +149,50 @@ function splitBoxes(order, boxes, avail = null) {
                 : "A box has a product that isn't on this order",
             );
           }
+          // One unit packed in several boxes: each box holds part `part` of `of` (counts as 1/of of a unit).
+          const of = Number(x.of) > 1 ? Number(x.of) : 1;
+          const part =
+            of > 1 ? Math.min(of, Math.max(1, Number(x.part) || 1)) : 1;
+          if (of > 1 && Number(x.quantity) !== 1)
+            throw new Error(
+              "A product split over several boxes is one unit per part",
+            );
           used.set(
             String(x.lineId),
-            (used.get(String(x.lineId)) || 0) + Number(x.quantity),
+            (used.get(String(x.lineId)) || 0) + Number(x.quantity) / of,
           );
+          const title = l.variantTitle
+            ? `${l.title} - ${l.variantTitle}`
+            : l.title;
           return {
             lineId: String(l.lineId),
-            title: l.variantTitle ? `${l.title} - ${l.variantTitle}` : l.title,
+            title: of > 1 ? `${title} (part ${part} of ${of})` : title,
             sku: l.sku || "",
             quantity: Number(x.quantity),
             unit: l.quantity ? l.total / l.quantity : 0,
+            ...(of > 1 ? { part, of } : {}),
           };
         }),
     }))
     .filter((b) => b.lines.length);
   for (const l of live) {
     const n = used.get(String(l.lineId)) || 0;
-    if (n !== l.quantity)
+    if (Math.abs(n - l.quantity) > 1e-6)
       throw new Error(
-        `${l.title}: ${n} of ${l.quantity} put in boxes — every unit must be in exactly one box`,
+        `${l.title}: ${Math.round(n * 100) / 100} of ${l.quantity} put in boxes — every unit (or every part of a unit packed in several boxes) must be in exactly one box`,
       );
   }
+  // A box holding part of a split item: its package type would be the whole item's, so its size must be entered.
+  out.forEach((b, i) => {
+    const pk = b.pkg || {};
+    if (
+      b.lines.some((l) => l.of > 1) &&
+      !["weight", "length", "breadth", "height"].every((k) => Number(pk[k]) > 0)
+    )
+      throw new Error(
+        `Box ${i + 1} holds part of an item packed in several boxes — enter its weight and size`,
+      );
+  });
   if (out.length === 1 && !partial) return null; // everything in one box: the usual booking
   if (out.length > 20) throw new Error("Up to 20 boxes per order");
   return out;
@@ -184,7 +207,7 @@ function boxOrder(order, box, cod) {
     return {
       ...l,
       quantity: b.quantity,
-      total: Math.round(b.unit * b.quantity * 100) / 100,
+      total: Math.round(((b.unit * b.quantity) / (b.of || 1)) * 100) / 100,
     };
   });
   const total =
@@ -217,7 +240,7 @@ async function bookBoxes({
   // COD shared by value; the last box takes the paise left over.
   const codTotal = cod ?? codOf(order);
   const values = boxes.map((b) =>
-    b.lines.reduce((t, l) => t + l.unit * l.quantity, 0),
+    b.lines.reduce((t, l) => t + (l.unit * l.quantity) / (l.of || 1), 0),
   );
   const sumV = values.reduce((t, v) => t + v, 0) || 1;
   let left = codTotal;
@@ -280,11 +303,12 @@ async function bookBoxes({
         events: [],
         box: i + 1,
         of: n,
-        lines: b.lines.map(({ lineId, title, sku, quantity }) => ({
+        lines: b.lines.map(({ lineId, title, sku, quantity, part, of }) => ({
           lineId,
           title,
           sku,
           quantity,
+          ...(of ? { part, of } : {}),
         })),
         ...(seller
           ? {
@@ -303,12 +327,11 @@ async function bookBoxes({
         (!order.channel || order.channel === "shopify")
       ) {
         try {
-          sh.shopifyFulfilled = await fulfillInShopify(
-            store,
-            order,
-            sh,
-            sh.lines,
-          );
+          // A unit packed in several boxes is fulfilled once, with the box holding its part 1.
+          const fl = sh.lines.filter((l) => !(l.part > 1));
+          sh.shopifyFulfilled = fl.length
+            ? await fulfillInShopify(store, order, sh, fl)
+            : false;
         } catch (e) {
           problems.push(
             `Box ${i + 1}: booked, but not marked fulfilled in Shopify (${e.message})`,
@@ -330,11 +353,12 @@ async function bookBoxes({
   order.extraShipments = booked.length > 1 ? booked.slice(1) : undefined;
   order.boxes = boxes.map((b, i) => ({
     box: i + 1,
-    lines: b.lines.map(({ lineId, title, sku, quantity }) => ({
+    lines: b.lines.map(({ lineId, title, sku, quantity, part, of }) => ({
       lineId,
       title,
       sku,
       quantity,
+      ...(of ? { part, of } : {}),
     })),
     booked: booked.some((x) => x.box === i + 1),
   }));
@@ -489,7 +513,7 @@ async function bookOrder(
       const note =
         order.channel && order.channel !== "shopify"
           ? ""
-          : await cancelInShopify(order, old.awb);
+          : await cancelInShopify(order, old.awb, old);
       order.cancelledShipments = [
         ...(order.cancelledShipments || []),
         { courier: old.courierName || "", awb: old.awb, at: new Date() },
@@ -783,7 +807,9 @@ async function trackOrder(order) {
 }
 
 // Cancel the order's Shopify fulfilment that carries this AWB. Returns a note for the remarks ("" when nothing to do).
-async function cancelInShopify(order, awb) {
+async function cancelInShopify(order, awb, sh = null) {
+  // A box that made no Shopify fulfilment of its own: match by AWB only, never guess (it could be a seller's).
+  const guess = !(sh && sh.shopifyFulfilled === false);
   try {
     const store = await ShopifyStore.findOne({
       organization: order.organization,
@@ -805,7 +831,7 @@ async function cancelInShopify(order, awb) {
       ),
     );
     // No fulfilment with this AWB: one made without a tracking number (or the order's only one) is this shipment's.
-    if (!mine.length) {
+    if (!mine.length && guess) {
       const untracked = live.filter(
         (f) =>
           !(f.trackingInfo || []).some((t) => String(t.number || "").trim()),
@@ -888,10 +914,10 @@ async function cancelShipment(order, { force = false, courierDone = "" } = {}) {
   }
   // Undo the Shopify fulfilment with this AWB too, so Shopify shows the order unfulfilled and it can be booked again.
   const shop = !(order.channel !== "shopify" && order.channel);
-  let shopifyNote = shop ? await cancelInShopify(order, sh.awb) : "";
+  let shopifyNote = shop ? await cancelInShopify(order, sh.awb, sh) : "";
   for (const x of extras)
     if (shop)
-      shopifyNote = (await cancelInShopify(order, x.awb)) || shopifyNote;
+      shopifyNote = (await cancelInShopify(order, x.awb, x)) || shopifyNote;
   order.cancelledShipments = [
     ...(order.cancelledShipments || []),
     { courier: sh.courierName || "", awb: sh.awb, at: new Date() },
