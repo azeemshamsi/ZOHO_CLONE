@@ -270,3 +270,23 @@ test("labels per box: box 1 booked before its lines/COD were kept (#201645) gets
   );
   assert.strictEqual(SH.boxViews({ ...o, extraShipments: [] }), null);
 });
+
+test("a seller's already-shipped product doesn't make the rest a mixed-pickup order (#200962)", async () => {
+  unfulfilled = { LA: 3, LB: 0 };
+  const sellers = require("../src/utils/sellers");
+  const was = sellers.pickupFor;
+  sellers.pickupFor = async (org, o) => {
+    if (o.lines.some((l) => l.lineId === "LB"))
+      throw new Error("has products from your own stock and WAVE_NAUTICAL");
+    return null;
+  };
+  try {
+    const o = order();
+    const r = await SH.bookOrder({ org: "o", storeOrg: "o" }, o, {
+      accountId: "a1",
+    });
+    assert.ok(r.awb);
+  } finally {
+    sellers.pickupFor = was;
+  }
+});

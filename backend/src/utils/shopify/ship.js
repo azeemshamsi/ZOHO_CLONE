@@ -583,9 +583,25 @@ async function bookOrder(
   }
   // Marketplace seller's products: picked up from the seller's address (registered with the courier if it keeps pickup locations).
   const sellers = require("../sellers");
+  // Only what's still to ship decides it: a seller's products already fulfilled in Shopify don't count.
+  const store = await ShopifyStore.findOne({
+    organization: ctx.storeOrg || ctx.org,
+  });
+  const unf = await unfulfilledMap(store, order);
+  const left = remaining(order, unf);
+  if (unf && !left.rows.length)
+    throw new Error(
+      "Everything on this order is already fulfilled in Shopify — nothing left to book",
+    );
   const seller = await sellers.pickupFor(
     ctx.storeOrg || ctx.org,
-    order,
+    {
+      name: order.name,
+      lines: left.rows.map((r) => ({
+        ...(r.line.toObject ? r.line.toObject() : r.line),
+        quantity: r.quantity,
+      })),
+    },
     pickupFrom,
   );
   if (seller) {
@@ -601,9 +617,6 @@ async function bookOrder(
       await sellers.registerPickup(seller, realAcc);
   }
   const acc = sellers.withPickup(realAcc, seller);
-  const store = await ShopifyStore.findOne({
-    organization: ctx.storeOrg || ctx.org,
-  });
   const org = await Organization.findById(ctx.org);
   // HSN and GST from the (checked) OrdexaGo items, not Shopify's.
   const Item = require("../../models/Item");
@@ -615,12 +628,6 @@ async function bookOrder(
     ).map((i) => [String(i._id), i]),
   );
   // Products already fulfilled in Shopify (e.g. a seller shipped theirs) aren't booked again.
-  const unf = await unfulfilledMap(store, order);
-  const left = remaining(order, unf);
-  if (unf && !left.rows.length)
-    throw new Error(
-      "Everything on this order is already fulfilled in Shopify — nothing left to book",
-    );
   if (unf && left.done.length && !(boxes || []).length)
     boxes = [
       {
