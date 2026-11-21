@@ -467,6 +467,7 @@ function BoxesEditor({ orderId, onChange }) {
   const [lines, setLines] = useState(null);
   const [mode, setMode] = useState("one"); // one | each | custom
   const [n, setN] = useState(2);
+  const [nText, setNText] = useState("2");
   const [assign, setAssign] = useState({}); // "lineId#unit" → box number
   const [pkgs, setPkgs] = useState({}); // box → { weight, length, breadth, height }
   const [done, setDone] = useState({ alreadyFulfilled: [], fulfillments: [] });
@@ -572,15 +573,21 @@ function BoxesEditor({ orderId, onChange }) {
               type="number"
               min="2"
               max={Math.min(20, totalUnits)}
-              value={n}
-              onChange={(e) =>
-                setN(
-                  Math.max(
-                    2,
-                    Math.min(20, totalUnits, Number(e.target.value) || 2),
-                  ),
-                )
-              }
+              value={nText}
+              onChange={(e) => {
+                // Type freely (e.g. "14"); the count is used once it's a valid number, and tidied on leaving the box.
+                setNText(e.target.value);
+                const v = Number(e.target.value);
+                if (v >= 2 && v <= Math.min(20, totalUnits)) setN(v);
+              }}
+              onBlur={() => {
+                const v = Math.max(
+                  2,
+                  Math.min(20, totalUnits, Number(nText) || n),
+                );
+                setN(v);
+                setNText(String(v));
+              }}
               style={{ maxWidth: 90 }}
             />
           </Field>
