@@ -378,6 +378,62 @@ async function bookBoxes({
   };
 }
 
+// One label view per box of a several-box (or partly shipped) order: only that box's products and COD.
+// Box 1 booked before its lines/COD were kept: its products are the ones not in the other boxes, its COD the rest.
+function boxViews(order) {
+  const o = typeof order.toObject === "function" ? order.toObject() : order;
+  const ships = allShipments(o);
+  if (!(o.extraShipments || []).length && !(o.shipment?.lines || []).length)
+    return null;
+  const unitOf = (lineId) => {
+    const l = (o.lines || []).find((x) => String(x.lineId) === String(lineId));
+    return l?.quantity ? l.total / l.quantity : 0;
+  };
+  const extras = o.extraShipments || [];
+  const of = ships.length;
+  return ships.map((x, i) => {
+    let lines = x.lines || [];
+    let cod = x.codAmount;
+    if (i === 0 && !lines.length) {
+      const inOthers = new Map();
+      for (const e of extras)
+        for (const l of e.lines || [])
+          inOthers.set(
+            String(l.lineId),
+            (inOthers.get(String(l.lineId)) || 0) + l.quantity / (l.of || 1),
+          );
+      lines = (o.lines || [])
+        .filter((l) => l.quantity > 0)
+        .map((l) => ({
+          lineId: String(l.lineId),
+          title: l.title,
+          sku: l.sku,
+          quantity: Math.round(
+            l.quantity - (inOthers.get(String(l.lineId)) || 0),
+          ),
+        }))
+        .filter((l) => l.quantity > 0);
+    }
+    if (i === 0 && cod == null)
+      cod = Math.max(
+        0,
+        Math.round(
+          (codOf(o) - extras.reduce((t, e) => t + (e.codAmount || 0), 0)) * 100,
+        ) / 100,
+      );
+    const n = x.of || of;
+    return {
+      ...boxOrder(
+        o,
+        { lines: lines.map((l) => ({ ...l, unit: unitOf(l.lineId) })) },
+        cod || 0,
+      ),
+      shipment: x,
+      name: n > 1 ? `${o.name} box ${x.box || i + 1}/${n}` : o.name,
+    };
+  });
+}
+
 // Every shipment of an order: box 1 (`shipment`) and the other boxes.
 const allShipments = (order) =>
   [order.shipment, ...(order.extraShipments || [])].filter((x) => x?.awb);
@@ -962,6 +1018,7 @@ module.exports = {
   storedUnfulfilled,
   remaining,
   shippableView,
+  boxViews,
   allShipments,
   splitBoxes,
   boxOrder,

@@ -35,16 +35,27 @@ const lineSchema = new mongoose.Schema(
     total: Number, // after discounts, GST inclusive
     item: { type: mongoose.Schema.Types.ObjectId, ref: "Item" },
   },
-  { _id: false }
+  { _id: false },
 );
 
-const eventSchema = new mongoose.Schema({ at: Date, status: String, location: String }, { _id: false });
+const eventSchema = new mongoose.Schema(
+  { at: Date, status: String, location: String },
+  { _id: false },
+);
 
 const shopifyOrderSchema = new mongoose.Schema(
   {
-    organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true },
+    organization: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Organization",
+      required: true,
+    },
     shopifyId: { type: String, required: true }, // gid://shopify/Order/123, or "amazon:<order id>" for Amazon orders
-    channel: { type: String, enum: ["shopify", "amazon", "flipkart"], default: "shopify" },
+    channel: {
+      type: String,
+      enum: ["shopify", "amazon", "flipkart"],
+      default: "shopify",
+    },
     // Amazon order details: { account, orderId, marketplaceId, easyShip, programs, fulfillmentStatus, serviceLevel,
     // shipBy, deliverBy, gstin, buyerCompany, items [{orderItemId, sku, quantity}], confirmedAt, confirmError,
     // packageStatus, slot {slotId, start, end, method}, scheduledAt, label {feedId, state, error, at} }
@@ -63,7 +74,11 @@ const shopifyOrderSchema = new mongoose.Schema(
     fulfillmentStatus: String, // UNFULFILLED, FULFILLED…
     cancelledAt: Date,
     cancelReason: String,
-    paymentMode: { type: String, enum: ["cod", "prepaid", "partial"], default: "prepaid" },
+    paymentMode: {
+      type: String,
+      enum: ["cod", "prepaid", "partial"],
+      default: "prepaid",
+    },
     prepaidAmount: { type: Number, default: 0 }, // paid online
     codAmount: { type: Number, default: 0 }, // to collect on delivery
     gateways: [String],
@@ -77,16 +92,40 @@ const shopifyOrderSchema = new mongoose.Schema(
     total: Number, // current total (after edits/refunds)
     outstanding: Number,
     lines: [lineSchema],
-    shopifyFulfillments: [{ _id: false, company: String, number: String, url: String }],
+    shopifyFulfillments: [
+      { _id: false, company: String, number: String, url: String },
+    ],
     // OrdexaGo workflow
-    status: { type: String, enum: ["new", "packed", "ready_to_ship", "shipped", "delivered", "rto", "return_created", "returned", "cancelled"], default: "new" },
+    status: {
+      type: String,
+      enum: [
+        "new",
+        "packed",
+        "ready_to_ship",
+        "shipped",
+        "delivered",
+        "rto",
+        "return_created",
+        "returned",
+        "cancelled",
+      ],
+      default: "new",
+    },
     returnStatus: String, // Shopify's
     shopifyReturnId: String,
     returnedAt: Date,
     returnNote: String,
-    returnCreditNote: { type: mongoose.Schema.Types.ObjectId, ref: "CreditNote" },
+    returnCreditNote: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CreditNote",
+    },
     // Shopify return + credit note, finished in the background after a scan.
-    returnSync: { state: String, message: String, creditNoteNumber: String, at: Date },
+    returnSync: {
+      state: String,
+      message: String,
+      creditNoteNumber: String,
+      at: Date,
+    },
     statusChangedAt: Date,
     shipment: {
       account: { type: mongoose.Schema.Types.ObjectId, ref: "CourierAccount" },
@@ -112,13 +151,31 @@ const shopifyOrderSchema = new mongoose.Schema(
       seller: { type: mongoose.Schema.Types.ObjectId, ref: "Seller" },
       shopifyFulfilled: Boolean,
       error: String,
+      // Several boxes: this is box `box` of `of`, holding `lines`, collecting `codAmount` (the rest are in extraShipments).
+      box: Number,
+      of: Number,
+      lines: { type: mongoose.Schema.Types.Mixed },
+      codAmount: Number,
     },
     deliveredAt: Date, // when it was delivered (for sellers' monthly purchase orders)
     deliveredChecked: Boolean, // deliveredAt confirmed from Shopify's fulfilment
     // Marketplace sellers whose products are on this order (from each line's Shopify Vendor) and what was settled.
     sellers: { type: [mongoose.Schema.Types.ObjectId], default: [] },
     // excluded: settled outside OrdexaGo (e.g. paid in the old software) — never goes on a purchase order.
-    sellerSettled: [{ _id: false, seller: mongoose.Schema.Types.ObjectId, purchaseOrder: mongoose.Schema.Types.ObjectId, number: String, organization: mongoose.Schema.Types.ObjectId, amount: Number, at: Date, excluded: Boolean, reason: String, by: mongoose.Schema.Types.ObjectId }],
+    sellerSettled: [
+      {
+        _id: false,
+        seller: mongoose.Schema.Types.ObjectId,
+        purchaseOrder: mongoose.Schema.Types.ObjectId,
+        number: String,
+        organization: mongoose.Schema.Types.ObjectId,
+        amount: Number,
+        at: Date,
+        excluded: Boolean,
+        reason: String,
+        by: mongoose.Schema.Types.ObjectId,
+      },
+    ],
     invoice: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice" },
     invoiceNumber: String,
     invoiceOrg: { type: mongoose.Schema.Types.ObjectId, ref: "Organization" }, // the company the invoice is in
@@ -142,14 +199,30 @@ const shopifyOrderSchema = new mongoose.Schema(
       },
     ],
     // B2B: the buyer's GSTIN and registered name, entered on the order; its invoice goes to that registered customer.
-    b2b: { gstin: String, name: String, at: Date, by: { type: mongoose.Schema.Types.ObjectId, ref: "User" } },
+    b2b: {
+      gstin: String,
+      name: String,
+      at: Date,
+      by: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    },
     // AWB scanned by us before handing the parcel to the courier (internal record): latest scan + every scan.
     awbScannedAt: Date,
     awbScannedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    awbScans: [{ _id: false, awb: String, courier: String, at: Date, by: mongoose.Schema.Types.ObjectId, byName: String }],
+    awbScans: [
+      {
+        _id: false,
+        awb: String,
+        courier: String,
+        at: Date,
+        by: mongoose.Schema.Types.ObjectId,
+        byName: String,
+      },
+    ],
     // Shipments booked and cancelled: a new booking then uses "<order>-2", "-3"… as the courier's order reference
     // (couriers refuse a reference they have seen before).
-    cancelledShipments: [{ _id: false, courier: String, awb: String, at: Date }],
+    cancelledShipments: [
+      { _id: false, courier: String, awb: String, at: Date },
+    ],
     // Shipped in several boxes (each its own AWB): box 1 is `shipment`, boxes 2… are here, each like `shipment`
     // plus { box, of, lines: [{ lineId, title, sku, quantity }] }. `boxes` keeps the split: [{ box, lines }].
     extraShipments: { type: [mongoose.Schema.Types.Mixed], default: undefined },
@@ -161,7 +234,7 @@ const shopifyOrderSchema = new mongoose.Schema(
     // A cancel request only flags the order for staff; it is never cancelled automatically.
     codConfirm: { state: String, at: Date, via: String },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 shopifyOrderSchema.index({ organization: 1, shopifyId: 1 }, { unique: true });
 shopifyOrderSchema.index({ organization: 1, status: 1, orderDate: -1 });
@@ -177,27 +250,62 @@ shopifyOrderSchema.index({ organization: 1, sellers: 1, orderDate: -1 });
 shopifyOrderSchema.pre("save", async function () {
   const { sellersOfLines } = require("../utils/sellers");
   const ids = await sellersOfLines(this.organization, this.lines || []);
-  if (ids.map(String).sort().join() !== (this.sellers || []).map(String).sort().join()) this.sellers = ids;
+  if (
+    ids.map(String).sort().join() !==
+    (this.sellers || []).map(String).sort().join()
+  )
+    this.sellers = ids;
   if (this.status === "delivered" && !this.deliveredAt) {
-    const ev = (this.shipment?.events || []).filter((e) => /deliver/i.test(e.status || "") && !/undeliver|not deliver/i.test(e.status || "") && e.at && !isNaN(e.at)).sort((a, b) => b.at - a.at)[0];
+    const ev = (this.shipment?.events || [])
+      .filter(
+        (e) =>
+          /deliver/i.test(e.status || "") &&
+          !/undeliver|not deliver/i.test(e.status || "") &&
+          e.at &&
+          !isNaN(e.at),
+      )
+      .sort((a, b) => b.at - a.at)[0];
     // Best guess until Shopify's own delivery time is read (refreshDeliveries sets it and deliveredChecked).
-    this.deliveredAt = ev?.at || (this.isModified("status") ? new Date() : this.statusChangedAt || new Date());
+    this.deliveredAt =
+      ev?.at ||
+      (this.isModified("status")
+        ? new Date()
+        : this.statusChangedAt || new Date());
   }
 });
 
 // Status changes → utils/marketing/orderEvents (WhatsApp order updates). Listeners run after the save, in the
 // background: they can never block or fail the change itself.
 shopifyOrderSchema.post("init", function () {
-  this.$locals.orig = { status: this.status, track: this.shipment?.trackStatus || "", awb: this.shipment?.awb || "" };
+  this.$locals.orig = {
+    status: this.status,
+    track: this.shipment?.trackStatus || "",
+    awb: this.shipment?.awb || "",
+  };
 });
 shopifyOrderSchema.pre("save", function () {
   const o = this.$locals.orig || {};
-  this.$locals.change = { isNew: this.isNew, prevStatus: this.isNew ? "" : o.status || "", status: this.status, prevTrack: this.isNew ? "" : o.track || "", track: this.shipment?.trackStatus || "", awb: this.shipment?.awb || "" };
+  this.$locals.change = {
+    isNew: this.isNew,
+    prevStatus: this.isNew ? "" : o.status || "",
+    status: this.status,
+    prevTrack: this.isNew ? "" : o.track || "",
+    track: this.shipment?.trackStatus || "",
+    awb: this.shipment?.awb || "",
+  };
 });
 shopifyOrderSchema.post("save", function (doc) {
   const ch = doc.$locals.change;
-  doc.$locals.orig = { status: doc.status, track: doc.shipment?.trackStatus || "", awb: doc.shipment?.awb || "" };
-  if (!ch || (!ch.isNew && ch.prevStatus === ch.status && ch.prevTrack === ch.track)) return;
+  doc.$locals.orig = {
+    status: doc.status,
+    track: doc.shipment?.trackStatus || "",
+    awb: doc.shipment?.awb || "",
+  };
+  if (
+    !ch ||
+    (!ch.isNew && ch.prevStatus === ch.status && ch.prevTrack === ch.track)
+  )
+    return;
   try {
     require("../utils/marketing/orderEvents").emitChange(doc, ch);
   } catch (e) {

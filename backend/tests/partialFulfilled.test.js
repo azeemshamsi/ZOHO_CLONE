@@ -28,7 +28,8 @@ client.gql = async (store, q, v) => {
               status: "OPEN",
               lineItems: {
                 nodes: [
-                  { id: "FOL-A", remainingQuantity: 3, lineItem: { id: "LA" } }, { id: "FOL-B", remainingQuantity: 1, lineItem: { id: "LB" } },
+                  { id: "FOL-A", remainingQuantity: 3, lineItem: { id: "LA" } },
+                  { id: "FOL-B", remainingQuantity: 1, lineItem: { id: "LB" } },
                 ],
               },
             },
@@ -230,4 +231,42 @@ test("one item packed in 2 boxes: value and COD halved, fulfilled once, sizes re
     gqlCalls.filter((c) => c.q.includes("fulfillmentCreate")).length,
     2,
   );
+});
+
+test("labels per box: box 1 booked before its lines/COD were kept (#201645) gets the rest", () => {
+  const o = {
+    name: "#201645",
+    paymentMode: "cod",
+    codAmount: 6196,
+    total: 6196,
+    lines: [
+      { lineId: "A", title: "Abstract", quantity: 1, total: 2599 },
+      { lineId: "B", title: "Deer", quantity: 1, total: 2199 },
+      { lineId: "C", title: "Set of 3", quantity: 1, total: 1299 },
+    ],
+    shipment: { awb: "3100110450811" },
+    extraShipments: [
+      {
+        awb: "3100110450822",
+        box: 2,
+        of: 2,
+        codAmount: 1320.09,
+        lines: [{ lineId: "C", title: "Set of 3", quantity: 1 }],
+      },
+    ],
+  };
+  const v = SH.boxViews(o);
+  assert.deepStrictEqual(
+    v.map((x) => [
+      x.name,
+      x.codAmount,
+      x.paymentMode,
+      x.lines.map((l) => l.lineId).join(""),
+    ]),
+    [
+      ["#201645 box 1/2", 4875.91, "cod", "AB"],
+      ["#201645 box 2/2", 1320.09, "cod", "C"],
+    ],
+  );
+  assert.strictEqual(SH.boxViews({ ...o, extraShipments: [] }), null);
 });

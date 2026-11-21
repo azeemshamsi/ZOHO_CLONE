@@ -2289,32 +2289,9 @@ router.get(
       (o.extraShipments || []).length ||
       (o.shipment?.lines || []).length
     ) {
-      const x =
-        boxNo > 1
-          ? (o.extraShipments || []).find((b) => b.box === boxNo)
-          : o.shipment;
-      if (!x) throw new HttpError(404, `Box ${boxNo} isn't booked`);
-      const view = {
-        ...require("../utils/shopify/ship").boxOrder(
-          o,
-          {
-            lines: (x.lines || []).map((l) => ({
-              ...l,
-              unit:
-                ((o.lines || []).find((ol) => String(ol.lineId) === l.lineId)
-                  ?.total || 0) /
-                Math.max(
-                  1,
-                  (o.lines || []).find((ol) => String(ol.lineId) === l.lineId)
-                    ?.quantity || 1,
-                ),
-            })),
-          },
-          x.codAmount || 0,
-        ),
-        shipment: x,
-        name: x.of > 1 ? `${o.name} box ${boxNo}/${x.of}` : o.name,
-      };
+      const views = require("../utils/shopify/ship").boxViews(o) || [];
+      const view = views.find((v, i) => (v.shipment.box || i + 1) === boxNo);
+      if (!view) throw new HttpError(404, `Box ${boxNo} isn't booked`);
       return require("../utils/shopify/labelOut").sendLabel(res, view, {
         org: req.org,
         storeOrg: req.storeOrg,
@@ -2347,36 +2324,12 @@ router.post(
     const all = await ordersFor(req, d.ids);
     // Easy Ship parcels carry Amazon's own label (open it from the order), never OrdexaGo's.
     const SH = require("../utils/shopify/ship");
-    const unitOf = (o, lineId) => {
-      const l = (o.lines || []).find((x) => String(x.lineId) === lineId);
-      return l?.quantity ? l.total / l.quantity : 0;
-    };
     // Several-box orders: one label per box.
     const orders = all
       .filter(
         (o) => o.shipment?.awb && o.shipment.carrier !== "amazon_easyship",
       )
-      .flatMap((o) =>
-        !(o.extraShipments || []).length && !(o.shipment?.lines || []).length
-          ? [o]
-          : SH.allShipments(o).map((x, i) => ({
-              ...SH.boxOrder(
-                o,
-                {
-                  lines: (x.lines || []).map((l) => ({
-                    ...l,
-                    unit: unitOf(o, l.lineId),
-                  })),
-                },
-                x.codAmount || 0,
-              ),
-              shipment: x,
-              name:
-                (x.of || SH.allShipments(o).length) > 1
-                  ? `${o.name} box ${x.box || i + 1}/${x.of || SH.allShipments(o).length}`
-                  : o.name,
-            })),
-      );
+      .flatMap((o) => SH.boxViews(o) || [o]);
     if (!orders.length)
       throw new HttpError(
         400,

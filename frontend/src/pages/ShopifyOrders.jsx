@@ -2295,6 +2295,20 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
                   {isEasyShipped ? "Amazon label" : "Label"}
                 </button>
               )}
+              {sh.awb && !isEasyShipped && (
+                <button
+                  className="btn"
+                  title="OrdexaGo's own 4x6 label (one per box), with COD, products and your return address"
+                  onClick={() =>
+                    openPdf("/shopify/orders/labels", {
+                      ids: [o._id],
+                      format: "4x6",
+                    })
+                  }
+                >
+                  OrdexaGo label
+                </button>
+              )}
               {sh.awb &&
                 (sh.account || isEasyShipped) &&
                 !["delivered", "rto", "cancelled"].includes(o.status) && (
@@ -2698,6 +2712,18 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
                           }
                         >
                           Label
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-ghost"
+                          title="OrdexaGo's own label for this box"
+                          onClick={() =>
+                            openPdf(
+                              `/shopify/orders/${o._id}/label?own=1${(x.box || i + 1) > 1 ? `&box=${x.box || i + 1}` : ""}`,
+                            )
+                          }
+                        >
+                          OrdexaGo label
                         </button>
                       </div>
                     ))}
