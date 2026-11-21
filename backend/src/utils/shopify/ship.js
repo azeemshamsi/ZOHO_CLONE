@@ -131,6 +131,7 @@ async function saveBooking(order, paths) {
       {
         ...(Object.keys($set).length ? { $set } : {}),
         ...(Object.keys($unset).length ? { $unset } : {}),
+        $inc: { __v: 1 }, // a sync holding the old copy then fails instead of writing over the booking
       },
     );
   }
@@ -602,6 +603,12 @@ async function bookOrder(
     active: true,
   });
   if (!realAcc) throw new Error("Choose a courier");
+  // Tell the sync a booking is under way, so it doesn't mark the order shipped from the fulfilments we're making.
+  if (order._id)
+    await ShopifyOrder.updateOne(
+      { _id: order._id },
+      { $set: { bookingAt: new Date() } },
+    ).catch(() => {});
   // An earlier AWB still on the order (the courier cancelled it): clear it and its Shopify fulfilment first,
   // so Shopify gets the new AWB.
   if (order.shipment?.awb) {

@@ -310,7 +310,7 @@ async function upsert(orgId, n, toClose = []) {
   } else if (n.returnStatus === "RETURNED" && prevReturn !== "RETURNED" && ["return_created", "shipped", "delivered", "rto"].includes(existing.status)) {
     // Return closed in Shopify: Returned, with the credit note and stock back (after saving).
     toClose.push(existing._id);
-  } else if (n.fulfillmentStatus === "FULFILLED" && ["new", "packed"].includes(existing.status)) {
+  } else if (n.fulfillmentStatus === "FULFILLED" && ["new", "packed"].includes(existing.status) && !(existing.bookingAt && Date.now() - existing.bookingAt < 15 * 60000)) {
     existing.status = "shipped";
     existing.statusChangedAt = new Date();
     const f = n.shopifyFulfillments[0];

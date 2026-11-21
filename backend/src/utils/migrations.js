@@ -309,13 +309,18 @@ const MIGRATIONS = [
     // the order at the same moment, so OrdexaGo couldn't save the AWBs. Put them back (from Shopify's fulfilments).
     // Box 12 (AFR10077 part 2 of 2) made no Shopify fulfilment; its AWB is the one Blue Dart issued between box 11
     // and box 13 — check it in Blue Dart.
-    id: "2026-11-restore-200962-boxes",
+    // v2: the sync had meanwhile taken the last box's AWB from Shopify as the order's only shipment, so v1 skipped it.
+    id: "2026-11-restore-200962-boxes-v2",
     run: async () => {
       const ShopifyOrder = require("../models/ShopifyOrder");
       const CourierAccount = require("../models/CourierAccount");
       const { codOf } = require("./couriers");
       const o = await ShopifyOrder.findOne({ name: "#200962" }).lean();
-      if (!o || o.shipment?.awb)
+      if (
+        !o ||
+        (o.extraShipments || []).length ||
+        (o.shipment?.awb && !/^68510700[78]/.test(o.shipment.awb))
+      )
         return console.log("#200962: nothing to restore");
       const acc = await CourierAccount.findOne({
         organization: o.organization,
