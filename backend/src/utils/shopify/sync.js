@@ -32,7 +32,7 @@ const ORDERS_QUERY = `query Orders($first: Int!, $after: String, $query: String)
       transactions(first: 30) { kind status gateway amountSet { ${MONEY} } }
       lineItems(first: 50) {
         nodes {
-          id title variantTitle sku quantity currentQuantity vendor
+          id title variantTitle sku quantity currentQuantity unfulfilledQuantity vendor
           image { url(transform: { maxWidth: 160 }) }
           originalUnitPriceSet { ${MONEY} }
           discountAllocations { allocatedAmountSet { ${MONEY} } }
@@ -122,6 +122,7 @@ function normalise(o) {
       hsn: (l.variant?.inventoryItem?.harmonizedSystemCode || "").replace(/\D/g, ""),
       shopifyTaxRate: r2((l.taxLines || []).reduce((s, t) => s + (Number(t.ratePercentage) || 0), 0)),
       quantity: qty,
+      unfulfilled: l.unfulfilledQuantity ?? qty,
       unitPrice: unit,
       discount,
       total: r2(unit * qty - discount),

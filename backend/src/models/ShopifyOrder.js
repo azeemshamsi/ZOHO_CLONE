@@ -29,6 +29,7 @@ const lineSchema = new mongoose.Schema(
     hsn: String, // from Shopify (inventory item)
     shopifyTaxRate: Number, // sum of the line's tax lines
     quantity: Number, // current quantity (after removals)
+    unfulfilled: Number, // units not yet fulfilled in Shopify (another fulfilment, e.g. a seller's, took the rest)
     unitPrice: Number, // list price per unit, GST inclusive
     discount: Number, // all discounts allocated to the line
     total: Number, // after discounts, GST inclusive

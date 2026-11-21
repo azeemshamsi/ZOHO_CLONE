@@ -469,10 +469,19 @@ function BoxesEditor({ orderId, onChange }) {
   const [n, setN] = useState(2);
   const [assign, setAssign] = useState({}); // "lineId#unit" → box number
   const [pkgs, setPkgs] = useState({}); // box → { weight, length, breadth, height }
+  const [done, setDone] = useState({ alreadyFulfilled: [], fulfillments: [] });
   useEffect(() => {
+    // Only what's still to ship: units already fulfilled in Shopify (e.g. a seller's own shipment) are left out.
     api
-      .get(`/shopify/orders/${orderId}`)
-      .then((r) => setLines((r.data.lines || []).filter((l) => l.quantity > 0)))
+      .get(`/shopify/orders/${orderId}/shippable`)
+      .then((r) => {
+        setLines(
+          (r.data.lines || [])
+            .map((l) => ({ ...l, quantity: l.toShip }))
+            .filter((l) => l.quantity > 0),
+        );
+        setDone(r.data);
+      })
       .catch(() => setLines([]));
   }, [orderId]);
   const units = (lines || []).flatMap((l) =>
@@ -515,12 +524,30 @@ function BoxesEditor({ orderId, onChange }) {
     }).filter((b) => b.lines.length);
     onChange(out.length > 1 ? out : null);
   }, [mode, n, JSON.stringify(assign), JSON.stringify(pkgs), lines]);
-  if (!lines || totalUnits < 2) return null;
+  const doneNote = (done.alreadyFulfilled || []).length > 0 && (
+    <div className="alert alert-info small" style={{ marginBottom: 8 }}>
+      Already fulfilled in Shopify — not booked again:{" "}
+      {done.alreadyFulfilled
+        .map((d) => `${d.quantity} × ${d.title}`)
+        .join(", ")}
+      {(done.fulfillments || []).length > 0 &&
+        ` (${done.fulfillments
+          .map((f) => `${f.courier} ${f.awb}`.trim())
+          .filter(Boolean)
+          .join(", ")})`}
+      .{" "}
+      {lines?.length
+        ? "This booking covers only the remaining products."
+        : "Nothing is left to ship on this order."}
+    </div>
+  );
+  if (!lines || totalUnits < 2) return doneNote || null;
   const setPk = (b, k) => (e) =>
     setPkgs({ ...pkgs, [b]: { ...(pkgs[b] || {}), [k]: e.target.value } });
   const used = new Set(units.map((x, i) => boxOf(x, i)));
   return (
     <div className="card" style={{ background: "var(--bg-2, #f7f8fa)" }}>
+      {doneNote}
       <div className="label-sm">Boxes</div>
       <div className="seg" role="group" style={{ margin: "4px 0 8px" }}>
         {[
@@ -2554,21 +2581,51 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
                   <div className="small" style={{ margin: "6px 0" }}>
                     <strong>{(o.extraShipments || []).length + 1} boxes</strong>
                     {[sh, ...o.extraShipments].map((x, i) => (
-                      <div key={x.awb || i} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 3 }}>
+                      <div
+                        key={x.awb || i}
+                        style={{
+                          display: "flex",
+                          gap: 6,
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                          marginTop: 3,
+                        }}
+                      >
                         <span>
                           Box {x.box || i + 1}:{" "}
                           {x.trackingUrl ? (
-                            <a href={x.trackingUrl} target="_blank" rel="noreferrer">
+                            <a
+                              href={x.trackingUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
                               {x.awb}
                             </a>
                           ) : (
                             x.awb
                           )}{" "}
-                          · {TRACK_LABEL[x.trackStatus] || x.trackStatus || "booked"}
+                          ·{" "}
+                          {TRACK_LABEL[x.trackStatus] ||
+                            x.trackStatus ||
+                            "booked"}
                           {x.codAmount ? ` · COD ${money(x.codAmount)}` : ""}
-                          <span className="muted"> · {(x.lines || []).map((l) => `${l.quantity} × ${l.title}`).join(", ")}</span>
+                          <span className="muted">
+                            {" "}
+                            ·{" "}
+                            {(x.lines || [])
+                              .map((l) => `${l.quantity} × ${l.title}`)
+                              .join(", ")}
+                          </span>
                         </span>
-                        <button type="button" className="btn btn-sm" onClick={() => openPdf(`/shopify/orders/${o._id}/label${(x.box || i + 1) > 1 ? `?box=${x.box || i + 1}` : ""}`)}>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          onClick={() =>
+                            openPdf(
+                              `/shopify/orders/${o._id}/label${(x.box || i + 1) > 1 ? `?box=${x.box || i + 1}` : ""}`,
+                            )
+                          }
+                        >
                           Label
                         </button>
                       </div>
