@@ -421,6 +421,38 @@ const MIGRATIONS = [
       console.log(`#200962: ${n} boxes restored, COD ₹${codTotal}`);
     },
   },
+  {
+    // #200962's restored boxes had no weight / size (lost with the failed save): the ones entered at booking.
+    id: "2026-11-200962-box-sizes",
+    run: async () => {
+      const ShopifyOrder = require("../models/ShopifyOrder");
+      const o = await ShopifyOrder.findOne({ name: "#200962" }).lean();
+      if (!o || (o.extraShipments || []).length !== 13)
+        return console.log("#200962: sizes not set");
+      const pouf = [7, 50, 43, 42];
+      const size = {
+        11: [10.8, 112, 46, 24],
+        12: [12, 66, 37, 37],
+        13: [16.1, 47, 47, 44],
+        14: [4, 37, 37, 36],
+      };
+      const fill = (x) => {
+        const [weight, length, breadth, height] = size[x.box] || pouf;
+        return x.weight ? x : { ...x, weight, length, breadth, height };
+      };
+      await ShopifyOrder.updateOne(
+        { _id: o._id },
+        {
+          $set: {
+            shipment: fill(o.shipment),
+            extraShipments: o.extraShipments.map(fill),
+          },
+          $inc: { __v: 1 },
+        },
+      );
+      console.log("#200962: box sizes set");
+    },
+  },
 ];
 
 async function runMigrations() {
