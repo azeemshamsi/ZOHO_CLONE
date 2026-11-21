@@ -791,7 +791,13 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
             )
           : null
         : { packageType: mode };
-  const pkgKey = JSON.stringify(pkgBody) + refresh + pickupFrom;
+  // Split into boxes: the order-level size isn't needed; courier rates are checked with the heaviest box's size.
+  const boxPkg = (boxes || [])
+    .map((b) => b.pkg)
+    .filter((p) => Number(p?.weight) > 0)
+    .sort((a, b) => b.weight - a.weight)[0];
+  const quotePkg = pkgBody || (boxes ? boxPkg || {} : null);
+  const pkgKey = JSON.stringify(quotePkg) + refresh + pickupFrom;
   const loadPackages = () =>
     api
       .get("/shopify/package-types")
@@ -806,7 +812,7 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
       .catch(() => {});
   }, []);
   useEffect(() => {
-    if (!pkgBody || !active.length) return;
+    if (!quotePkg || !active.length) return;
     let live = true;
     setChecking(true);
     const t = setTimeout(
@@ -814,7 +820,7 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
         api
           .post("/shopify/orders/quotes", {
             ids: ids.slice(0, 50),
-            pkg: pkgBody,
+            pkg: quotePkg,
             pickupFrom,
           })
           .then((r) => {
@@ -870,7 +876,28 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
     ? choices.find((c) => c.key === pick?.key)
     : quotes?.summary?.find((s) => s.account === pick?.account);
   const blocked = single && chosen?.serviceable === false && !skipCheck;
-  const needPkg = mode === "manual" && !manualOk;
+  const needPkg = mode === "manual" && !manualOk && !(single && boxes);
+  const needAwbs =
+    acc?.carrier === "custom" &&
+    single &&
+    (boxes ? boxes.some((_, i) => !boxAwbs[i]) : !manual.awb);
+  const whyNot = busy
+    ? ""
+    : checking && !pick
+      ? "Checking couriers…"
+      : !pick
+        ? boxes
+          ? "Enter the weight and size of the boxes to check couriers"
+          : "Choose a courier"
+        : needPkg
+          ? "Enter the package weight and size"
+          : blocked
+            ? "This courier doesn't deliver there — choose another or tick the override"
+            : needAwbs
+              ? boxes
+                ? "Enter the AWB of every box"
+                : "Enter the AWB"
+              : "";
   const autoMissing =
     !single && quotes?.orders?.filter((o) => o.needsPackage).length;
 
@@ -910,20 +937,17 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
       onClose={onClose}
       footer={
         <>
+          {whyNot && (
+            <span className="small text-amber" style={{ marginRight: "auto" }}>
+              {whyNot}
+            </span>
+          )}
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
           <button
             className="btn btn-primary"
-            disabled={
-              busy ||
-              !pick ||
-              needPkg ||
-              blocked ||
-              (acc?.carrier === "custom" &&
-                single &&
-                (boxes ? boxes.some((_, i) => !boxAwbs[i]) : !manual.awb))
-            }
+            disabled={busy || !pick || needPkg || blocked || needAwbs}
             onClick={go}
           >
             {busy
