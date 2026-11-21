@@ -600,6 +600,102 @@ async function undoTargets(req, q) {
   return out;
 }
 
+/**
+ * Transactions entered in OrdexaGo itself (not from any import) in a date range — to reconcile with Tally:
+ * whatever is here isn't in the Tally books unless it was entered there too.
+ *   GET /native?from=&to=
+ */
+router.get(
+  "/native",
+  ah(async (req, res) => {
+    const date = {};
+    if (req.query.from) date.$gte = new Date(`${req.query.from}T00:00:00Z`);
+    if (req.query.to) date.$lte = new Date(`${req.query.to}T23:59:59Z`);
+    const inDates = (d) =>
+      (!date.$gte || d.date >= date.$gte) &&
+      (!date.$lte || d.date <= date.$lte);
+    const Account = require("../models/Account");
+    const names = new Map(
+      (await Account.find({ organization: req.org }, { name: 1 }).lean()).map(
+        (a) => [String(a._id), a.name],
+      ),
+    );
+    const acc = (x) => (x ? names.get(String(x)) || String(x) : "");
+    const KINDS = [
+      ["bills", "Bill", "billNumber", "vendor", "Vendor"],
+      ["invoices", "Invoice", "invoiceNumber", "customer", "Customer"],
+      ["vendorCredits", "VendorCredit", "number", "vendor", "Vendor"],
+      ["creditNotes", "CreditNote", "number", "customer", "Customer"],
+      ["expenses", "Expense", "reference", "vendor", "Vendor"],
+      ["journals", "Journal", "number", null, null],
+      ["vendorPayments", "VendorPayment", "paymentNumber", "vendor", "Vendor"],
+      ["payments", "Payment", "paymentNumber", "customer", "Customer"],
+    ];
+    const out = [];
+    for (const [type, model, num, partyField, partyModel] of KINDS) {
+      const M = require(`../models/${model}`);
+      const docs = (await M.find({ organization: req.org }).lean()).filter(
+        (d) =>
+          !d.importRef &&
+          d.status !== "void" &&
+          d.status !== "draft" &&
+          inDates(d),
+      );
+      if (!docs.length) continue;
+      let parties = new Map();
+      if (partyModel) {
+        const P = require(`../models/${partyModel}`);
+        const ids = [
+          ...new Set(
+            docs.map((d) => String(d[partyField] || "")).filter(Boolean),
+          ),
+        ];
+        parties = new Map(
+          (await P.find({ _id: { $in: ids } }, { displayName: 1 }).lean()).map(
+            (p) => [String(p._id), p.displayName],
+          ),
+        );
+      }
+      const rows = docs
+        .sort((a, b) => new Date(a.date) - new Date(b.date))
+        .map((d) => ({
+          id: String(d._id),
+          number: d[num] || "",
+          date: d.date,
+          party: partyField
+            ? parties.get(String(d[partyField] || "")) || ""
+            : "",
+          total:
+            d.total ??
+            d.amount ??
+            (d.lines || []).reduce((t, l) => t + (l.debit || 0), 0),
+          accounts: [
+            ...new Set(
+              [
+                ...(d.lineItems || []).map((l) => acc(l.account)),
+                ...(d.lines || []).map((l) => acc(l.account)),
+                acc(d.account),
+                acc(d.ledger),
+                acc(d.paidThrough),
+                acc(d.depositTo),
+                acc(d.paidFrom),
+              ].filter(Boolean),
+            ),
+          ].slice(0, 4),
+        }));
+      out.push({
+        type,
+        label: LABELS[type] || type,
+        count: rows.length,
+        total:
+          Math.round(rows.reduce((t, r) => t + (r.total || 0), 0) * 100) / 100,
+        rows: rows.slice(0, 500),
+      });
+    }
+    res.send(out);
+  }),
+);
+
 router.get(
   "/undo",
   ah(async (req, res) => {

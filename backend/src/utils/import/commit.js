@@ -854,6 +854,12 @@ async function commit(ctx, data, opts, progress) {
     ["creditNotes", "customer", CreditNote, "creditNotes", "number"],
     ["vendorCredits", "vendor", VendorCredit, "vendorCredits", "number"],
   ];
+  const LABEL_ONE = {
+    invoices: "invoice",
+    bills: "bill",
+    creditNotes: "credit note",
+    vendorCredits: "debit note",
+  };
   for (const [type, kind, M, routeName, numField] of docTypes) {
     for (const d of data.records[type] || []) {
       progress();
@@ -875,11 +881,16 @@ async function commit(ctx, data, opts, progress) {
         };
         const ownNumber =
           d.autoNumber && (type === "invoices" || type === "creditNotes");
-        if (
-          (await M.exists({ organization: ctx.org, importRef: key })) ||
-          (d.number && !ownNumber && (await M.exists(numQ)))
-        ) {
+        if (await M.exists({ organization: ctx.org, importRef: key })) {
           R_(type).skipped++;
+          continue;
+        }
+        if (d.number && !ownNumber && (await M.exists(numQ))) {
+          // Same number already in OrdexaGo, but not from this import (entered by hand, or left by an earlier one).
+          R_(type).skipped++;
+          warnings.push(
+            `${label}: not imported — ${LABEL_ONE[type]} ${d.number} is already in OrdexaGo (entered there, not from this import). Delete it there and import again if the Tally one is right.`,
+          );
           continue;
         }
         let pos = d.placeOfSupply || p.placeOfSupply || org.state;

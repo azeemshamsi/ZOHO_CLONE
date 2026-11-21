@@ -19,8 +19,13 @@ const TYPES = [
   ["expenses", "Expenses"],
   ["journals", "Journals"],
 ];
-const SOURCE = { zoho: "Zoho Books", tally: "Tally ERP / TallyPrime", sheet: "Spreadsheet" };
-const ORDER = "Chart of accounts → Customers & vendors → Opening balances → Invoices & bills → Payments → Expenses → Journals";
+const SOURCE = {
+  zoho: "Zoho Books",
+  tally: "Tally ERP / TallyPrime",
+  sheet: "Spreadsheet",
+};
+const ORDER =
+  "Chart of accounts → Customers & vendors → Opening balances → Invoices & bills → Payments → Expenses → Journals";
 
 function readBase64(file) {
   return new Promise((resolve, reject) => {
@@ -34,8 +39,11 @@ function readBase64(file) {
 // Compress the file in the browser before sending: Tally/Zoho exports (XML, CSV) shrink 10–20×,
 // so big exports upload quickly and stay under the server's request limit.
 async function readForUpload(file) {
-  if (typeof CompressionStream === "undefined") return { data: await readBase64(file), gzip: false };
-  const gz = await new Response(file.stream().pipeThrough(new CompressionStream("gzip"))).blob();
+  if (typeof CompressionStream === "undefined")
+    return { data: await readBase64(file), gzip: false };
+  const gz = await new Response(
+    file.stream().pipeThrough(new CompressionStream("gzip")),
+  ).blob();
   return { data: await readBase64(gz), gzip: true };
 }
 const MAX_MB = 150;
@@ -72,12 +80,20 @@ export function Import() {
 
   const runPreview = async (f = file, t = type) => {
     if (!f) return;
-    if (f.size > MAX_MB * 1024 * 1024) return toast(`Files up to ${MAX_MB} MB can be imported. Split bigger exports by date range.`, "error");
+    if (f.size > MAX_MB * 1024 * 1024)
+      return toast(
+        `Files up to ${MAX_MB} MB can be imported. Split bigger exports by date range.`,
+        "error",
+      );
     setBusy(true);
     setPreview(null);
     try {
       const { data, gzip } = await readForUpload(f);
-      const { data: p } = await api.post("/import/preview", { fileName: f.name, data, gzip, type: t || undefined }, { timeout: 600000 });
+      const { data: p } = await api.post(
+        "/import/preview",
+        { fileName: f.name, data, gzip, type: t || undefined },
+        { timeout: 600000 },
+      );
       setPreview(p);
       if (p.hasOpening && !openingDate && p.firstDate) {
         // Default: 1 April of the financial year of the earliest transaction, else the first of this FY.
@@ -86,7 +102,9 @@ export function Import() {
         setOpeningDate(`${fy}-04-01`);
       } else if (p.hasOpening && !openingDate) {
         const d = new Date();
-        setOpeningDate(`${d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1}-04-01`);
+        setOpeningDate(
+          `${d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1}-04-01`,
+        );
       }
     } catch (e) {
       toast(errMsg(e), "error");
@@ -106,7 +124,8 @@ export function Import() {
       .get(`/import/jobs/${id}`)
       .then(({ data }) => {
         setJob({ id, ...data });
-        if (data.status === "running") timer.current = setTimeout(() => poll(id), 700);
+        if (data.status === "running")
+          timer.current = setTimeout(() => poll(id), 700);
       })
       .catch((e) => toast(errMsg(e), "error"));
   };
@@ -114,7 +133,10 @@ export function Import() {
   const start = async () => {
     setBusy(true);
     try {
-      const { data } = await api.post("/import/commit", { id: preview.id, openingDate: preview.hasOpening ? openingDate : undefined });
+      const { data } = await api.post("/import/commit", {
+        id: preview.id,
+        openingDate: preview.hasOpening ? openingDate : undefined,
+      });
       setJob({ id: data.jobId, status: "running", done: 0, total: 1 });
       poll(data.jobId);
     } catch (e) {
@@ -129,7 +151,10 @@ export function Import() {
 
   return (
     <>
-      <PageHeader title="Import Data" subtitle="Bring your books over from Zoho Books, Tally ERP 9 / TallyPrime, or any spreadsheet." />
+      <PageHeader
+        title="Import Data"
+        subtitle="Bring your books over from Zoho Books, Tally ERP 9 / TallyPrime, or any spreadsheet."
+      />
 
       {!job && (
         <div className="grid-side import-grid">
@@ -150,11 +175,28 @@ export function Import() {
               onClick={() => input.current?.click()}
             >
               <Icon name="doc" size={28} />
-              <div>{file ? <strong>{file.name}</strong> : "Drop a file here, or click to browse"}</div>
-              <div className="muted small">Excel (.xlsx, .xls), CSV, or XML — up to 150 MB</div>
-              <input ref={input} type="file" hidden accept=".xlsx,.xls,.xlsm,.ods,.csv,.txt,.tsv,.xml" onChange={(e) => pick(e.target.files[0])} />
+              <div>
+                {file ? (
+                  <strong>{file.name}</strong>
+                ) : (
+                  "Drop a file here, or click to browse"
+                )}
+              </div>
+              <div className="muted small">
+                Excel (.xlsx, .xls), CSV, or XML — up to 150 MB
+              </div>
+              <input
+                ref={input}
+                type="file"
+                hidden
+                accept=".xlsx,.xls,.xlsm,.ods,.csv,.txt,.tsv,.xml"
+                onChange={(e) => pick(e.target.files[0])}
+              />
             </div>
-            <Field label="What's in this file?" hint="Leave on automatic — OrdexaGo reads the column names. Change it only if a sheet isn't recognised.">
+            <Field
+              label="What's in this file?"
+              hint="Leave on automatic — OrdexaGo reads the column names. Change it only if a sheet isn't recognised."
+            >
               <select
                 value={type}
                 onChange={(e) => {
@@ -175,16 +217,34 @@ export function Import() {
           <div className="card import-help">
             <h3 className="card-title pad">How to export</h3>
             <p>
-              <strong>Zoho Books:</strong> open the module (Chart of Accounts, Customers, Vendors, Invoices, Bills, Customer Payments, Vendor Payments, Expenses, Manual Journals), then <em>⋯ → Export</em>. Choose CSV or XLSX. For opening balances, export the Trial Balance report as of the day before your start date.
+              <strong>Zoho Books:</strong> open the module (Chart of Accounts,
+              Customers, Vendors, Invoices, Bills, Customer Payments, Vendor
+              Payments, Expenses, Manual Journals), then <em>⋯ → Export</em>.
+              Choose CSV or XLSX. For opening balances, export the Trial Balance
+              report as of the day before your start date.
             </p>
             <p>
-              <strong>Tally ERP 9 / TallyPrime:</strong> <em>Display → List of Accounts</em> (or <em>Day Book</em> for vouchers), then <em>Export (Alt+E)</em> with Format = <em>XML (Data Interchange)</em>. Masters bring ledgers, groups, opening balances and bill-wise outstanding; the Day Book brings Sales, Purchase, Receipt, Payment, Credit/Debit Note and Journal vouchers. Excel exports of the ledger list or trial balance work too.
+              <strong>Tally ERP 9 / TallyPrime:</strong>{" "}
+              <em>Display → List of Accounts</em> (or <em>Day Book</em> for
+              vouchers), then <em>Export (Alt+E)</em> with Format ={" "}
+              <em>XML (Data Interchange)</em>. Masters bring ledgers, groups,
+              opening balances and bill-wise outstanding; the Day Book brings
+              Sales, Purchase, Receipt, Payment, Credit/Debit Note and Journal
+              vouchers. Excel exports of the ledger list or trial balance work
+              too.
             </p>
-            <p className="muted small">Import in this order: {ORDER}. Re-importing the same file is safe — records already brought in are skipped.</p>
+            <p className="muted small">
+              Import in this order: {ORDER}. Re-importing the same file is safe
+              — records already brought in are skipped.
+            </p>
             <div className="template-links">
               <span className="muted small">CSV templates:</span>
               {TYPES.slice(1).map(([v, l]) => (
-                <button key={v} className="link-btn small" onClick={() => download(v)}>
+                <button
+                  key={v}
+                  className="link-btn small"
+                  onClick={() => download(v)}
+                >
                   {l}
                 </button>
               ))}
@@ -193,6 +253,7 @@ export function Import() {
         </div>
       )}
       {!preview && !job && <UndoImport />}
+      {!preview && !job && <NativeEntries />}
 
       {preview && !job && (
         <div className="card" style={{ marginTop: 18 }}>
@@ -203,7 +264,10 @@ export function Import() {
           {preview.datasets.map((d) => (
             <div key={d.type} className="import-set">
               <div className="import-set-head">
-                <strong>{d.label}</strong> <span className="muted">— {d.count} record{d.count === 1 ? "" : "s"}</span>
+                <strong>{d.label}</strong>{" "}
+                <span className="muted">
+                  — {d.count} record{d.count === 1 ? "" : "s"}
+                </span>
               </div>
               <div className="card flush">
                 <table className="table compact">
@@ -218,14 +282,20 @@ export function Import() {
                     {d.sample.map((r, i) => (
                       <tr key={i}>
                         {Object.values(r).map((v, j) => (
-                          <td key={j}>{v === null || v === undefined ? "" : String(v)}</td>
+                          <td key={j}>
+                            {v === null || v === undefined ? "" : String(v)}
+                          </td>
                         ))}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              {d.count > d.sample.length && <div className="muted small">…and {d.count - d.sample.length} more</div>}
+              {d.count > d.sample.length && (
+                <div className="muted small">
+                  …and {d.count - d.sample.length} more
+                </div>
+              )}
             </div>
           ))}
           {preview.warnings.length > 0 && (
@@ -233,7 +303,9 @@ export function Import() {
               {preview.warnings.slice(0, 12).map((w, i) => (
                 <div key={i}>{w}</div>
               ))}
-              {preview.warnings.length > 12 && <div>…and {preview.warnings.length - 12} more</div>}
+              {preview.warnings.length > 12 && (
+                <div>…and {preview.warnings.length - 12} more</div>
+              )}
             </div>
           )}
 
@@ -241,12 +313,25 @@ export function Import() {
             3. Import
           </h3>
           {preview.hasOpening && (
-            <Field label="Opening balance date" required hint="The date your books in OrdexaGo start from. Opening balances are posted on this date, against Opening Balance Equity.">
-              <input type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} style={{ maxWidth: 200 }} />
+            <Field
+              label="Opening balance date"
+              required
+              hint="The date your books in OrdexaGo start from. Opening balances are posted on this date, against Opening Balance Equity."
+            >
+              <input
+                type="date"
+                value={openingDate}
+                onChange={(e) => setOpeningDate(e.target.value)}
+                style={{ maxWidth: 200 }}
+              />
             </Field>
           )}
           <div className="row-actions">
-            <button className="btn btn-primary" disabled={busy || (preview.hasOpening && !openingDate)} onClick={start}>
+            <button
+              className="btn btn-primary"
+              disabled={busy || (preview.hasOpening && !openingDate)}
+              onClick={start}
+            >
               Import {preview.datasets.reduce((s, d) => s + d.count, 0)} records
             </button>
             <button className="btn" onClick={reset}>
@@ -262,18 +347,26 @@ export function Import() {
             <>
               <h3 className="card-title pad">Importing…</h3>
               <div className="progress">
-                <div style={{ width: `${Math.round((job.done / Math.max(job.total, 1)) * 100)}%` }} />
+                <div
+                  style={{
+                    width: `${Math.round((job.done / Math.max(job.total, 1)) * 100)}%`,
+                  }}
+                />
               </div>
               <p className="muted">
-                {job.done} of {job.total} — you can leave this page; the import keeps running.
+                {job.done} of {job.total} — you can leave this page; the import
+                keeps running.
               </p>
             </>
           ) : job.status === "failed" ? (
-            <div className="alert alert-error">The import stopped: {job.error}</div>
+            <div className="alert alert-error">
+              The import stopped: {job.error}
+            </div>
           ) : (
             <>
               <h3 className="card-title pad">
-                <Icon name="check" /> Import finished — {created} created{failed ? `, ${failed} failed` : ""}
+                <Icon name="check" /> Import finished — {created} created
+                {failed ? `, ${failed} failed` : ""}
               </h3>
               <table className="table compact">
                 <thead>
@@ -298,7 +391,11 @@ export function Import() {
               {failed > 0 && (
                 <div className="alert alert-error" style={{ marginTop: 12 }}>
                   {results
-                    .flatMap(([k, r]) => r.failed.map((f) => `${job.labels?.[k] || k} — ${f.ref}: ${f.error}`))
+                    .flatMap(([k, r]) =>
+                      r.failed.map(
+                        (f) => `${job.labels?.[k] || k} — ${f.ref}: ${f.error}`,
+                      ),
+                    )
                     .slice(0, 50)
                     .map((t, i) => (
                       <div key={i}>{t}</div>
@@ -334,7 +431,12 @@ export function Import() {
 // Remove transactions brought in by an earlier import (e.g. to import the same vouchers again, correctly).
 function UndoImport() {
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ source: "tally", from: "", to: "", opening: false });
+  const [f, setF] = useState({
+    source: "tally",
+    from: "",
+    to: "",
+    opening: false,
+  });
   const [counts, setCounts] = useState(null);
   const [job, setJob] = useState(null);
   const check = async () => {
@@ -351,7 +453,12 @@ function UndoImport() {
   }, [open, f.source, f.from, f.to, f.opening]);
   const run = async () => {
     const n = counts.reduce((s, c) => s + c.count, 0);
-    if (!window.confirm(`Delete ${n} imported transaction(s)? Customers, vendors and accounts stay${f.opening ? "" : ", and so do opening balances"}. This can't be undone.`)) return;
+    if (
+      !window.confirm(
+        `Delete ${n} imported transaction(s)? Customers, vendors and accounts stay${f.opening ? "" : ", and so do opening balances"}. This can't be undone.`,
+      )
+    )
+      return;
     try {
       const { data } = await api.post("/import/undo", f);
       setJob({ status: "running", done: 0, total: data.total });
@@ -380,26 +487,45 @@ function UndoImport() {
     <div className="card" style={{ marginTop: 18 }}>
       <h3 className="card-title pad">Undo an import</h3>
       <p className="muted small">
-        Deletes the invoices, bills, credit/debit notes, payments, expenses and journals that an import created. Customers, vendors, the chart of accounts and opening balances are kept, so you can then import the
+        Deletes the invoices, bills, credit/debit notes, payments, expenses and
+        journals that an import created. Customers, vendors, the chart of
+        accounts and opening balances are kept, so you can then import the
         transactions again.
       </p>
       <div className="row-3">
         <Field label="Imported from">
-          <select value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })}>
+          <select
+            value={f.source}
+            onChange={(e) => setF({ ...f, source: e.target.value })}
+          >
             <option value="tally">Tally</option>
             <option value="zoho">Zoho Books</option>
             <option value="sheet">Spreadsheet / CSV</option>
           </select>
         </Field>
         <Field label="Transactions dated from" hint="Leave empty for all">
-          <input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value })} />
+          <input
+            type="date"
+            value={f.from}
+            onChange={(e) => setF({ ...f, from: e.target.value })}
+          />
         </Field>
         <Field label="to">
-          <input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} />
+          <input
+            type="date"
+            value={f.to}
+            onChange={(e) => setF({ ...f, to: e.target.value })}
+          />
         </Field>
       </div>
       <label className="check small" style={{ margin: "4px 0 10px" }}>
-        <input type="checkbox" checked={f.opening} onChange={(e) => setF({ ...f, opening: e.target.checked })} /> Also delete imported opening balances (customer/vendor openings and the opening balances journal), to import the masters again
+        <input
+          type="checkbox"
+          checked={f.opening}
+          onChange={(e) => setF({ ...f, opening: e.target.checked })}
+        />{" "}
+        Also delete imported opening balances (customer/vendor openings and the
+        opening balances journal), to import the masters again
       </label>
       {job?.status === "running" ? (
         <p>
@@ -407,18 +533,150 @@ function UndoImport() {
         </p>
       ) : job?.status === "done" ? (
         <div className="alert alert-success">
-          {job.results.map((r) => `${r.label}: ${r.deleted} deleted${r.failed.length ? `, ${r.failed.length} couldn't be (${[...new Set(r.failed)].slice(0, 2).join("; ")})` : ""}`).join(" · ")}
+          {job.results
+            .map(
+              (r) =>
+                `${r.label}: ${r.deleted} deleted${r.failed.length ? `, ${r.failed.length} couldn't be (${[...new Set(r.failed)].slice(0, 2).join("; ")})` : ""}`,
+            )
+            .join(" · ")}
         </div>
       ) : null}
       {counts && (
         <p className="small">
-          {total ? `Found: ${counts.map((c) => `${c.count} ${c.label.toLowerCase()}`).join(", ")}.` : "Nothing imported from there in these dates."}
+          {total
+            ? `Found: ${counts.map((c) => `${c.count} ${c.label.toLowerCase()}`).join(", ")}.`
+            : "Nothing imported from there in these dates."}
         </p>
       )}
       <div className="row-actions">
-        <button className="btn btn-danger" disabled={!total || job?.status === "running"} onClick={run}>
+        <button
+          className="btn btn-danger"
+          disabled={!total || job?.status === "running"}
+          onClick={run}
+        >
           Delete {total || ""} imported transactions
         </button>
+        <button className="btn" onClick={() => setOpen(false)}>
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// What was entered in OrdexaGo itself (not from an import): to see why OrdexaGo differs from Tally.
+const DOC_PATH = {
+  bills: "bills",
+  invoices: "invoices",
+  vendorCredits: "vendor-credits",
+  creditNotes: "credit-notes",
+  expenses: "expenses",
+  journals: "journals",
+  vendorPayments: "payments-made",
+  payments: "payments",
+};
+function NativeEntries() {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ from: "", to: "" });
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    if (!open) return;
+    setData(null);
+    api
+      .get("/import/native", { params: f })
+      .then((r) => setData(r.data))
+      .catch((e) => toast(errMsg(e), "error"));
+  }, [open, f.from, f.to]);
+  const inr = (n) =>
+    `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  if (!open)
+    return (
+      <p className="muted small">
+        OrdexaGo doesn't match Tally?{" "}
+        <button className="link-btn small" onClick={() => setOpen(true)}>
+          See transactions entered in OrdexaGo (not imported)
+        </button>
+      </p>
+    );
+  return (
+    <div className="card" style={{ marginTop: 18 }}>
+      <h3 className="card-title pad">Entered in OrdexaGo, not imported</h3>
+      <p className="muted small">
+        These were made in OrdexaGo itself (by hand, from a PDF, from Shopify or
+        a marketplace…). They're not in your Tally books unless someone entered
+        them there too — delete duplicates here, or enter the missing ones in
+        Tally.
+      </p>
+      <div className="row-3">
+        <Field label="Dated from" hint="Leave empty for all">
+          <input
+            type="date"
+            value={f.from}
+            onChange={(e) => setF({ ...f, from: e.target.value })}
+          />
+        </Field>
+        <Field label="to">
+          <input
+            type="date"
+            value={f.to}
+            onChange={(e) => setF({ ...f, to: e.target.value })}
+          />
+        </Field>
+      </div>
+      {!data ? (
+        <p className="muted small">Loading…</p>
+      ) : !data.length ? (
+        <p className="small">
+          Nothing — everything in these dates came from an import.
+        </p>
+      ) : (
+        data.map((g) => (
+          <details key={g.type} style={{ marginBottom: 8 }}>
+            <summary className="strong" style={{ cursor: "pointer" }}>
+              {g.label}: {g.count} · {inr(g.total)}
+            </summary>
+            <div style={{ overflowX: "auto" }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Number</th>
+                    <th>Party</th>
+                    <th>Accounts</th>
+                    <th className="num">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {g.rows.map((r) => (
+                    <tr key={r.id}>
+                      <td className="small">
+                        {new Date(r.date).toLocaleDateString("en-IN")}
+                      </td>
+                      <td className="small">
+                        <Link
+                          to={`/${DOC_PATH[g.type]}/${r.id}${g.type === "expenses" ? "/edit" : ""}`}
+                          target="_blank"
+                        >
+                          {r.number || "open"}
+                        </Link>
+                      </td>
+                      <td className="small">{r.party}</td>
+                      <td className="small muted">{r.accounts.join(", ")}</td>
+                      <td className="num">{inr(r.total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {g.count > g.rows.length && (
+                <p className="small muted">
+                  First {g.rows.length} of {g.count} — narrow the dates.
+                </p>
+              )}
+            </div>
+          </details>
+        ))
+      )}
+      <div className="row-actions">
         <button className="btn" onClick={() => setOpen(false)}>
           Close
         </button>
