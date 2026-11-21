@@ -27,7 +27,20 @@ const { nextNumber } = require("../../models/Counter");
 function call(router, method, url, ctx, body) {
   return new Promise((resolve, reject) => {
     const [path, qs] = url.split("?");
-    const req = { method, url, originalUrl: url, baseUrl: "", path, body: body || {}, query: Object.fromEntries(new URLSearchParams(qs || "")), params: {}, headers: {}, get: () => undefined, org: ctx.org, user: ctx.user };
+    const req = {
+      method,
+      url,
+      originalUrl: url,
+      baseUrl: "",
+      path,
+      body: body || {},
+      query: Object.fromEntries(new URLSearchParams(qs || "")),
+      params: {},
+      headers: {},
+      get: () => undefined,
+      org: ctx.org,
+      user: ctx.user,
+    };
     const res = {
       statusCode: 200,
       status(c) {
@@ -35,7 +48,12 @@ function call(router, method, url, ctx, body) {
         return this;
       },
       send(d) {
-        if (this.statusCode >= 400) reject(Object.assign(new Error(d?.message || "Request failed"), { status: this.statusCode }));
+        if (this.statusCode >= 400)
+          reject(
+            Object.assign(new Error(d?.message || "Request failed"), {
+              status: this.statusCode,
+            }),
+          );
         else resolve(d);
         return this;
       },
@@ -44,7 +62,9 @@ function call(router, method, url, ctx, body) {
       },
       setHeader() {},
     };
-    router.handle(req, res, (err) => reject(err || new Error(`No route ${method} ${url}`)));
+    router.handle(req, res, (err) =>
+      reject(err || new Error(`No route ${method} ${url}`)),
+    );
   });
 }
 const R = (name) => require(`../../routes/${name}`);
@@ -54,17 +74,64 @@ function systemSynonyms(code, name) {
   const extra = {
     cash: ["cash", "cash in hand", "cash-in-hand", "petty cash"],
     bank: ["bank", "bank account"],
-    ar: ["accounts receivable", "sundry debtors", "debtors", "trade receivables"],
+    ar: [
+      "accounts receivable",
+      "sundry debtors",
+      "debtors",
+      "trade receivables",
+    ],
     ap: ["accounts payable", "sundry creditors", "creditors", "trade payables"],
-    sales: ["sales", "sales account", "sales accounts", "sales - gst", "sales gst", "local sales", "domestic sales", "revenue"],
-    cogs: ["cost of goods sold", "purchase", "purchases", "purchase account", "purchase accounts", "purchase - gst", "purchases gst", "local purchase"],
-    owners_equity: ["owner's equity", "owners equity", "capital account", "capital", "proprietor's capital", "partners capital"],
-    opening_equity: ["opening balance equity", "opening balance adjustments", "difference in opening balances"],
-    adjustments: ["rounding & adjustments", "round off", "rounding off", "round-off", "rounded off", "rounding"],
+    sales: [
+      "sales",
+      "sales account",
+      "sales accounts",
+      "sales - gst",
+      "sales gst",
+      "local sales",
+      "domestic sales",
+      "revenue",
+    ],
+    cogs: [
+      "cost of goods sold",
+      "purchase",
+      "purchases",
+      "purchase account",
+      "purchase accounts",
+      "purchase - gst",
+      "purchases gst",
+      "local purchase",
+    ],
+    owners_equity: [
+      "owner's equity",
+      "owners equity",
+      "capital account",
+      "capital",
+      "proprietor's capital",
+      "partners capital",
+    ],
+    opening_equity: [
+      "opening balance equity",
+      "opening balance adjustments",
+      "difference in opening balances",
+    ],
+    adjustments: [
+      "rounding & adjustments",
+      "round off",
+      "rounding off",
+      "round-off",
+      "rounded off",
+      "rounding",
+    ],
     shipping_income: ["shipping charge", "shipping charges", "freight outward"],
     other_income: ["other income", "misc income", "miscellaneous income"],
     drawings: ["drawings", "owner's drawings"],
-    inventory: ["inventory asset", "stock in hand", "stock-in-hand", "closing stock", "inventory"],
+    inventory: [
+      "inventory asset",
+      "stock in hand",
+      "stock-in-hand",
+      "closing stock",
+      "inventory",
+    ],
     fixed_assets: ["fixed assets"],
     acc_depreciation: ["accumulated depreciation"],
     depreciation: ["depreciation", "depreciation expense"],
@@ -73,8 +140,18 @@ function systemSynonyms(code, name) {
 }
 function taxCode(name) {
   const n = name.toLowerCase();
-  const side = /input|itc|purchase|receivable|\bin\b/.test(n) ? "input" : /output|sales|payable|\bout\b/.test(n) ? "output" : null;
-  const t = /igst/.test(n) ? "igst" : /cgst/.test(n) ? "cgst" : /sgst|utgst/.test(n) ? "sgst" : null;
+  const side = /input|itc|purchase|receivable|\bin\b/.test(n)
+    ? "input"
+    : /output|sales|payable|\bout\b/.test(n)
+      ? "output"
+      : null;
+  const t = /igst/.test(n)
+    ? "igst"
+    : /cgst/.test(n)
+      ? "cgst"
+      : /sgst|utgst/.test(n)
+        ? "sgst"
+        : null;
   return side && t ? `${side}_${t}` : null;
 }
 
@@ -83,38 +160,58 @@ async function commit(ctx, data, opts, progress) {
   const src = data.source; // "zoho" | "tally" | "sheet"
   const ref = (type, k) => `${src}:${type}:${clean(k).toLowerCase()}`;
   const results = {};
-  const R_ = (t) => (results[t] = results[t] || { created: 0, skipped: 0, failed: [] });
-  const fail = (t, label, e) => R_(t).failed.push({ ref: label, error: e.message || String(e) });
+  const R_ = (t) =>
+    (results[t] = results[t] || { created: 0, skipped: 0, failed: [] });
+  const fail = (t, label, e) =>
+    R_(t).failed.push({ ref: label, error: e.message || String(e) });
   const warnings = [...(data.warnings || [])];
-  const openingDate = opts.openingDate ? new Date(`${opts.openingDate}T00:00:00Z`) : null;
+  const openingDate = opts.openingDate
+    ? new Date(`${opts.openingDate}T00:00:00Z`)
+    : null;
   const dayBefore = (d) => new Date(d.getTime());
 
   /* ---------- account name → code ---------- */
   const accByName = new Map();
   const refreshAccounts = async () => {
     for (const a of await chartOfAccounts(ctx.org)) {
-      for (const n of a.system ? systemSynonyms(a.code, a.name) : [a.name.toLowerCase()]) if (!accByName.has(n)) accByName.set(n, a.code);
-      if (a.accountCode) accByName.set(String(a.accountCode).toLowerCase(), a.code);
+      for (const n of a.system
+        ? systemSynonyms(a.code, a.name)
+        : [a.name.toLowerCase()])
+        if (!accByName.has(n)) accByName.set(n, a.code);
+      if (a.accountCode)
+        accByName.set(String(a.accountCode).toLowerCase(), a.code);
     }
   };
   await refreshAccounts();
   const accounts = await chartOfAccounts(ctx.org);
-  const groupOfCode = (code) => accounts.find((a) => a.code === code)?.group || "";
+  const groupOfCode = (code) =>
+    accounts.find((a) => a.code === code)?.group || "";
   // `exact`: only the same name (or a built-in account's usual names / a GST ledger), so two Tally
   // ledgers that differ only by a bracketed suffix ("… (Un Reg.)") stay separate accounts.
   const lookupAccount = (name, { exact = false } = {}) => {
     const n = clean(name).toLowerCase();
     if (!n) return null;
-    return accByName.get(n) || taxCode(n) || (exact ? null : accByName.get(n.replace(/\s*\(.*\)$/, ""))) || null;
+    return (
+      accByName.get(n) ||
+      taxCode(n) ||
+      (exact ? null : accByName.get(n.replace(/\s*\(.*\)$/, ""))) ||
+      null
+    );
   };
 
   // The account a purchase line's ledger posts to; ledgers not in OrdexaGo yet become Expense accounts.
   const expenseAccount = async (name) => {
     const code = lookupAccount(name);
     if (code) return ["ar", "ap"].includes(code) ? "" : code;
-    const d = await Account.create({ organization: ctx.org, name: clean(name), group: "Expense" });
+    const d = await Account.create({
+      organization: ctx.org,
+      name: clean(name),
+      group: "Expense",
+    });
     accByName.set(clean(name).toLowerCase(), String(d._id));
-    warnings.push(`Account "${clean(name)}" was created as an Expense (from a Tally purchase voucher) — change its type in Chart of Accounts if needed`);
+    warnings.push(
+      `Account "${clean(name)}" was created as an Expense (from a Tally purchase voucher) — change its type in Chart of Accounts if needed`,
+    );
     return String(d._id);
   };
 
@@ -126,8 +223,15 @@ async function commit(ctx, data, opts, progress) {
       if (have) {
         // Accounts from an earlier import learn whether they're a sales / purchase ledger.
         if (a.ledgerKind && /^[0-9a-f]{24}$/i.test(have)) {
-          const cur = await Account.findOne({ _id: have, organization: ctx.org }, { ledgerKind: 1 }).lean();
-          if (cur && !cur.ledgerKind) await Account.updateOne({ _id: have }, { $set: { ledgerKind: a.ledgerKind } });
+          const cur = await Account.findOne(
+            { _id: have, organization: ctx.org },
+            { ledgerKind: 1 },
+          ).lean();
+          if (cur && !cur.ledgerKind)
+            await Account.updateOne(
+              { _id: have },
+              { $set: { ledgerKind: a.ledgerKind } },
+            );
         }
         R_("accounts").skipped++;
         continue;
@@ -140,9 +244,18 @@ async function commit(ctx, data, opts, progress) {
       }
       if (!group) {
         group = "Other Current Asset";
-        warnings.push(`Account "${a.name}" (type "${a.type || "?"}") was put under Other Current Asset — change it in Chart of Accounts if needed`);
+        warnings.push(
+          `Account "${a.name}" (type "${a.type || "?"}") was put under Other Current Asset — change it in Chart of Accounts if needed`,
+        );
       }
-      const doc = await Account.create({ organization: ctx.org, name: a.name, group, accountCode: a.code || "", description: a.description || "", ledgerKind: a.ledgerKind || "" });
+      const doc = await Account.create({
+        organization: ctx.org,
+        name: a.name,
+        group,
+        accountCode: a.code || "",
+        description: a.description || "",
+        ledgerKind: a.ledgerKind || "",
+      });
       accByName.set(a.name.toLowerCase(), String(doc._id));
       R_("accounts").created++;
     } catch (e) {
@@ -157,21 +270,31 @@ async function commit(ctx, data, opts, progress) {
   await refreshAccounts();
   // Tally's Opening Stock ledger: item opening values (Inventory masters import) are matched to it.
   if (data.stockLedgerOpening) {
-    await Organization.updateOne({ _id: ctx.org }, { tallyOpeningStock: round2(data.stockLedgerOpening) });
+    await Organization.updateOne(
+      { _id: ctx.org },
+      { tallyOpeningStock: round2(data.stockLedgerOpening) },
+    );
     org.tallyOpeningStock = round2(data.stockLedgerOpening);
   }
 
   /* ---------- 2. Customers and vendors ---------- */
-  const currencies = new Set((await Currency.find({ organization: ctx.org }).lean()).map((c) => c.code));
+  const currencies = new Set(
+    (await Currency.find({ organization: ctx.org }).lean()).map((c) => c.code),
+  );
   const contacts = { customer: new Map(), vendor: new Map() };
-  for (const c of await Customer.find({ organization: ctx.org }).lean()) contacts.customer.set(c.displayName.toLowerCase(), c);
-  for (const v of await Vendor.find({ organization: ctx.org }).lean()) contacts.vendor.set(v.displayName.toLowerCase(), v);
+  for (const c of await Customer.find({ organization: ctx.org }).lean())
+    contacts.customer.set(c.displayName.toLowerCase(), c);
+  for (const v of await Vendor.find({ organization: ctx.org }).lean())
+    contacts.vendor.set(v.displayName.toLowerCase(), v);
   const makeContact = async (kind, c) => {
     const M = kind === "customer" ? Customer : Vendor;
     let currency = "INR";
     if (c.currency && c.currency !== "INR") {
       if (currencies.has(c.currency)) currency = c.currency;
-      else warnings.push(`${c.displayName}: currency ${c.currency} isn't set up in Currencies, so it was imported in INR`);
+      else
+        warnings.push(
+          `${c.displayName}: currency ${c.currency} isn't set up in Currencies, so it was imported in INR`,
+        );
     }
     const doc = await M.create({
       organization: ctx.org,
@@ -181,9 +304,12 @@ async function commit(ctx, data, opts, progress) {
       phone: c.phone || "",
       gstTreatment: c.gstTreatment || "consumer",
       gstin: c.gstin || "",
-      placeOfSupply: c.placeOfSupply || (c.gstTreatment === "overseas" ? "" : org.state),
+      placeOfSupply:
+        c.placeOfSupply || (c.gstTreatment === "overseas" ? "" : org.state),
       billingAddress: c.billingAddress || {},
-      ...(c.paymentTerms !== null && c.paymentTerms !== undefined ? { paymentTerms: c.paymentTerms } : {}),
+      ...(c.paymentTerms !== null && c.paymentTerms !== undefined
+        ? { paymentTerms: c.paymentTerms }
+        : {}),
       currency,
     });
     const o = doc.toObject();
@@ -194,14 +320,17 @@ async function commit(ctx, data, opts, progress) {
     const n = clean(name).toLowerCase();
     if (!n) throw new Error(`No ${kind} name`);
     if (contacts[kind].has(n)) return contacts[kind].get(n);
-    warnings.push(`${label}: ${kind} "${name}" wasn't in the file's contacts, so it was created`);
+    warnings.push(
+      `${label}: ${kind} "${name}" wasn't in the file's contacts, so it was created`,
+    );
     return makeContact(kind, { displayName: clean(name) });
   };
   for (const kind of ["customer", "vendor"])
     for (const c of data.records[`${kind}s`] || []) {
       progress();
       try {
-        if (contacts[kind].has(c.displayName.toLowerCase())) R_(`${kind}s`).skipped++;
+        if (contacts[kind].has(c.displayName.toLowerCase()))
+          R_(`${kind}s`).skipped++;
         else {
           await makeContact(kind, c);
           R_(`${kind}s`).created++;
@@ -212,14 +341,31 @@ async function commit(ctx, data, opts, progress) {
     }
 
   /* ---------- 3. Opening balances ---------- */
-  const withOpening = [...(data.records.accounts || []).filter((a) => round2(a.opening) && !["debtors", "creditors"].includes(a.group)), ...(data.records.openingBalances || []).map((o) => ({ name: o.account, type: o.type, opening: round2(o.debit - o.credit) }))];
-  const contactOpenings = ["customer", "vendor"].flatMap((k) => (data.records[`${k}s`] || []).filter((c) => round2(c.opening) || (c.openingBills || []).length).map((c) => ({ ...c, kind: k })));
-  if ((withOpening.length || contactOpenings.length) && !openingDate) warnings.push("Opening balances were found but no opening balance date was given, so they were not imported");
+  const withOpening = [
+    ...(data.records.accounts || []).filter(
+      (a) => round2(a.opening) && !["debtors", "creditors"].includes(a.group),
+    ),
+    ...(data.records.openingBalances || []).map((o) => ({
+      name: o.account,
+      type: o.type,
+      opening: round2(o.debit - o.credit),
+    })),
+  ];
+  const contactOpenings = ["customer", "vendor"].flatMap((k) =>
+    (data.records[`${k}s`] || [])
+      .filter((c) => round2(c.opening) || (c.openingBills || []).length)
+      .map((c) => ({ ...c, kind: k })),
+  );
+  if ((withOpening.length || contactOpenings.length) && !openingDate)
+    warnings.push(
+      "Opening balances were found but no opening balance date was given, so they were not imported",
+    );
   if (openingDate && withOpening.length) {
     progress();
     const key = ref("opening", iso(openingDate));
     try {
-      if (await Journal.exists({ organization: ctx.org, importRef: key })) R_("openingBalances").skipped++;
+      if (await Journal.exists({ organization: ctx.org, importRef: key }))
+        R_("openingBalances").skipped++;
       else {
         const lines = [];
         const missing = [];
@@ -228,7 +374,11 @@ async function commit(ctx, data, opts, progress) {
           if (!code && a.type) {
             const g = require("./sheets").mapGroup(a.type);
             if (g && !["debtors", "creditors"].includes(g)) {
-              const d = await Account.create({ organization: ctx.org, name: a.name, group: g });
+              const d = await Account.create({
+                organization: ctx.org,
+                name: a.name,
+                group: g,
+              });
               code = String(d._id);
               accByName.set(a.name.toLowerCase(), code);
             }
@@ -238,22 +388,64 @@ async function commit(ctx, data, opts, progress) {
             continue;
           }
           if (["ar", "ap"].includes(code)) {
-            warnings.push(`Opening balance on "${a.name}" (${code === "ar" ? "receivables" : "payables"}) was skipped — import customer/vendor opening balances instead, so each party's balance is right`);
+            warnings.push(
+              `Opening balance on "${a.name}" (${code === "ar" ? "receivables" : "payables"}) was skipped — import customer/vendor opening balances instead, so each party's balance is right`,
+            );
             continue;
           }
-          lines.push({ account: code, description: "Opening balance", debit: a.opening > 0 ? round2(a.opening) : 0, credit: a.opening < 0 ? round2(-a.opening) : 0 });
+          lines.push({
+            account: code,
+            description: "Opening balance",
+            debit: a.opening > 0 ? round2(a.opening) : 0,
+            credit: a.opening < 0 ? round2(-a.opening) : 0,
+          });
         }
-        if (missing.length) warnings.push(`Opening balances skipped for unknown accounts: ${missing.slice(0, 15).join(", ")}${missing.length > 15 ? "…" : ""} — import the chart of accounts first`);
+        if (missing.length)
+          warnings.push(
+            `Opening balances skipped for unknown accounts: ${missing.slice(0, 15).join(", ")}${missing.length > 15 ? "…" : ""} — import the chart of accounts first`,
+          );
         const diff = round2(lines.reduce((s, l) => s + l.debit - l.credit, 0));
-        if (diff) lines.push({ account: "opening_equity", description: "Balancing figure", debit: diff < 0 ? -diff : 0, credit: diff > 0 ? diff : 0 });
+        if (diff)
+          lines.push({
+            account: "opening_equity",
+            description: "Balancing figure",
+            debit: diff < 0 ? -diff : 0,
+            credit: diff > 0 ? diff : 0,
+          });
         if (lines.length) {
           const total = round2(lines.reduce((s, l) => s + l.debit, 0));
-          await Journal.create({ organization: ctx.org, number: await nextNumber(ctx.org, "journal", org.journalPrefix || "MJ-"), date: openingDate, reference: "Opening balances", notes: "Opening balances imported", lines, total, importRef: key });
+          await Journal.create({
+            organization: ctx.org,
+            number: await nextNumber(
+              ctx.org,
+              "journal",
+              org.journalPrefix || "MJ-",
+            ),
+            date: openingDate,
+            reference: "Opening balances",
+            notes: "Opening balances imported",
+            lines,
+            total,
+            importRef: key,
+          });
           R_("openingBalances").created++;
           // Customer/vendor openings post to Opening Balance Equity too, so only warn about what's left after them.
-          const parties = round2(contactOpenings.reduce((s, c) => s + (c.kind === "customer" ? 1 : -1) * ((c.openingBills || []).length ? c.openingBills.reduce((t, b) => t + b.amount, 0) : c.opening), 0));
+          const parties = round2(
+            contactOpenings.reduce(
+              (s, c) =>
+                s +
+                (c.kind === "customer" ? 1 : -1) *
+                  ((c.openingBills || []).length
+                    ? c.openingBills.reduce((t, b) => t + b.amount, 0)
+                    : c.opening),
+              0,
+            ),
+          );
           const left = round2(diff + parties);
-          if (Math.abs(left) >= 1) warnings.push(`Opening balances (including customers and vendors) don't balance by ₹${Math.abs(left)}; the difference is in Opening Balance Equity`);
+          if (Math.abs(left) >= 1)
+            warnings.push(
+              `Opening balances (including customers and vendors) don't balance by ₹${Math.abs(left)}; the difference is in Opening Balance Equity`,
+            );
         }
       }
     } catch (e) {
@@ -273,36 +465,99 @@ async function commit(ctx, data, opts, progress) {
       progress();
       const p = contacts[c.kind].get(c.displayName.toLowerCase());
       if (!p) continue;
-      const bills = (c.openingBills || []).length ? c.openingBills : [{ number: "", date: openingDate, amount: c.opening }];
+      const bills = (c.openingBills || []).length
+        ? c.openingBills
+        : [{ number: "", date: openingDate, amount: c.opening }];
       for (const [i, b] of bills.entries()) {
         const amt = round2(b.amount);
         if (!amt) continue;
         const key = ref(`ob-${c.kind}`, `${c.displayName}|${b.number || i}`);
         const isCredit = amt < 0;
-        const M = c.kind === "customer" ? (isCredit ? CreditNote : Invoice) : isCredit ? VendorCredit : Bill;
+        const M =
+          c.kind === "customer"
+            ? isCredit
+              ? CreditNote
+              : Invoice
+            : isCredit
+              ? VendorCredit
+              : Bill;
         try {
           if (await M.exists({ organization: ctx.org, importRef: key })) {
             R_("openingBalances").skipped++;
             continue;
           }
-          const d = b.date && b.date <= openingDate ? b.date : dayBefore(openingDate);
-          const due = iso(new Date(d.getTime() + (p.paymentTerms || 0) * 86400000));
-          const line = [{ name: `Opening balance${b.number ? ` (${b.number})` : ""}`, quantity: 1, rate: Math.abs(amt), taxRate: 0 }];
+          const d =
+            b.date && b.date <= openingDate ? b.date : dayBefore(openingDate);
+          const due = iso(
+            new Date(d.getTime() + (p.paymentTerms || 0) * 86400000),
+          );
+          const line = [
+            {
+              name: `Opening balance${b.number ? ` (${b.number})` : ""}`,
+              quantity: 1,
+              rate: Math.abs(amt),
+              taxRate: 0,
+            },
+          ];
           const pos = p.placeOfSupply || org.state;
           let doc;
           if (c.kind === "customer" && !isCredit) {
-            let no = b.number ? clean(b.number).slice(0, 30) : await obNumber(Invoice, "OB-INV-", "invoiceNumber");
-            if (no && (await Invoice.exists({ organization: ctx.org, invoiceNumber: no }))) no = `${no}-OB`;
-            doc = await call(R("invoices"), "POST", "/", ctx, { customer: String(p._id), invoiceNumber: no, date: iso(d), dueDate: due, status: "sent", placeOfSupply: pos, lineItems: line });
+            let no = b.number
+              ? clean(b.number).slice(0, 30)
+              : await obNumber(Invoice, "OB-INV-", "invoiceNumber");
+            if (
+              no &&
+              (await Invoice.exists({
+                organization: ctx.org,
+                invoiceNumber: no,
+              }))
+            )
+              no = `${no}-OB`;
+            doc = await call(R("invoices"), "POST", "/", ctx, {
+              customer: String(p._id),
+              invoiceNumber: no,
+              date: iso(d),
+              dueDate: due,
+              status: "sent",
+              placeOfSupply: pos,
+              lineItems: line,
+            });
           } else if (c.kind === "vendor" && !isCredit) {
-            doc = await call(R("bills"), "POST", "/", ctx, { vendor: String(p._id), billNumber: b.number || `OB-${iso(openingDate)}-${i + 1}`, date: iso(d), dueDate: due, status: "open", placeOfSupply: pos, lineItems: line });
+            doc = await call(R("bills"), "POST", "/", ctx, {
+              vendor: String(p._id),
+              billNumber: b.number || `OB-${iso(openingDate)}-${i + 1}`,
+              date: iso(d),
+              dueDate: due,
+              status: "open",
+              placeOfSupply: pos,
+              lineItems: line,
+            });
           } else if (c.kind === "customer") {
             // Own number series, so they don't take the numbers of real credit notes imported later.
-            doc = await call(R("creditNotes"), "POST", "/", ctx, { customer: String(p._id), number: await obNumber(CreditNote, "OB-CN-"), date: iso(d), status: "open", reason: "Opening balance", placeOfSupply: pos, lineItems: line });
+            doc = await call(R("creditNotes"), "POST", "/", ctx, {
+              customer: String(p._id),
+              number: await obNumber(CreditNote, "OB-CN-"),
+              date: iso(d),
+              status: "open",
+              reason: "Opening balance",
+              placeOfSupply: pos,
+              lineItems: line,
+            });
           } else {
-            doc = await call(R("vendorCredits"), "POST", "/", ctx, { vendor: String(p._id), number: await obNumber(VendorCredit, "OB-DN-"), date: iso(d), status: "open", reason: "Opening balance", placeOfSupply: pos, lineItems: line });
+            doc = await call(R("vendorCredits"), "POST", "/", ctx, {
+              vendor: String(p._id),
+              number: await obNumber(VendorCredit, "OB-DN-"),
+              date: iso(d),
+              status: "open",
+              reason: "Opening balance",
+              placeOfSupply: pos,
+              lineItems: line,
+            });
           }
-          await M.updateOne({ _id: doc._id }, { opening: true, importRef: key });
+          await M.updateOne(
+            { _id: doc._id },
+            { opening: true, importRef: key },
+          );
           R_("openingBalances").created++;
         } catch (e) {
           fail("openingBalances", `${c.displayName} ${b.number || ""}`, e);
@@ -323,7 +578,12 @@ async function commit(ctx, data, opts, progress) {
   /* ---------- Stock items from Tally's Inventory masters ---------- */
   if ((data.records.items || []).length) {
     const ItemM = require("../../models/Item");
-    const have = new Map((await ItemM.find({ organization: ctx.org }).lean()).map((i) => [clean(i.name).toLowerCase(), i]));
+    const have = new Map(
+      (await ItemM.find({ organization: ctx.org }).lean()).map((i) => [
+        clean(i.name).toLowerCase(),
+        i,
+      ]),
+    );
     for (const m of data.records.items) {
       progress();
       try {
@@ -332,20 +592,36 @@ async function commit(ctx, data, opts, progress) {
         // Tally's HSN and GST rate win; unit and group fill in where OrdexaGo has none.
         const set = {};
         if (m.hsnSac) set.hsnSac = m.hsnSac;
-        if (m.taxRate !== null && m.taxRate !== undefined) set.taxRate = newRate(m.taxRate);
+        if (m.taxRate !== null && m.taxRate !== undefined)
+          set.taxRate = newRate(m.taxRate);
         if (!it) {
-          await ItemM.create({ organization: ctx.org, type: "goods", name: clean(m.name), unit: m.unit || "pcs", category: m.group || "", description: m.description || "", trackInventory: true, taxRate: 0, ...set });
+          await ItemM.create({
+            organization: ctx.org,
+            type: "goods",
+            name: clean(m.name),
+            unit: m.unit || "pcs",
+            category: m.group || "",
+            description: m.description || "",
+            trackInventory: true,
+            taxRate: 0,
+            ...set,
+          });
           R_("items").created++;
           continue;
         }
         if (!it.unit && m.unit) set.unit = m.unit;
         if (!it.category && m.group) set.category = m.group;
-        const changed = Object.keys(set).some((f) => String(it[f] ?? "") !== String(set[f]));
+        const changed = Object.keys(set).some(
+          (f) => String(it[f] ?? "") !== String(set[f]),
+        );
         if (!changed) {
           R_("items").skipped++;
           continue;
         }
-        await ItemM.updateOne({ _id: it._id }, { ...set, trackInventory: true });
+        await ItemM.updateOne(
+          { _id: it._id },
+          { ...set, trackInventory: true },
+        );
         R_("items").created++;
       } catch (e) {
         fail("items", m.name, e);
@@ -354,27 +630,75 @@ async function commit(ctx, data, opts, progress) {
     // Opening stock from the item masters (quantity and value on each item). Tally's Opening Stock ledger,
     // which its trial balance uses, can differ from the items; values are scaled to it so balances match.
     const withOpening = data.records.items.filter((m) => m.openingQty > 0);
-    if (withOpening.length && !openingDate) warnings.push("The items have opening stock in Tally but no opening balance date was given, so opening stock was not imported");
+    if (withOpening.length && !openingDate)
+      warnings.push(
+        "The items have opening stock in Tally but no opening balance date was given, so opening stock was not imported",
+      );
     if (withOpening.length && openingDate) {
-      const itemsTotal = round2(withOpening.reduce((s, m) => s + m.openingValue, 0));
+      const itemsTotal = round2(
+        withOpening.reduce((s, m) => s + m.openingValue, 0),
+      );
       const values = withOpening.map((m) => round2(m.openingValue));
-      const fresh = new Map((await ItemM.find({ organization: ctx.org }).lean()).map((i) => [clean(i.name).toLowerCase(), i]));
-      const listed = new Set(withOpening.map((m) => clean(m.name).toLowerCase()));
+      const fresh = new Map(
+        (await ItemM.find({ organization: ctx.org }).lean()).map((i) => [
+          clean(i.name).toLowerCase(),
+          i,
+        ]),
+      );
+      const listed = new Set(
+        withOpening.map((m) => clean(m.name).toLowerCase()),
+      );
       for (const [i, m] of withOpening.entries()) {
         const it = fresh.get(clean(m.name).toLowerCase());
         if (!it) continue;
-        await ItemM.updateOne({ _id: it._id }, { openingStock: m.openingQty, openingStockRate: values[i] / m.openingQty, openingStockDate: openingDate, trackInventory: true });
+        await ItemM.updateOne(
+          { _id: it._id },
+          {
+            openingStock: m.openingQty,
+            openingStockRate: values[i] / m.openingQty,
+            openingStockDate: openingDate,
+            trackInventory: true,
+          },
+        );
       }
       // Items Tally has no opening stock for: none in OrdexaGo either (e.g. left over from a Stock Summary).
       // Items with no opening stock in Tally: none here either — including items left with an opening on this
       // date from an earlier Stock Summary import under a name Tally's masters don't have.
-      const keep = [...fresh.values()].filter((it) => listed.has(clean(it.name).toLowerCase())).map((it) => it._id);
-      const day = { $gte: new Date(openingDate.getTime() - 86400000), $lte: new Date(openingDate.getTime() + 86400000) };
-      const stale = await ItemM.find({ organization: ctx.org, openingStock: { $gt: 0 }, _id: { $nin: keep }, $or: [{ name: { $in: data.records.items.map((m) => m.name) } }, { openingStockDate: day }] }, { name: 1, openingStock: 1, openingStockRate: 1 }).lean();
-      await ItemM.updateMany({ _id: { $in: stale.map((x) => x._id) } }, { openingStock: 0, openingStockRate: 0 });
-      if (stale.length) warnings.push(`Opening stock removed from ${stale.length} item(s) that have none in Tally (₹${round2(stale.reduce((t, x) => t + round2(x.openingStock * (x.openingStockRate || 0)), 0)).toLocaleString("en-IN")}): ${stale.slice(0, 12).map((x) => `${x.name} (${x.openingStock})`).join(", ")}${stale.length > 12 ? "…" : ""}`);
+      const keep = [...fresh.values()]
+        .filter((it) => listed.has(clean(it.name).toLowerCase()))
+        .map((it) => it._id);
+      const day = {
+        $gte: new Date(openingDate.getTime() - 86400000),
+        $lte: new Date(openingDate.getTime() + 86400000),
+      };
+      const stale = await ItemM.find(
+        {
+          organization: ctx.org,
+          openingStock: { $gt: 0 },
+          _id: { $nin: keep },
+          $or: [
+            { name: { $in: data.records.items.map((m) => m.name) } },
+            { openingStockDate: day },
+          ],
+        },
+        { name: 1, openingStock: 1, openingStockRate: 1 },
+      ).lean();
+      await ItemM.updateMany(
+        { _id: { $in: stale.map((x) => x._id) } },
+        { openingStock: 0, openingStockRate: 0 },
+      );
+      if (stale.length)
+        warnings.push(
+          `Opening stock removed from ${stale.length} item(s) that have none in Tally (₹${round2(stale.reduce((t, x) => t + round2(x.openingStock * (x.openingStockRate || 0)), 0)).toLocaleString("en-IN")}): ${stale
+            .slice(0, 12)
+            .map((x) => `${x.name} (${x.openingStock})`)
+            .join(", ")}${stale.length > 12 ? "…" : ""}`,
+        );
       R_("openingStock").created += withOpening.length;
-      warnings.push(`Opening stock: ${withOpening.length} item(s) as on ${iso(openingDate)}, worth ₹${itemsTotal.toLocaleString("en-IN")} as in Tally's items` + "");
+      warnings.push(
+        `Opening stock: ${withOpening.length} item(s) as on ${iso(openingDate)}, worth ₹${itemsTotal.toLocaleString("en-IN")} as in Tally's items` +
+          "",
+      );
       // Tally's Opening Stock ledger (its trial balance and P&L use it) can differ from its items' values when
       // accounts and inventory aren't integrated. The difference goes to "Opening Stock Difference (Tally)",
       // which the Tally view shows as part of Opening Stock — so balances and profit match Tally's.
@@ -383,33 +707,73 @@ async function commit(ctx, data, opts, progress) {
       const target = org.tallyOpeningStock;
       const diff = target ? round2(target - itemsTotal) : 0;
       if (Math.abs(diff) >= 0.01) {
-        let acc = await Account.findOne({ organization: ctx.org, role: "opening_stock_diff" });
-        if (!acc) acc = await Account.create({ organization: ctx.org, name: "Opening Stock Difference (Tally)", group: "Cost Of Goods Sold", role: "opening_stock_diff", description: "Tally's Opening Stock ledger minus its stock items' opening values. Shown as part of Opening Stock in the Tally view of reports." });
+        let acc = await Account.findOne({
+          organization: ctx.org,
+          role: "opening_stock_diff",
+        });
+        if (!acc)
+          acc = await Account.create({
+            organization: ctx.org,
+            name: "Opening Stock Difference (Tally)",
+            group: "Cost Of Goods Sold",
+            role: "opening_stock_diff",
+            description:
+              "Tally's Opening Stock ledger minus its stock items' opening values. Shown as part of Opening Stock in the Tally view of reports.",
+          });
         const a = Math.abs(diff);
         await Journal.create({
           organization: ctx.org,
-          number: await nextNumber(ctx.org, "journal", org.journalPrefix || "MJ-"),
+          number: await nextNumber(
+            ctx.org,
+            "journal",
+            org.journalPrefix || "MJ-",
+          ),
           date: openingDate,
           reference: "Opening stock difference",
           notes: `Tally's Opening Stock ledger ₹${target.toLocaleString("en-IN")} − its items' opening values ₹${itemsTotal.toLocaleString("en-IN")}`,
           lines: [
-            { account: String(acc._id), description: "Opening stock as per Tally ledger", debit: diff > 0 ? a : 0, credit: diff < 0 ? a : 0 },
-            { account: "opening_equity", description: "Opening stock difference", debit: diff < 0 ? a : 0, credit: diff > 0 ? a : 0 },
+            {
+              account: String(acc._id),
+              description: "Opening stock as per Tally ledger",
+              debit: diff > 0 ? a : 0,
+              credit: diff < 0 ? a : 0,
+            },
+            {
+              account: "opening_equity",
+              description: "Opening stock difference",
+              debit: diff < 0 ? a : 0,
+              credit: diff > 0 ? a : 0,
+            },
           ],
           total: a,
           importRef: diffKey,
         });
-        warnings.push(`Tally's Opening Stock ledger is ₹${target.toLocaleString("en-IN")} but its items add up to ₹${itemsTotal.toLocaleString("en-IN")}: the ₹${a.toLocaleString("en-IN")} difference was posted to "Opening Stock Difference (Tally)", shown as part of Opening Stock in the Tally view (as in Tally's P&L)`);
-      } else if (!target) warnings.push("Import Tally's accounting masters (ledgers) too, so Opening Stock matches Tally's Opening Stock ledger");
+        warnings.push(
+          `Tally's Opening Stock ledger is ₹${target.toLocaleString("en-IN")} but its items add up to ₹${itemsTotal.toLocaleString("en-IN")}: the ₹${a.toLocaleString("en-IN")} difference was posted to "Opening Stock Difference (Tally)", shown as part of Opening Stock in the Tally view (as in Tally's P&L)`,
+        );
+      } else if (!target)
+        warnings.push(
+          "Import Tally's accounting masters (ledgers) too, so Opening Stock matches Tally's Opening Stock ledger",
+        );
     }
-    const noRate = data.records.items.filter((m) => m.taxRate === null || m.taxRate === undefined).length;
-    if (noRate) warnings.push(`${noRate} stock item(s) have no GST rate in Tally (on the item or its stock groups), so their rate in OrdexaGo was left as it was`);
+    const noRate = data.records.items.filter(
+      (m) => m.taxRate === null || m.taxRate === undefined,
+    ).length;
+    if (noRate)
+      warnings.push(
+        `${noRate} stock item(s) have no GST rate in Tally (on the item or its stock groups), so their rate in OrdexaGo was left as it was`,
+      );
   }
 
   /* ---------- 4. Invoices, bills, credit notes, vendor credits ---------- */
   /* ---------- Stock items (Tally stock lines are linked to items, so stock moves) ---------- */
   const Item = require("../../models/Item");
-  const items = new Map((await Item.find({ organization: ctx.org }).lean()).map((i) => [clean(i.name).toLowerCase(), i]));
+  const items = new Map(
+    (await Item.find({ organization: ctx.org }).lean()).map((i) => [
+      clean(i.name).toLowerCase(),
+      i,
+    ]),
+  );
   // HSN and GST rate per item, from the source's stock lines (Tally keeps them on every voucher line):
   // the HSN seen, and the GST rate used most often.
   const facts = new Map();
@@ -421,7 +785,8 @@ async function commit(ctx, data, opts, progress) {
         const f = facts.get(k) || { hsn: "", rates: new Map() };
         const hsn = clean(l.hsnSac || "").replace(/[^0-9A-Za-z]/g, "");
         if (!f.hsn && /^\d{4,8}$/.test(hsn)) f.hsn = hsn;
-        if (l.taxRate > 0) f.rates.set(l.taxRate, (f.rates.get(l.taxRate) || 0) + 1);
+        if (l.taxRate > 0)
+          f.rates.set(l.taxRate, (f.rates.get(l.taxRate) || 0) + 1);
         facts.set(k, f);
       }
   const factOf = (k) => {
@@ -443,8 +808,14 @@ async function commit(ctx, data, opts, progress) {
       enriched++;
     }
   }
-  if (moved12) warnings.push(`${moved12} item(s) at 12% GST in the source were set to 5% for new invoices and bills (the 12% slab no longer applies); imported vouchers keep their own rates`);
-  if (enriched) warnings.push(`${enriched} item(s) got their HSN code and/or GST rate from the Tally vouchers`);
+  if (moved12)
+    warnings.push(
+      `${moved12} item(s) at 12% GST in the source were set to 5% for new invoices and bills (the 12% slab no longer applies); imported vouchers keep their own rates`,
+    );
+  if (enriched)
+    warnings.push(
+      `${enriched} item(s) got their HSN code and/or GST rate from the Tally vouchers`,
+    );
   const itemFor = async (l, side) => {
     const k = clean(l.name).toLowerCase();
     let it = items.get(k);
@@ -456,13 +827,17 @@ async function commit(ctx, data, opts, progress) {
           name: clean(l.name),
           unit: l.unit || "pcs",
           hsnSac: factOf(k).hsn || l.hsnSac || "",
-          ...(side === "sale" ? { rate: l.rate || 0 } : { purchaseRate: l.rate || 0 }),
+          ...(side === "sale"
+            ? { rate: l.rate || 0 }
+            : { purchaseRate: l.rate || 0 }),
           taxRate: factOf(k).rate || l.taxRate || 0,
           trackInventory: true,
         })
       ).toObject();
       items.set(k, it);
-      warnings.push(`Item "${l.name}" wasn't in OrdexaGo, so it was created (check its HSN and GST rate)`);
+      warnings.push(
+        `Item "${l.name}" wasn't in OrdexaGo, so it was created (check its HSN and GST rate)`,
+      );
     } else if (!it.trackInventory) {
       await Item.updateOne({ _id: it._id }, { trackInventory: true });
       it.trackInventory = true;
@@ -470,7 +845,9 @@ async function commit(ctx, data, opts, progress) {
     return it;
   };
 
-  const incomeGroup = new Map((await chartOfAccounts(ctx.org)).map((a) => [a.code, a.group]));
+  const incomeGroup = new Map(
+    (await chartOfAccounts(ctx.org)).map((a) => [a.code, a.group]),
+  );
   const docTypes = [
     ["invoices", "customer", Invoice, "invoices", "invoiceNumber"],
     ["bills", "vendor", Bill, "bills", "billNumber"],
@@ -491,9 +868,17 @@ async function commit(ctx, data, opts, progress) {
         if (!d.date) throw new Error("Missing or unreadable date");
         if (!d.lines.length) throw new Error("No line items");
         const p = await party(kind, d.party, type, label);
-        const numQ = { organization: ctx.org, [numField]: d.number, ...(type === "bills" ? { vendor: p._id } : {}) };
-        const ownNumber = d.autoNumber && (type === "invoices" || type === "creditNotes");
-        if ((await M.exists({ organization: ctx.org, importRef: key })) || (d.number && !ownNumber && (await M.exists(numQ)))) {
+        const numQ = {
+          organization: ctx.org,
+          [numField]: d.number,
+          ...(type === "bills" ? { vendor: p._id } : {}),
+        };
+        const ownNumber =
+          d.autoNumber && (type === "invoices" || type === "creditNotes");
+        if (
+          (await M.exists({ organization: ctx.org, importRef: key })) ||
+          (d.number && !ownNumber && (await M.exists(numQ)))
+        ) {
           R_(type).skipped++;
           continue;
         }
@@ -501,23 +886,40 @@ async function commit(ctx, data, opts, progress) {
         // The source's GST ledgers decide: IGST only → another state; CGST/SGST only → your state.
         if (d.localTax && !d.interState && pos !== org.state) pos = org.state;
         if (d.interState && !d.localTax && pos === org.state) {
-          const other = [d.partyState, p.placeOfSupply].find((x) => x && x !== org.state);
+          const other = [d.partyState, p.placeOfSupply].find(
+            (x) => x && x !== org.state,
+          );
           if (other) pos = other;
         }
         // Make OrdexaGo's total match the source: put any difference in Adjustment.
         let adjustment = round2(d.adjustment || 0);
         let roundOff = round2(d.adjustmentRoundOff || 0);
         if (d.total) {
-          const t = computeTotals({ lineItems: d.lines, orgState: org.state, placeOfSupply: pos, shippingCharge: d.shippingCharge || 0, adjustment });
+          const t = computeTotals({
+            lineItems: d.lines,
+            orgState: org.state,
+            placeOfSupply: pos,
+            shippingCharge: d.shippingCharge || 0,
+            adjustment,
+          });
           const diff = round2(d.total - t.total);
           if (diff) {
             adjustment = round2(adjustment + diff);
-            if (d.adjustmentLedger && Math.abs(diff) < 1) roundOff = round2(roundOff + diff);
-            if (Math.abs(diff) > 1) warnings.push(`${label}: total differs from the source by ₹${diff} (mixed GST rates or charges); the difference is in Adjustment`);
+            if (d.adjustmentLedger && Math.abs(diff) < 1)
+              roundOff = round2(roundOff + diff);
+            if (Math.abs(diff) > 1)
+              warnings.push(
+                `${label}: total differs from the source by ₹${diff} (mixed GST rates or charges); the difference is in Adjustment`,
+              );
           }
         }
-        if (d.interState && pos === org.state) warnings.push(`${label}: IGST in the source but the customer/vendor is in your state — check place of supply`);
-        const due = d.dueDate ? iso(d.dueDate) : iso(new Date(d.date.getTime() + (p.paymentTerms || 0) * 86400000));
+        if (d.interState && pos === org.state)
+          warnings.push(
+            `${label}: IGST in the source but the customer/vendor is in your state — check place of supply`,
+          );
+        const due = d.dueDate
+          ? iso(d.dueDate)
+          : iso(new Date(d.date.getTime() + (p.paymentTerms || 0) * 86400000));
         const body = {
           [kind]: String(p._id),
           date: iso(d.date),
@@ -526,12 +928,26 @@ async function commit(ctx, data, opts, progress) {
             const out = [];
             const purchase = type === "bills" || type === "vendorCredits";
             for (const { stock, ledger, ...l } of d.lines) {
-              const line = { ...l, item: stock && l.name ? String((await itemFor(l, purchase ? "purchase" : "sale"))._id) : null };
-              if (purchase && ledger && !stock) line.account = await expenseAccount(ledger);
+              const line = {
+                ...l,
+                item:
+                  stock && l.name
+                    ? String(
+                        (await itemFor(l, purchase ? "purchase" : "sale"))._id,
+                      )
+                    : null,
+              };
+              if (purchase && ledger && !stock)
+                line.account = await expenseAccount(ledger);
               // Sales lines keep their own sales ledger (Tally "OutState Sales 5%"…), so income shows per ledger as in Tally.
               if (!purchase && ledger) {
                 const code = lookupAccount(ledger);
-                if (code && code !== "sales" && ["Income", "Other Income"].includes(incomeGroup.get(code))) line.account = code;
+                if (
+                  code &&
+                  code !== "sales" &&
+                  ["Income", "Other Income"].includes(incomeGroup.get(code))
+                )
+                  line.account = code;
               }
               out.push(line);
             }
@@ -540,29 +956,80 @@ async function commit(ctx, data, opts, progress) {
           shippingCharge: d.shippingCharge || 0,
           adjustment,
           // Also when the ledger and the round-off cancel out (TDS 0.13 against round-off 0.13: adjustment 0).
-          ...(d.adjustmentLedger && (adjustment || roundOff) && !["ar", "ap"].includes(lookupAccount(d.adjustmentLedger)) ? { adjustmentAccount: lookupAccount(d.adjustmentLedger) || "" } : {}),
+          ...(d.adjustmentLedger &&
+          (adjustment || roundOff) &&
+          !["ar", "ap"].includes(lookupAccount(d.adjustmentLedger))
+            ? { adjustmentAccount: lookupAccount(d.adjustmentLedger) || "" }
+            : {}),
           ...(() => {
             // The voucher's sales / purchase ledger, when it's an account of the right kind.
             const code = d.ledger ? lookupAccount(d.ledger) : "";
-            const groups = type === "bills" || type === "vendorCredits" ? ["Cost Of Goods Sold", "Expense", "Other Expense"] : ["Income", "Other Income"];
-            return code && code !== "sales" && code !== "cogs" && groups.includes(incomeGroup.get(code)) ? { ledger: code } : {};
+            const groups =
+              type === "bills" || type === "vendorCredits"
+                ? ["Cost Of Goods Sold", "Expense", "Other Expense"]
+                : ["Income", "Other Income"];
+            return code &&
+              code !== "sales" &&
+              code !== "cogs" &&
+              groups.includes(incomeGroup.get(code))
+              ? { ledger: code }
+              : {};
           })(),
           customerNotes: d.notes || "",
           terms: d.terms || "",
         };
-        if (d.exchangeRate && p.currency && p.currency !== "INR") body.exchangeRate = d.exchangeRate;
+        if (d.exchangeRate && p.currency && p.currency !== "INR")
+          body.exchangeRate = d.exchangeRate;
         // Tally vouchers without a number get their own series: INV01, INV02… (credit notes CN01…), skipping numbers in use.
-        if (type === "invoices") Object.assign(body, { invoiceNumber: ownNumber ? await obNumber(Invoice, "INV", "invoiceNumber") : clean(d.number).slice(0, 40), dueDate: due < body.date ? body.date : due, status: d.status === "draft" ? "draft" : "sent" });
-        if (type === "bills") Object.assign(body, { billNumber: clean(d.number) || `IMP-${iso(d.date)}`, dueDate: due < body.date ? body.date : due, status: d.status === "draft" ? "draft" : "open" });
+        if (type === "invoices")
+          Object.assign(body, {
+            invoiceNumber: ownNumber
+              ? await obNumber(Invoice, "INV", "invoiceNumber")
+              : clean(d.number).slice(0, 40),
+            dueDate: due < body.date ? body.date : due,
+            status: d.status === "draft" ? "draft" : "sent",
+          });
+        if (type === "bills")
+          Object.assign(body, {
+            billNumber: clean(d.number) || `IMP-${iso(d.date)}`,
+            dueDate: due < body.date ? body.date : due,
+            status: d.status === "draft" ? "draft" : "open",
+          });
         if (type === "creditNotes" || type === "vendorCredits") {
-          Object.assign(body, { number: ownNumber ? await obNumber(CreditNote, "CN") : clean(d.number).slice(0, 40), status: d.status === "draft" ? "draft" : "open", reason: "Imported" });
+          Object.assign(body, {
+            number: ownNumber
+              ? await obNumber(CreditNote, "CN")
+              : clean(d.number).slice(0, 40),
+            status: d.status === "draft" ? "draft" : "open",
+            reason: "Imported",
+          });
           if (d.linked) {
-            const L = type === "creditNotes" ? await Invoice.findOne({ organization: ctx.org, invoiceNumber: d.linked, customer: p._id }) : await Bill.findOne({ organization: ctx.org, billNumber: d.linked, vendor: p._id });
-            if (L) body[type === "creditNotes" ? "invoice" : "bill"] = String(L._id);
+            const L =
+              type === "creditNotes"
+                ? await Invoice.findOne({
+                    organization: ctx.org,
+                    invoiceNumber: d.linked,
+                    customer: p._id,
+                  })
+                : await Bill.findOne({
+                    organization: ctx.org,
+                    billNumber: d.linked,
+                    vendor: p._id,
+                  });
+            if (L)
+              body[type === "creditNotes" ? "invoice" : "bill"] = String(L._id);
           }
         }
         const doc = await call(R(routeName), "POST", "/", ctx, body);
-        await M.updateOne({ _id: doc._id }, { importRef: key, ...(body.adjustmentAccount && roundOff ? { adjustmentRoundOff: roundOff } : {}) });
+        await M.updateOne(
+          { _id: doc._id },
+          {
+            importRef: key,
+            ...(body.adjustmentAccount && roundOff
+              ? { adjustmentRoundOff: roundOff }
+              : {}),
+          },
+        );
         R_(type).created++;
       } catch (e) {
         fail(type, label, e);
@@ -573,19 +1040,39 @@ async function commit(ctx, data, opts, progress) {
   /* ---------- 5. Payments ---------- */
   const bankCode = (name) => {
     const code = lookupAccount(name);
-    return code && ["Cash", "Bank"].includes(groupOfCode(code) || accounts.find((a) => a.code === code)?.group || (code === "cash" || code === "bank" ? "Bank" : "")) ? code : "";
+    return code &&
+      ["Cash", "Bank"].includes(
+        groupOfCode(code) ||
+          accounts.find((a) => a.code === code)?.group ||
+          (code === "cash" || code === "bank" ? "Bank" : ""),
+      )
+      ? code
+      : "";
   };
   await refreshAccounts();
   const freshAccounts = await chartOfAccounts(ctx.org);
-  const isBank = (code) => freshAccounts.some((a) => a.code === code && ["Cash", "Bank"].includes(a.group));
+  const isBank = (code) =>
+    freshAccounts.some(
+      (a) => a.code === code && ["Cash", "Bank"].includes(a.group),
+    );
   for (const [type, kind, M, routeName, DocM, docNum] of [
     ["payments", "customer", Payment, "payments", Invoice, "invoiceNumber"],
-    ["vendorPayments", "vendor", VendorPayment, "vendorPayments", Bill, "billNumber"],
+    [
+      "vendorPayments",
+      "vendor",
+      VendorPayment,
+      "vendorPayments",
+      Bill,
+      "billNumber",
+    ],
   ]) {
     for (const p of data.records[type] || []) {
       progress();
       const label = `${p.number || iso(p.date)} ${p.party}`;
-      const key = ref(type, `${p.number}|${p.party}|${iso(p.date)}|${p.amount}`);
+      const key = ref(
+        type,
+        `${p.number}|${p.party}|${iso(p.date)}|${p.amount}`,
+      );
       try {
         if (!p.date) throw new Error("Missing date");
         if (!(p.amount > 0)) throw new Error("Amount must be more than zero");
@@ -598,39 +1085,80 @@ async function commit(ctx, data, opts, progress) {
         const allocations = [];
         const notFound = [];
         for (const a of p.allocations || []) {
-          const d = await DocM.findOne({ organization: ctx.org, [docNum]: a.number, [kind]: party_._id });
+          const d = await DocM.findOne({
+            organization: ctx.org,
+            [docNum]: a.number,
+            [kind]: party_._id,
+          });
           if (!d) {
             notFound.push(a.number);
             continue;
           }
           const amt = round2(Math.min(a.amount, d.balance, left));
           if (amt > 0) {
-            allocations.push({ [kind === "customer" ? "invoice" : "bill"]: String(d._id), amount: amt });
+            allocations.push({
+              [kind === "customer" ? "invoice" : "bill"]: String(d._id),
+              amount: amt,
+            });
             left = round2(left - amt);
           }
         }
         // No bill-wise details in the source (Tally "On Account"), or bills that aren't here (an opening balance
         // brought in as one amount): settle the oldest open documents first, opening balances included.
         if ((!(p.allocations || []).length || notFound.length) && left > 0) {
-          const taken = new Set(allocations.map((a) => a[kind === "customer" ? "invoice" : "bill"]));
-          const open = await DocM.find({ organization: ctx.org, [kind]: party_._id, balance: { $gt: 0 }, status: { $nin: ["draft", "void"] }, date: { $lte: p.date } }).sort({ date: 1 });
+          const taken = new Set(
+            allocations.map((a) => a[kind === "customer" ? "invoice" : "bill"]),
+          );
+          const open = await DocM.find({
+            organization: ctx.org,
+            [kind]: party_._id,
+            balance: { $gt: 0 },
+            status: { $nin: ["draft", "void"] },
+            date: { $lte: p.date },
+          }).sort({ date: 1 });
           for (const d of open) {
             if (taken.has(String(d._id))) continue;
             const amt = round2(Math.min(d.balance, left));
             if (amt <= 0) break;
-            allocations.push({ [kind === "customer" ? "invoice" : "bill"]: String(d._id), amount: amt });
+            allocations.push({
+              [kind === "customer" ? "invoice" : "bill"]: String(d._id),
+              amount: amt,
+            });
             left = round2(left - amt);
           }
         }
-        if (notFound.length) warnings.push(`${label}: ${kind === "customer" ? "invoice" : "bill"}(s) ${notFound.join(", ")} not in OrdexaGo, so the amount went to the oldest open ${kind === "customer" ? "invoices" : "bills"}${left > 0 ? "; the rest stays as an advance" : ""}`);
+        if (notFound.length)
+          warnings.push(
+            `${label}: ${kind === "customer" ? "invoice" : "bill"}(s) ${notFound.join(", ")} not in OrdexaGo, so the amount went to the oldest open ${kind === "customer" ? "invoices" : "bills"}${left > 0 ? "; the rest stays as an advance" : ""}`,
+          );
         let bankAccount = "";
         const code = p.depositTo ? lookupAccount(p.depositTo) : "";
         if (code && isBank(code)) bankAccount = code;
-        else if (p.depositTo && !/^(cash|bank)$/i.test(p.depositTo)) warnings.push(`${label}: "${p.depositTo}" isn't a cash/bank account in OrdexaGo, so the default ${p.mode === "cash" ? "Cash" : "Bank"} account was used`);
-        const body = { [kind]: String(party_._id), date: iso(p.date), amount: p.amount, mode: p.mode || "bank_transfer", reference: (p.reference || p.number || "").slice(0, 100), bankAccount, allocations };
-        if (p.exchangeRate && party_.currency && party_.currency !== "INR") body.exchangeRate = p.exchangeRate;
+        else if (p.depositTo && !/^(cash|bank)$/i.test(p.depositTo))
+          warnings.push(
+            `${label}: "${p.depositTo}" isn't a cash/bank account in OrdexaGo, so the default ${p.mode === "cash" ? "Cash" : "Bank"} account was used`,
+          );
+        const body = {
+          [kind]: String(party_._id),
+          date: iso(p.date),
+          amount: p.amount,
+          mode: p.mode || "bank_transfer",
+          reference: (p.reference || p.number || "").slice(0, 100),
+          bankAccount,
+          allocations,
+        };
+        if (p.exchangeRate && party_.currency && party_.currency !== "INR")
+          body.exchangeRate = p.exchangeRate;
         const doc = await call(R(routeName), "POST", "/", ctx, body);
-        await M.updateOne({ _id: doc._id }, { importRef: key, ...(body.adjustmentAccount && roundOff ? { adjustmentRoundOff: roundOff } : {}) });
+        await M.updateOne(
+          { _id: doc._id },
+          {
+            importRef: key,
+            ...(body.adjustmentAccount && roundOff
+              ? { adjustmentRoundOff: roundOff }
+              : {}),
+          },
+        );
         R_(type).created++;
       } catch (e) {
         fail(type, label, e);
@@ -643,21 +1171,33 @@ async function commit(ctx, data, opts, progress) {
   for (const e of data.records.expenses || []) {
     progress();
     const label = `${iso(e.date)} ${e.account} ${e.amount}`;
-    const key = ref("expense", `${iso(e.date)}|${e.account}|${e.amount}|${e.reference}|${e.vendor}`);
+    const key = ref(
+      "expense",
+      `${iso(e.date)}|${e.account}|${e.amount}|${e.reference}|${e.vendor}`,
+    );
     try {
       if (await Expense.exists({ organization: ctx.org, importRef: key })) {
         R_("expenses").skipped++;
         continue;
       }
       let cats = await call(R("expenses"), "GET", "/categories", ctx);
-      let category = cats.find((c) => c.toLowerCase() === e.account.toLowerCase());
+      let category = cats.find(
+        (c) => c.toLowerCase() === e.account.toLowerCase(),
+      );
       if (!category) {
-        await Account.create({ organization: ctx.org, name: e.account, group: "Expense" });
+        await Account.create({
+          organization: ctx.org,
+          name: e.account,
+          group: "Expense",
+        });
         warnings.push(`Expense account "${e.account}" was created`);
         category = e.account;
       }
       const code = e.paidThrough ? lookupAccount(e.paidThrough) : "";
-      const v = e.vendor ? contacts.vendor.get(e.vendor.toLowerCase()) || (await makeContact("vendor", { displayName: e.vendor })) : null;
+      const v = e.vendor
+        ? contacts.vendor.get(e.vendor.toLowerCase()) ||
+          (await makeContact("vendor", { displayName: e.vendor }))
+        : null;
       const doc = await call(R("expenses"), "POST", "/", ctx, {
         date: iso(e.date),
         category,
@@ -693,14 +1233,31 @@ async function commit(ctx, data, opts, progress) {
       const lines = [];
       for (const l of j.lines) {
         let code = lookupAccount(l.account);
-        if (!code && (contacts.customer.has(clean(l.account).toLowerCase()) || l.partyKind === "customer")) code = "ar";
-        if (!code && (contacts.vendor.has(clean(l.account).toLowerCase()) || l.partyKind === "vendor")) code = "ap";
+        if (
+          !code &&
+          (contacts.customer.has(clean(l.account).toLowerCase()) ||
+            l.partyKind === "customer")
+        )
+          code = "ar";
+        if (
+          !code &&
+          (contacts.vendor.has(clean(l.account).toLowerCase()) ||
+            l.partyKind === "vendor")
+        )
+          code = "ap";
         if (!code) missing.push(l.account);
-        const line = { account: code, description: l.party || "", debit: round2(l.debit), credit: round2(l.credit) };
+        const line = {
+          account: code,
+          description: l.party || "",
+          debit: round2(l.debit),
+          credit: round2(l.credit),
+        };
         // A party ledger on a journal: the line names that customer/vendor, so their balance moves.
         if (code === "ar" || code === "ap") {
           const kind = code === "ar" ? "customer" : "vendor";
-          const known = contacts[kind].has(clean(l.account).toLowerCase()) || l.partyKind === kind;
+          const known =
+            contacts[kind].has(clean(l.account).toLowerCase()) ||
+            l.partyKind === kind;
           if (known) {
             const p = await party(kind, l.account, "journals", label);
             Object.assign(line, { [kind]: p._id, contactName: p.displayName });
@@ -708,14 +1265,33 @@ async function commit(ctx, data, opts, progress) {
         }
         lines.push(line);
       }
-      if (missing.length) throw new Error(`Unknown account(s): ${[...new Set(missing)].join(", ")} — import the chart of accounts / Tally masters first`);
+      if (missing.length)
+        throw new Error(
+          `Unknown account(s): ${[...new Set(missing)].join(", ")} — import the chart of accounts / Tally masters first`,
+        );
       const dr = round2(lines.reduce((s, l) => s + l.debit, 0));
       const cr = round2(lines.reduce((s, l) => s + l.credit, 0));
-      if (Math.abs(dr - cr) > 0.05) throw new Error(`Debits ${dr} and credits ${cr} don't match`);
-      if (touchesParty) warnings.push(`${label}: posts to receivables/payables without a customer/vendor — the totals are right, but no party's balance changes`);
-      let number = clean(j.number).slice(0, 40) || (await nextNumber(ctx.org, "journal", org.journalPrefix || "MJ-"));
-      if (await Journal.exists({ organization: ctx.org, number })) number = `${number}-${String(Date.now()).slice(-4)}`;
-      await Journal.create({ organization: ctx.org, number, date: j.date, reference: j.reference || "", notes: j.notes || "Imported journal", lines, total: dr, importRef: key });
+      if (Math.abs(dr - cr) > 0.05)
+        throw new Error(`Debits ${dr} and credits ${cr} don't match`);
+      if (touchesParty)
+        warnings.push(
+          `${label}: posts to receivables/payables without a customer/vendor — the totals are right, but no party's balance changes`,
+        );
+      let number =
+        clean(j.number).slice(0, 40) ||
+        (await nextNumber(ctx.org, "journal", org.journalPrefix || "MJ-"));
+      if (await Journal.exists({ organization: ctx.org, number }))
+        number = `${number}-${String(Date.now()).slice(-4)}`;
+      await Journal.create({
+        organization: ctx.org,
+        number,
+        date: j.date,
+        reference: j.reference || "",
+        notes: j.notes || "Imported journal",
+        lines,
+        total: dr,
+        importRef: key,
+      });
       R_("journals").created++;
     } catch (e) {
       fail("journals", label, e);
@@ -735,44 +1311,128 @@ async function commit(ctx, data, opts, progress) {
       const vend = contacts.vendor.get(n);
       if (!cust || !vend) continue;
       // Replace an earlier set-off (it may have gone the other way), then take the balance without it.
-      await Journal.deleteMany({ organization: ctx.org, importRef: { $regex: `^${`${src}:journal:setoff|${n}|`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` } });
+      {
+        const pre = `${src}:journal:setoff|${n}|`;
+        const old = (
+          await Journal.find({ organization: ctx.org }, { importRef: 1 }).lean()
+        )
+          .filter(
+            (j) =>
+              typeof j.importRef === "string" && j.importRef.startsWith(pre),
+          )
+          .map((j) => j._id);
+        if (old.length) await Journal.deleteMany({ _id: { $in: old } });
+      }
       // The other record's balance as it stands in OrdexaGo: receivable on the customer / payable to the vendor.
       const { journalNet } = require("../partyJournals");
       let other;
       if (home === "creditors") {
         const [inv, pay, cn, jn] = await Promise.all([
-          Invoice.find({ organization: ctx.org, customer: cust._id, status: { $in: ["sent", "partially_paid", "overdue"] } }, { balance: 1 }).lean(),
-          Payment.find({ organization: ctx.org, customer: cust._id }, { unusedAmount: 1 }).lean(),
-          CreditNote.find({ organization: ctx.org, customer: cust._id, status: "open" }, { balance: 1 }).lean(),
+          Invoice.find(
+            {
+              organization: ctx.org,
+              customer: cust._id,
+              status: { $in: ["sent", "partially_paid", "overdue"] },
+            },
+            { balance: 1 },
+          ).lean(),
+          Payment.find(
+            { organization: ctx.org, customer: cust._id },
+            { unusedAmount: 1 },
+          ).lean(),
+          CreditNote.find(
+            { organization: ctx.org, customer: cust._id, status: "open" },
+            { balance: 1 },
+          ).lean(),
           journalNet(ctx.org, "customer"),
         ]);
-        other = round2(inv.reduce((t, d) => t + (d.balance || 0), 0) - pay.reduce((t, d) => t + (d.unusedAmount || 0), 0) - cn.reduce((t, d) => t + (d.balance || 0), 0) + (jn[String(cust._id)] || 0));
+        other = round2(
+          inv.reduce((t, d) => t + (d.balance || 0), 0) -
+            pay.reduce((t, d) => t + (d.unusedAmount || 0), 0) -
+            cn.reduce((t, d) => t + (d.balance || 0), 0) +
+            (jn[String(cust._id)] || 0),
+        );
       } else {
         const [bills, pay, vc, jn] = await Promise.all([
-          Bill.find({ organization: ctx.org, vendor: vend._id, status: { $in: ["open", "partially_paid", "overdue"] } }, { balance: 1 }).lean(),
-          VendorPayment.find({ organization: ctx.org, vendor: vend._id }, { unusedAmount: 1 }).lean(),
-          VendorCredit.find({ organization: ctx.org, vendor: vend._id, status: "open" }, { balance: 1 }).lean(),
+          Bill.find(
+            {
+              organization: ctx.org,
+              vendor: vend._id,
+              status: { $in: ["open", "partially_paid", "overdue"] },
+            },
+            { balance: 1 },
+          ).lean(),
+          VendorPayment.find(
+            { organization: ctx.org, vendor: vend._id },
+            { unusedAmount: 1 },
+          ).lean(),
+          VendorCredit.find(
+            { organization: ctx.org, vendor: vend._id, status: "open" },
+            { balance: 1 },
+          ).lean(),
           journalNet(ctx.org, "vendor"),
         ]);
-        other = round2(bills.reduce((t, d) => t + (d.balance || 0), 0) - pay.reduce((t, d) => t + (d.unusedAmount || 0), 0) - vc.reduce((t, d) => t + (d.balance || 0), 0) + (jn[String(vend._id)] || 0));
+        other = round2(
+          bills.reduce((t, d) => t + (d.balance || 0), 0) -
+            pay.reduce((t, d) => t + (d.unusedAmount || 0), 0) -
+            vc.reduce((t, d) => t + (d.balance || 0), 0) +
+            (jn[String(vend._id)] || 0),
+        );
       }
       if (Math.abs(other) < 0.01) continue;
-      const dates = ["invoices", "bills", "creditNotes", "vendorCredits", "payments", "vendorPayments"].flatMap((t) => (r[t] || []).filter((d) => same(d.party)).map((d) => +new Date(d.date)));
-      const date = dates.length ? new Date(Math.max(...dates)) : openingDate || new Date();
+      const dates = [
+        "invoices",
+        "bills",
+        "creditNotes",
+        "vendorCredits",
+        "payments",
+        "vendorPayments",
+      ].flatMap((t) =>
+        (r[t] || []).filter((d) => same(d.party)).map((d) => +new Date(d.date)),
+      );
+      const date = dates.length
+        ? new Date(Math.max(...dates))
+        : openingDate || new Date();
       const key = ref("journal", `setoff|${n}|${iso(date)}`);
       // Dr Accounts Payable (vendor) / Cr Accounts Receivable (customer) by the amount; reversed when negative.
       const a = Math.abs(other);
       // other > 0: a payable on the vendor record / a receivable on the customer record — both cleared by Dr AP, Cr AR.
       const toCustomer = other > 0;
       const lines = [
-        { account: "ap", vendor: vend._id, contactName: vend.displayName, description: "Set-off with customer record", debit: toCustomer ? a : 0, credit: toCustomer ? 0 : a },
-        { account: "ar", customer: cust._id, contactName: cust.displayName, description: "Set-off with vendor record", debit: toCustomer ? 0 : a, credit: toCustomer ? a : 0 },
+        {
+          account: "ap",
+          vendor: vend._id,
+          contactName: vend.displayName,
+          description: "Set-off with customer record",
+          debit: toCustomer ? a : 0,
+          credit: toCustomer ? 0 : a,
+        },
+        {
+          account: "ar",
+          customer: cust._id,
+          contactName: cust.displayName,
+          description: "Set-off with vendor record",
+          debit: toCustomer ? 0 : a,
+          credit: toCustomer ? a : 0,
+        },
       ];
       let number = `SETOFF-${clean(name).slice(0, 25)}`;
-      if (await Journal.exists({ organization: ctx.org, number })) number = `${number}-${iso(date)}`;
-      await Journal.create({ organization: ctx.org, number, date, reference: "Customer/vendor set-off", notes: `${clean(name)} is one ledger in Tally (${home === "debtors" ? "Sundry Debtors" : "Sundry Creditors"}): balance of its ${home === "debtors" ? "vendor" : "customer"} record moved to its ${home === "debtors" ? "customer" : "vendor"} record`, lines, total: a, importRef: key });
+      if (await Journal.exists({ organization: ctx.org, number }))
+        number = `${number}-${iso(date)}`;
+      await Journal.create({
+        organization: ctx.org,
+        number,
+        date,
+        reference: "Customer/vendor set-off",
+        notes: `${clean(name)} is one ledger in Tally (${home === "debtors" ? "Sundry Debtors" : "Sundry Creditors"}): balance of its ${home === "debtors" ? "vendor" : "customer"} record moved to its ${home === "debtors" ? "customer" : "vendor"} record`,
+        lines,
+        total: a,
+        importRef: key,
+      });
       R_("journals").created++;
-      warnings.push(`${clean(name)}: ₹${a.toLocaleString("en-IN")} set off between its customer and vendor records (one ledger in Tally)`);
+      warnings.push(
+        `${clean(name)}: ₹${a.toLocaleString("en-IN")} set off between its customer and vendor records (one ledger in Tally)`,
+      );
     } catch (e) {
       fail("journals", `Set-off ${name}`, e);
     }
@@ -787,17 +1447,38 @@ async function commit(ctx, data, opts, progress) {
       const key = ref("stockAdjustment", `${a.number}|${iso(a.date)}`);
       try {
         if (!a.date) throw new Error("Missing date");
-        if (await InventoryAdjustment.exists({ organization: ctx.org, importRef: key })) {
+        if (
+          await InventoryAdjustment.exists({
+            organization: ctx.org,
+            importRef: key,
+          })
+        ) {
           R_("stockAdjustments").skipped++;
           continue;
         }
         const lines = [];
         for (const l of a.lines) {
           const it = await itemFor(l);
-          lines.push({ item: String(it._id), quantityAdjusted: l.quantity, costPrice: l.quantity > 0 ? l.rate : 0 });
+          lines.push({
+            item: String(it._id),
+            quantityAdjusted: l.quantity,
+            costPrice: l.quantity > 0 ? l.rate : 0,
+          });
         }
-        const doc = await call(R("inventoryAdjustments"), "POST", "/", ctx, { mode: "quantity", date: iso(a.date), reference: a.number.slice(0, 60), reason: a.reason, account: "cogs", description: a.notes || "", status: "adjusted", lines });
-        await InventoryAdjustment.updateOne({ _id: doc._id }, { importRef: key });
+        const doc = await call(R("inventoryAdjustments"), "POST", "/", ctx, {
+          mode: "quantity",
+          date: iso(a.date),
+          reference: a.number.slice(0, 60),
+          reason: a.reason,
+          account: "cogs",
+          description: a.notes || "",
+          status: "adjusted",
+          lines,
+        });
+        await InventoryAdjustment.updateOne(
+          { _id: doc._id },
+          { importRef: key },
+        );
         R_("stockAdjustments").created++;
       } catch (e) {
         fail("stockAdjustments", label, e);
@@ -813,14 +1494,36 @@ async function commit(ctx, data, opts, progress) {
       try {
         const k = clean(o.name).toLowerCase();
         let it = items.get(k);
-        const fields = { openingStock: o.quantity, openingStockRate: o.rate, openingStockDate: when, trackInventory: true };
+        const fields = {
+          openingStock: o.quantity,
+          openingStockRate: o.rate,
+          openingStockDate: when,
+          trackInventory: true,
+        };
         if (!it) {
-          it = (await Item.create({ organization: ctx.org, type: "goods", name: clean(o.name), unit: o.unit || "pcs", purchaseRate: o.rate || 0, taxRate: 0, ...fields })).toObject();
+          it = (
+            await Item.create({
+              organization: ctx.org,
+              type: "goods",
+              name: clean(o.name),
+              unit: o.unit || "pcs",
+              purchaseRate: o.rate || 0,
+              taxRate: 0,
+              ...fields,
+            })
+          ).toObject();
           items.set(k, it);
-          warnings.push(`Item "${o.name}" was created with its opening stock (check its HSN and GST rate)`);
+          warnings.push(
+            `Item "${o.name}" was created with its opening stock (check its HSN and GST rate)`,
+          );
           R_("openingStock").created++;
         } else {
-          if (it.openingStock === o.quantity && Math.abs((it.openingStockRate || 0) - o.rate) < 0.0001 && it.openingStockDate && +new Date(it.openingStockDate) === +when) {
+          if (
+            it.openingStock === o.quantity &&
+            Math.abs((it.openingStockRate || 0) - o.rate) < 0.0001 &&
+            it.openingStockDate &&
+            +new Date(it.openingStockDate) === +when
+          ) {
             R_("openingStock").skipped++;
             continue;
           }
@@ -834,7 +1537,9 @@ async function commit(ctx, data, opts, progress) {
   }
 
   // Ledgers the imported vouchers post to become sales / purchase ledgers (pickers on invoices and bills).
-  await require("./ledgerKinds").markLedgerKinds(ctx.org).catch(() => {});
+  await require("./ledgerKinds")
+    .markLedgerKinds(ctx.org)
+    .catch(() => {});
   return { results, warnings: [...new Set(warnings)] };
 }
 
