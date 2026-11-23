@@ -1474,13 +1474,22 @@ async function commit(ctx, data, opts, progress) {
             item: String(it._id),
             quantityAdjusted: l.quantity,
             costPrice: l.quantity > 0 ? l.rate : 0,
+            ...(l.rate ? { rate: l.rate } : {}),
+            ...(l.costPercent != null ? { costPercent: l.costPercent } : {}),
           });
         }
+        const additionalCosts = (a.additionalCosts || []).map((c) => ({
+          account: lookupAccount(c.ledger) || "",
+          name: c.ledger,
+          percent: c.percent,
+          amount: c.amount,
+        }));
         const doc = await call(R("inventoryAdjustments"), "POST", "/", ctx, {
           mode: "quantity",
           date: iso(a.date),
           reference: a.number.slice(0, 60),
           reason: a.reason,
+          additionalCosts,
           account: "cogs",
           description: a.notes || "",
           status: "adjusted",

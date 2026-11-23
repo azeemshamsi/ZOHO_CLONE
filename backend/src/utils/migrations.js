@@ -477,6 +477,51 @@ const MIGRATIONS = [
       );
     },
   },
+  {
+    // The manufacturing view (like Tally): components' rates, each made item's % of cost and the labour /
+    // additional costs, for the manufacturing journals already imported from Tally.
+    id: "2026-11-tally-mfg-details",
+    run: async () => {
+      const InventoryAdjustment = require("../models/InventoryAdjustment");
+      const { chartOfAccounts } = require("./ledger");
+      const data = require("./data/tallyMfg.json").filter((f) =>
+        /^manufacturing/i.test(f.n),
+      );
+      const charts = new Map();
+      let n = 0;
+      for (const f of data) {
+        const key = `tally:stockAdjustment:${f.n.toLowerCase()}|${f.d}`;
+        for (const a of await InventoryAdjustment.find({ importRef: key })) {
+          if (a.lines.length !== f.l.length) continue;
+          const org = String(a.organization);
+          if (!charts.has(org))
+            charts.set(org, await chartOfAccounts(a.organization));
+          const chart = charts.get(org);
+          a.lines.forEach((l, i) => {
+            if (f.l[i][0]) l.rate = f.l[i][0];
+            if (f.l[i][1] != null) l.costPercent = f.l[i][1];
+          });
+          a.additionalCosts = f.c.map(([name, percent, amount]) => ({
+            account:
+              chart.find(
+                (c) =>
+                  c.name.trim().toLowerCase() === name.trim().toLowerCase(),
+              )?.code || "",
+            name,
+            percent,
+            amount,
+          }));
+          a.reason = "Manufacturing";
+          a.markModified("lines");
+          await a.save();
+          n++;
+        }
+      }
+      console.log(
+        `Tally manufacturing: ${n} journals have their components, % of cost and additional costs`,
+      );
+    },
+  },
 ];
 
 async function runMigrations() {

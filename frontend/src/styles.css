@@ -1006,3 +1006,7 @@ tr.clickable:hover td { background: var(--brand-50); }
 .ticket-side { display: flex; flex-direction: column; gap: 4px; }
 .ticket-side .label-sm { margin-top: 10px; }
 @media (max-width: 900px) { .ticket-layout { grid-template-columns: 1fr; } .ticket-msg { max-width: 100%; } }
+
+/* Manufacturing journal (like Tally): components left, made items + additional costs right */
+.mfg-grid { display: grid; gap: 18px; }
+@media (min-width: 1000px) { .mfg-grid { grid-template-columns: 1fr 1fr; } }

@@ -591,6 +591,24 @@ function normalise(xml, known = {}) {
         for (const l of made)
           l.rate = C.round2((l._amount + (l._addl || 0)) / l.quantity);
       }
+      // Kept for the manufacturing view: each made item's % of cost, and the additional costs.
+      const fixedPerc = made.reduce((t, l) => t + (l._perc || 0), 0);
+      const restMade = made.filter((l) => !l._perc);
+      const restVal = restMade.reduce((t, l) => t + l._amount, 0);
+      if (addlTotal > 0 || made.some((l) => l._perc))
+        for (const l of made)
+          l.costPercent =
+            l._perc ||
+            C.round2(
+              restVal
+                ? ((100 - fixedPerc) * l._amount) / restVal
+                : (100 - fixedPerc) / restMade.length,
+            );
+      const additionalCosts = addl.map((e) => ({
+        ledger: text(e.LEDGERNAME),
+        percent: Math.abs(num(text(e.RATEOFINVOICETAX))) || 0,
+        amount: Math.abs(num(text(e.AMOUNT))),
+      }));
       for (const l of lines) {
         delete l._amount;
         delete l._perc;
@@ -610,6 +628,7 @@ function normalise(xml, known = {}) {
           notes:
             text(v.NARRATION) || `${text(v.VOUCHERTYPENAME)} ${number} (Tally)`,
           lines,
+          ...(additionalCosts.length ? { additionalCosts } : {}),
         });
       } else
         stockOnly.push(`${text(v.VOUCHERTYPENAME) || "Voucher"} ${number}`);

@@ -8,6 +8,9 @@ const lineSchema = new mongoose.Schema(
     quantityAdjusted: { type: Number, default: 0 }, // + adds stock, − removes it (quantity mode)
     costPrice: { type: Number, default: 0 }, // cost per unit for stock added; 0 = current average
     valueAdjusted: { type: Number, default: 0 }, // value mode
+    // Manufacturing (like Tally): a component's rate as entered, and a made item's share of the effective cost (%).
+    rate: { type: Number },
+    costPercent: { type: Number },
   },
   { _id: false }
 );
@@ -25,6 +28,8 @@ const adjustmentSchema = new mongoose.Schema(
     description: { type: String, default: "" },
     status: { type: String, enum: ["draft", "adjusted"], default: "adjusted" },
     lines: { type: [lineSchema], default: [] },
+    // Manufacturing: labour and other costs added to what's made — { account (code), name, percent of components, amount }
+    additionalCosts: { type: [{ _id: false, account: String, name: String, percent: Number, amount: Number }], default: undefined },
     importRef: { type: String, index: true }, // set by the importer (Tally stock journals)
   },
   { timestamps: true }
@@ -32,4 +37,4 @@ const adjustmentSchema = new mongoose.Schema(
 
 adjustmentSchema.index({ organization: 1, number: 1 }, { unique: true });
 module.exports = mongoose.model("InventoryAdjustment", adjustmentSchema);
-module.exports.REASONS = ["Stocktaking results", "Damaged goods", "Stolen goods", "Stock on fire", "Stock written off", "Inventory revaluation", "Other"];
+module.exports.REASONS = ["Manufacturing", "Stock journal", "Stocktaking results", "Damaged goods", "Stolen goods", "Stock on fire", "Stock written off", "Inventory revaluation", "Other"];
