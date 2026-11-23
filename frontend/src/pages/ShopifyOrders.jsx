@@ -967,6 +967,7 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
         </p>
       ) : (
         <div className="form-grid">
+          <PaymentBanner orders={quotes?.orders} />
           <Field
             label="Package"
             hint={
@@ -3148,7 +3149,7 @@ export function ShopifyOrders() {
     q: params.get("q") || "",
   }));
   const [showFilters, setShowFilters] = useState(false);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(1); // how many batches of 100 are shown (they load as you scroll)
   const [data, setData] = useState(null);
   const [store, setStore] = useState(null);
   const [amazon, setAmazon] = useState(null);
@@ -3182,7 +3183,7 @@ export function ShopifyOrders() {
   const nav = useNavigate();
 
   const query = useMemo(() => {
-    const p = { status: tab, page, limit: 50 };
+    const p = { status: tab, page: 1, limit: 100 * page };
     for (const [k, v] of Object.entries({ ...filters, q })) if (v) p[k] = v;
     return p;
   }, [tab, page, filters, q]);
@@ -3817,7 +3818,10 @@ export function ShopifyOrders() {
         ) : (
           <table
             className="table table-click ship-table"
-            style={{ opacity: loading ? 0.55 : 1, transition: "opacity .15s" }}
+            style={{
+              opacity: loading && page === 1 ? 0.55 : 1,
+              transition: "opacity .15s",
+            }}
           >
             <thead>
               <tr>
@@ -4106,27 +4110,15 @@ export function ShopifyOrders() {
             </tbody>
           </table>
         )}
-        {data && data.total > data.limit && (
-          <div className="pager">
-            <span className="muted small">
-              {(data.page - 1) * data.limit + 1}–
-              {Math.min(data.total, data.page * data.limit)} of {data.total}
-            </span>
-            <button
-              className="btn btn-sm"
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-            >
-              Previous
-            </button>
-            <button
-              className="btn btn-sm"
-              disabled={page * data.limit >= data.total}
-              onClick={() => setPage(page + 1)}
-            >
-              Next
-            </button>
-          </div>
+        {data && data.total > 0 && (
+          <MoreOrders
+            shown={data.rows.length}
+            total={data.total}
+            loading={loading}
+            onMore={() =>
+              !loading && data.rows.length < data.total && setPage(page + 1)
+            }
+          />
         )}
       </div>
 
@@ -4172,5 +4164,84 @@ export function ShopifyOrders() {
       )}
       {void nav}
     </>
+  );
+}
+
+// All orders in one list: the next 100 load on their own as you scroll to the bottom (selections stay).
+function MoreOrders({ shown, total, loading, onMore }) {
+  const ref = useRef();
+  useEffect(() => {
+    if (!ref.current || shown >= total) return;
+    const io = new IntersectionObserver(
+      (e) => e[0].isIntersecting && onMore(),
+      { rootMargin: "400px" },
+    );
+    io.observe(ref.current);
+    return () => io.disconnect();
+  }, [shown, total, loading]);
+  return (
+    <div ref={ref} className="pager">
+      <span className="muted small">
+        Showing {shown} of {total}
+      </span>
+      {shown < total && (
+        <button className="btn btn-sm" disabled={loading} onClick={onMore}>
+          {loading ? "Loading…" : "Load more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Booking: is it prepaid, COD or partly paid — shown big, before choosing the courier.
+function PaymentBanner({ orders }) {
+  if (!orders?.length) return null;
+  const kind = (o) =>
+    o.paymentMode === "partial"
+      ? "partial"
+      : o.codAmount > 0
+        ? "cod"
+        : "prepaid";
+  if (orders.length === 1) {
+    const o = orders[0];
+    const k = kind(o);
+    return (
+      <div
+        className={`alert ${k === "prepaid" ? "alert-success" : "alert-warn"}`}
+        style={{ fontSize: 15 }}
+      >
+        <b>
+          {k === "prepaid" ? "PREPAID" : k === "cod" ? "COD" : "PARTLY PAID"}
+        </b>
+        {" · "}
+        {k === "prepaid"
+          ? `nothing to collect (order ${money(o.orderTotal)})`
+          : k === "cod"
+            ? `collect ${money(o.codAmount)} on delivery`
+            : `${money(o.prepaidAmount)} paid online · collect ${money(o.codAmount)} on delivery`}
+      </div>
+    );
+  }
+  const n = { prepaid: 0, cod: 0, partial: 0 };
+  let collect = 0;
+  for (const o of orders) {
+    n[kind(o)]++;
+    collect += o.codAmount || 0;
+  }
+  return (
+    <div className="alert alert-info">
+      <b>{n.prepaid} prepaid</b> · <b>{n.cod} COD</b>
+      {n.partial ? (
+        <>
+          {" "}
+          · <b>{n.partial} partly paid</b>
+        </>
+      ) : null}
+      {collect > 0 && ` · ${money(collect)} to collect`}
+      <div className="small muted">
+        With separate COD and prepaid accounts for a courier (e.g. Blue Dart),
+        each order is booked with the right one, whichever you pick.
+      </div>
+    </div>
   );
 }

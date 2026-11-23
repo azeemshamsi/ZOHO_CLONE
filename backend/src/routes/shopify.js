@@ -394,7 +394,7 @@ router.get(
   ah(async (req, res) => {
     const q = req.query;
     const page = Math.max(1, Number(q.page) || 1);
-    const limit = Math.min(200, Math.max(10, Number(q.limit) || 50));
+    const limit = Math.min(3000, Math.max(10, Number(q.limit) || 50)); // the list grows as you scroll
     const matched = filterEntries(await orderIndex(req.storeOrg), q);
     const counts = Object.fromEntries(
       [...STATUSES, "awb_scanned"].map((s) => [s, 0]),
@@ -1337,6 +1337,10 @@ router.post(
         pincode: o.shippingAddress?.zip || "",
         city: o.shippingAddress?.city || "",
         cod: false,
+        paymentMode: full.paymentMode,
+        codAmount: require("../utils/couriers").codOf(o),
+        prepaidAmount: full.prepaidAmount || 0,
+        orderTotal: full.total,
         rows: [],
         lines,
         alreadyFulfilled: left.done,
@@ -1366,9 +1370,32 @@ router.post(
       } catch (e) {
         pickupNote = e.message;
       }
+      // A COD order on a prepaid-only account (or the other way round) goes to the same courier's other account:
+      // quote that one, under the account chosen, so picking either Blue Dart account books each order correctly.
+      const SHP = require("../utils/shopify/ship");
       const rows = sortQuotes(
         await Promise.all(
-          accs.map((a) => quoteAccount(sellers.withPickup(a, seller), s)),
+          accs.map(async (a) => {
+            if (SHP.takesPayment(a, s.cod))
+              return quoteAccount(sellers.withPickup(a, seller), s);
+            const other = accs.find(
+              (x) =>
+                x.carrier === a.carrier &&
+                String(x._id) !== String(a._id) &&
+                SHP.takesPayment(x, s.cod),
+            );
+            if (!other) return quoteAccount(sellers.withPickup(a, seller), s);
+            const r = await quoteAccount(sellers.withPickup(other, seller), s);
+            return {
+              ...r,
+              account: String(a._id),
+              name: a.name,
+              via: other.name,
+              note: [`books with ${other.name}`, r.note]
+                .filter(Boolean)
+                .join(" · "),
+            };
+          }),
         ),
       );
       const choices = [
@@ -1383,6 +1410,7 @@ router.post(
         pkg: p,
         cod: s.cod,
         codAmount: s.codAmount,
+
         rows,
         pickup: seller
           ? {

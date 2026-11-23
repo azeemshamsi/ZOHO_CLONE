@@ -15,6 +15,29 @@ const STATUS_FROM_TRACK = {
   out_for_delivery: "shipped",
 };
 
+/* ---------------- COD / prepaid accounts ---------------- */
+// Does this account take this kind of order? options.codEnabled === false: prepaid only; options.codOnly: COD only.
+const takesPayment = (acc, cod) =>
+  cod ? acc.options?.codEnabled !== false : !acc.options?.codOnly;
+const isCodOrder = (order) => codOf(order) > 0;
+// The account to book with: the one chosen if it takes this order's payment type, else the same courier's account
+// that does (e.g. chose "Blue Dart Prepaid" for a COD order → "Blue Dart COD").
+async function accountForPayment(acc, order) {
+  const cod = isCodOrder(order);
+  if (takesPayment(acc, cod)) return acc;
+  const other = (
+    await CourierAccount.find({
+      organization: acc.organization,
+      carrier: acc.carrier,
+      active: true,
+    })
+  ).find((a) => String(a._id) !== String(acc._id) && takesPayment(a, cod));
+  if (other) return other;
+  throw new Error(
+    `${acc.name} is for ${cod ? "prepaid" : "COD"} orders only, and there's no ${acc.carrier === "bluedart" ? "Blue Dart" : acc.name} account for ${cod ? "COD" : "prepaid"} orders — add one in Settings → Couriers, or choose another courier`,
+  );
+}
+
 /* ---------------- what's left to ship ---------------- */
 
 // Units not yet fulfilled in Shopify, read live (a seller may have shipped their products themselves): lineId → n.
@@ -597,12 +620,15 @@ async function bookOrder(
     throw new Error(
       `Already booked: ${order.shipment.courierName} ${order.shipment.awb}`,
     );
-  const realAcc = await CourierAccount.findOne({
+  let realAcc = await CourierAccount.findOne({
     _id: accountId,
     organization: ctx.storeOrg || ctx.org,
     active: true,
   });
   if (!realAcc) throw new Error("Choose a courier");
+  // COD and prepaid can have their own account with a courier (Blue Dart has separate customer codes): a COD
+  // order goes to the COD account, a prepaid one to the prepaid account, whichever of the two was chosen.
+  realAcc = await accountForPayment(realAcc, order);
   // Tell the sync a booking is under way, so it doesn't mark the order shipped from the fulfilments we're making.
   if (order._id)
     await ShopifyOrder.updateOne(
@@ -1079,6 +1105,9 @@ async function trackAll() {
 }
 
 module.exports = {
+  takesPayment,
+  isCodOrder,
+  accountForPayment,
   unfulfilledMap,
   storedUnfulfilled,
   remaining,

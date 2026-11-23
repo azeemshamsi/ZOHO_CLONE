@@ -283,6 +283,7 @@ async function quoteAccount(acc, s) {
   const out = { account: String(acc._id), name: acc.name, carrier: acc.carrier, test: !!acc.test, isDefault: !!acc.isDefault, serviceable: null, charge: null, source: "", etd: "", note: "", chargeableWeight: cwt.weight, volumetricWeight: cwt.volumetric };
   if (!/^\d{6}$/.test(q.to || "")) return { ...out, serviceable: false, note: "The order has no valid 6-digit pincode" };
   if (s.cod && acc.options?.codEnabled === false) return { ...out, serviceable: false, note: `${acc.name} is set up for prepaid only` };
+  if (!s.cod && acc.options?.codOnly) return { ...out, serviceable: false, note: `${acc.name} is set up for COD only` };
   try {
     const r = await withTimeout(QUOTES[acc.carrier](acc, q), 15000);
     Object.assign(out, { serviceable: r.serviceable ?? null, etd: r.etd || "", note: r.note || "", courierName: r.courierName, courierId: r.courierId, options: r.options });
