@@ -798,6 +798,7 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
     rateCard: asRateCard(acc.rateCard),
   });
   const [busy, setBusy] = useState(false);
+  const [pendingLists, setPendingLists] = useState(null);
   const c = carriers[f.carrier];
   const saved = acc.credentialKeys || [];
   const save = async () => {
@@ -816,6 +817,20 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
       const { data } = isNew
         ? await api.post("/shopify/couriers", body)
         : await api.put(`/shopify/couriers/${acc._id}`, body);
+      if (pendingLists) {
+        try {
+          const up = await uploadPincodeLists(data._id, pendingLists);
+          setPendingLists(null);
+          if (Object.keys(up).length)
+            toast(
+              `Pincode lists uploaded: ${Object.entries(up)
+                .map(([k, v]) => `${v} ${k}`)
+                .join(", ")}`,
+            );
+        } catch (err) {
+          toast(`Pincode lists: ${errMsg(err)}`, "error");
+        }
+      }
       if (f.carrier !== "custom") {
         try {
           const t = await api.post(`/shopify/couriers/${data._id}/test`);
@@ -1166,12 +1181,15 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
         <RateCard
           rc={f.rateCard}
           flat={FLAT_CARRIERS.includes(f.carrier)}
+          name={f.name}
+          onLists={setPendingLists}
+          pending={pendingLists}
           onChange={(rateCard) => setF((x) => ({ ...x, rateCard }))}
         />
         {f.rateCard.enabled &&
           (isNew ? (
             <p className="muted small">
-              Save the courier first, then upload its pincode lists.
+              Save the courier first, then upload its pincode lists (lists from an imported file are uploaded when you save).
             </p>
           ) : (
             <PincodeLists acc={acc} flat={FLAT_CARRIERS.includes(f.carrier)} />
@@ -1263,6 +1281,74 @@ const asRateCard = (rc) =>
       }
     : { ...EMPTY_RC };
 const n = (v) => (v === "" || v === null || v === undefined ? "" : Number(v));
+
+// A rate card from JSON: a plain card, { rateCard }, or another app's export ({ format: "rate_card_export",
+// couriers: [{ name, zones, extras, pincode_zones, edl_pincodes, ecc_pincodes }] }). → { rc, lists, name }
+function readRateCard(j, preferName = "") {
+  let src = j.rateCard || j;
+  if (Array.isArray(j.couriers)) {
+    if (!j.couriers.length) throw new Error("No courier in the file");
+    const want = preferName.toLowerCase();
+    const cod = /\bcod\b/.test(want);
+    src =
+      j.couriers.find((c) => (c.name || "").toLowerCase() === want) ||
+      j.couriers.find((c) => /\bcod\b/i.test(c.name || "") === cod) ||
+      j.couriers[0];
+  }
+  if (!Array.isArray(src.zones) || !src.zones.length)
+    throw new Error("No zones found in it");
+  const pins = (a, zone) =>
+    (Array.isArray(a) ? a : [])
+      .map((r) => (typeof r === "string" ? { pincode: r } : r))
+      .map((r) => ({
+        pincode: String(r.pincode || "").replace(/\D/g, ""),
+        zone: zone ? String(r.zone || "").trim() : "",
+      }))
+      .filter((r) => /^\d{6}$/.test(r.pincode) && (!zone || r.zone))
+      .filter(function (r) {
+        // first row of each pincode (exports can repeat one)
+        if (this.has(r.pincode)) return false;
+        this.add(r.pincode);
+        return true;
+      }, new Set());
+  const lists = {
+    zone: pins(src.pincode_zones, true),
+    edl: pins(src.edl_pincodes),
+    ecc: pins(src.ecc_pincodes),
+  };
+  return {
+    name: src.name || "",
+    lists,
+    rc: asRateCard({
+      enabled: true,
+      rate_type: src.rate_type || "slab",
+      volumetric_divisor: src.volumetric_divisor || 5000,
+      default_zone: src.default_zone || "",
+      zones: src.zones,
+      extras: src.extras || {},
+    }),
+  };
+}
+
+// Upload pincode lists (replacing what the courier had) in chunks the API takes.
+async function uploadPincodeLists(id, lists) {
+  const done = {};
+  for (const kind of ["zone", "edl", "ecc"]) {
+    const rows = lists?.[kind] || [];
+    if (!rows.length) continue;
+    let added = 0;
+    for (let i = 0; i < rows.length; i += 20000) {
+      const { data } = await api.post(`/shopify/couriers/${id}/pincodes`, {
+        kind,
+        replace: i === 0,
+        rows: rows.slice(i, i + 20000),
+      });
+      added += data.added;
+    }
+    done[kind] = added;
+  }
+  return done;
+}
 
 function Slabs({ slabs = [], onChange, unit = "₹" }) {
   const set = (i, k, v) =>
@@ -1512,7 +1598,7 @@ function FlatZones({ rc, set, setZone }) {
   );
 }
 
-function RateCard({ rc, onChange, flat }) {
+function RateCard({ rc, onChange, flat, name = "", onLists, pending }) {
   const [paste, setPaste] = useState(null);
   const x = rc.extras || {};
   const set = (k, v) => onChange({ ...rc, [k]: v });
@@ -1529,26 +1615,29 @@ function RateCard({ rc, onChange, flat }) {
       "zones",
       rc.zones.map((y, j) => (j === i ? z : y)),
     );
-  const importJson = () => {
+  const load = (text) => {
     try {
-      const j = JSON.parse(paste);
-      const src = j.rateCard || j;
-      if (!Array.isArray(src.zones)) throw new Error("No zones found in it");
-      onChange(
-        asRateCard({
-          enabled: true,
-          rate_type: src.rate_type || "slab",
-          volumetric_divisor: src.volumetric_divisor || 5000,
-          default_zone: src.default_zone || "",
-          zones: src.zones,
-          extras: src.extras || {},
-        }),
-      );
+      const r = readRateCard(JSON.parse(text), name);
+      onChange(r.rc);
+      onLists?.(r.lists);
       setPaste(null);
-      toast(`Rate card loaded: ${src.zones.length} zones — save to keep it`);
+      const pinsNote = [
+        r.lists.zone.length && `${r.lists.zone.length} zone pincodes`,
+        r.lists.edl.length && `${r.lists.edl.length} EDL`,
+        r.lists.ecc.length && `${r.lists.ecc.length} ECC`,
+      ]
+        .filter(Boolean)
+        .join(", ");
+      toast(
+        `Rate card loaded${r.name ? ` (${r.name})` : ""}: ${r.rc.zones.length} zones${pinsNote ? ` + ${pinsNote}` : ""} — save to keep it`,
+      );
     } catch (e) {
       toast(`Couldn't read that: ${e.message}`, "error");
     }
+  };
+  const importJson = () => load(paste);
+  const importFile = async (file) => {
+    if (file) load(await file.text());
   };
   return (
     <div
@@ -1580,7 +1669,28 @@ function RateCard({ rc, onChange, flat }) {
         >
           Paste JSON from other app
         </button>
+        <label className="btn btn-sm">
+          Import rate card file
+          <input
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={(e) => {
+              importFile(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+        </label>
       </div>
+      {pending &&
+        (pending.zone.length || pending.edl.length || pending.ecc.length) >
+          0 && (
+          <p className="small" style={{ margin: "6px 0 0" }}>
+            On save, the pincode lists from the file replace this courier's:{" "}
+            {pending.zone.length} pincode → zone, {pending.edl.length} EDL,{" "}
+            {pending.ecc.length} ECC.
+          </p>
+        )}
       {paste !== null && (
         <div style={{ marginTop: 8 }}>
           <textarea
