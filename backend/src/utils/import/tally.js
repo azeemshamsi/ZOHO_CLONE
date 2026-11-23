@@ -421,6 +421,8 @@ function normalise(xml, known = {}) {
   const seenDocs = new Map();
   const dupNumbers = [];
   const stockOnly = [];
+  const cashParties = new Set();
+  const cashDocs = [];
   for (const v of collect(xml, "VOUCHER")) {
     if (
       /yes/i.test(text(v.ISCANCELLED)) ||
@@ -660,9 +662,24 @@ function normalise(xml, known = {}) {
     const asDoc = (kind, partyGroup) => {
       // A party can be both (sister concern / branch kept under Sundry Creditors but also sold to):
       // a sales voucher still makes an invoice; the importer creates the matching customer if needed.
-      if (!partyEntry || !["debtors", "creditors"].includes(pg))
+      // A cash sale / purchase (Tally: the party is the Cash or a bank ledger) with stock lines is still a sale:
+      // an invoice (bill) to "Cash Sales" ("Cash Purchases") paid at once into (from) that ledger, so the stock
+      // moves and Cash is debited (credited) just as in Tally. Without stock lines it stays a journal.
+      const cashDoc =
+        !!partyEntry &&
+        (kind === "invoices" || kind === "bills") &&
+        !["debtors", "creditors"].includes(pg) &&
+        (["Cash", "Bank"].includes(groupOf(partyEntry.ledger)) ||
+          /\bcash\b/i.test(partyEntry.ledger)) &&
+        inv.some((it) => Math.abs(num(text(it.ACTUALQTY) || text(it.BILLEDQTY))) > 0);
+      if (!cashDoc && (!partyEntry || !["debtors", "creditors"].includes(pg)))
         return asJournal();
-      if (pg !== partyGroup) {
+      const docParty = cashDoc
+        ? kind === "invoices"
+          ? "Cash Sales"
+          : "Cash Purchases"
+        : partyEntry.ledger;
+      if (!cashDoc && pg !== partyGroup) {
         twoWay.add(
           `${partyEntry.ledger} (${partyGroup === "debtors" ? "also a customer" : "also a vendor"})`,
         );
@@ -838,18 +855,18 @@ function normalise(xml, known = {}) {
           0,
         );
       // The same party can have two vouchers with one number (e.g. bill "100" on two dates): keep both.
-      const dupKey = `${kind}|${clean(partyEntry.ledger).toLowerCase()}|${clean(number).toLowerCase()}`;
+      const dupKey = `${kind}|${clean(docParty).toLowerCase()}|${clean(number).toLowerCase()}`;
       let docNumber = number;
       if (seenDocs.has(dupKey)) {
         docNumber = `${number} (${d ? `${String(d.getUTCDate()).padStart(2, "0")}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${d.getUTCFullYear()}` : seenDocs.get(dupKey) + 1})`;
-        dupNumbers.push(`${partyEntry.ledger} ${number}`);
+        dupNumbers.push(`${docParty} ${number}`);
       }
       seenDocs.set(dupKey, (seenDocs.get(dupKey) || 0) + 1);
       out[kind].push({
         number: docNumber,
         date: d,
         dueDate: null,
-        party: partyEntry.ledger,
+        party: docParty,
         status: sales ? "sent" : "open",
         placeOfSupply: docState,
         partyState,
@@ -861,6 +878,12 @@ function normalise(xml, known = {}) {
         adjustmentLedger,
         adjustmentRoundOff: adjustmentLedger ? C.round2(roundSigned) : 0,
         autoNumber,
+        ...(cashDoc
+          ? {
+              replacesJournal:
+                `${text(v.VOUCHERTYPENAME) || "Journal"} ${number}`.trim(),
+            }
+          : {}),
         total: C.round2(total),
         notes: narration,
         linked:
@@ -875,6 +898,30 @@ function normalise(xml, known = {}) {
           return s.length === 1 ? s[0] : "";
         })(),
       });
+      if (cashDoc) {
+        if (!cashParties.has(docParty)) {
+          cashParties.add(docParty);
+          out[kind === "invoices" ? "customers" : "vendors"].push({
+            kind: kind === "invoices" ? "customer" : "vendor",
+            displayName: docParty,
+            companyName: "",
+            gstTreatment: "unregistered",
+            placeOfSupply: docState,
+            billingAddress: { state: docState, country: "India" },
+          });
+        }
+        out[kind === "invoices" ? "payments" : "vendorPayments"].push({
+          number,
+          date: d,
+          party: docParty,
+          amount: C.round2(total),
+          mode: groupOf(partyEntry.ledger) === "Bank" ? "bank_transfer" : "cash",
+          reference: text(v.REFERENCE) || number,
+          depositTo: partyEntry.ledger,
+          allocations: [{ number: docNumber, amount: C.round2(total) }],
+        });
+        cashDocs.push(`${text(v.VOUCHERTYPENAME)} ${number}`);
+      }
     };
 
     if (base === "sales") asDoc("invoices", "debtors");
@@ -913,6 +960,10 @@ function normalise(xml, known = {}) {
         });
     } else asJournal();
   }
+  if (cashDocs.length)
+    warnings.push(
+      `${cashDocs.length} cash/bank sale or purchase voucher(s) with stock were imported as an invoice/bill to "Cash Sales" / "Cash Purchases" paid at once, so their stock moves: ${cashDocs.slice(0, 8).join(", ")}${cashDocs.length > 8 ? "…" : ""}`,
+    );
   if (dupNumbers.length)
     warnings.push(
       `${dupNumbers.length} voucher(s) repeat a number already used for the same party, so the date was added to tell them apart: ${dupNumbers.slice(0, 10).join(", ")}${dupNumbers.length > 10 ? "…" : ""}`,

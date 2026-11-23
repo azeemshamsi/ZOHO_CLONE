@@ -1042,6 +1042,17 @@ async function commit(ctx, data, opts, progress) {
           },
         );
         R_(type).created++;
+        // A cash sale an earlier import brought in as a journal (no stock moved): this invoice replaces it.
+        if (d.replacesJournal) {
+          const jr = await Journal.deleteMany({
+            organization: ctx.org,
+            importRef: ref("journal", `${d.replacesJournal}|${iso(d.date)}`),
+          });
+          if (jr.deletedCount)
+            warnings.push(
+              `${label}: the journal "${d.replacesJournal}" from an earlier import was replaced by this ${LABEL_ONE[type]}, so its stock moves`,
+            );
+        }
       } catch (e) {
         fail(type, label, e);
       }
