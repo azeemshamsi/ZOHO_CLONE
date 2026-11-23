@@ -298,34 +298,55 @@ const QUOTES = {
   async velocity(acc, q) {
     const c = CARRIERS.velocity;
     if (!q.from) return { serviceable: null, note: "Add the pickup pincode to this courier to check rates" };
+    const { short } = require("./http");
     const { status, data } = await c.call(acc, "/rates", {
       journey_type: "forward",
-      origin_pincode: q.from,
-      destination_pincode: q.to,
+      origin_pincode: String(q.from),
+      destination_pincode: String(q.to),
       dead_weight: Math.max(1, Math.round((Number(q.weight) || 0.5) * 1000)),
       length: Number(q.length) || 10,
       width: Number(q.breadth) || 10,
       height: Number(q.height) || 10,
       payment_method: q.cod ? "cod" : "prepaid",
-      ...(q.cod ? { shipment_value: Math.max(1, r2(q.codAmount || q.value)) } : {}),
+      shipment_value: Math.max(1, r2(q.cod ? q.codAmount || q.value : q.value)),
     });
-    if (status >= 400) throw new Error(data?.message || `rate check failed (${status})`);
-    const options = (data.result?.serviceable_couriers || [])
-      .filter((x) => x.carrier_id && (!x.status || x.status === "active"))
-      .map((x) => ({
-        courierId: String(x.carrier_id),
-        name: x.carrier_name || x.carrier_code,
-        charge: r2(Number(x.charges?.total_forward_charges || 0) + Number(x.platform_fee || 0)),
-        etd: x.expected_delivery?.delivery || "",
-        breakdown: { freight: r2(x.charges?.forward_freight_charges || 0), cod_charge: r2(x.charges?.cod_charges || 0) },
-      }))
-      .filter((o) => o.charge > 0)
-      .sort((a, b) => a.charge - b.charge);
-    if (!options.length) return { serviceable: false, note: `Velocity has no courier for ${q.to}` };
+    const res = data?.result || data?.payload || data || {};
+    const list = res.serviceable_couriers || res.couriers || res.serviceability_results || (Array.isArray(res) ? res : []);
+    const num = (v) => Number(String(v ?? "").replace(/[^0-9.]/g, "")) || 0;
+    const options = list
+      .filter((x) => x && (x.carrier_id || x.id))
+      .map((x) => {
+        const ch = x.charges || {};
+        const total = num(ch.total_forward_charges ?? ch.total_charges ?? ch.total ?? x.total_charges ?? x.rate ?? x.charge);
+        return {
+          courierId: String(x.carrier_id || x.id),
+          name: x.carrier_name || x.carrier_code || x.name || String(x.carrier_id),
+          charge: total > 0 ? r2(total + num(x.platform_fee)) : null,
+          etd: x.expected_delivery?.delivery || "",
+          breakdown: total > 0 ? { freight: r2(num(ch.forward_freight_charges)), cod_charge: r2(num(ch.cod_charges)) } : undefined,
+        };
+      })
+      .sort((a, b) => (a.charge ?? 1e12) - (b.charge ?? 1e12));
+    if (!options.length) {
+      // The rate API gave nothing usable: ask the serviceability API, and show what Velocity said.
+      const sv = await c
+        .call(acc, "/serviceability", { from: String(q.from), to: String(q.to), payment_mode: q.cod ? "cod" : "prepaid", shipment_type: "forward" })
+        .catch(() => null);
+      const sl = sv?.data?.result?.serviceability_results || [];
+      if (sl.length) {
+        const opts = sl.map((x) => ({ courierId: String(x.carrier_id), name: x.carrier_name, charge: null, etd: "" }));
+        const want = String(acc.options?.carrierId || "");
+        const pick = opts.find((o) => o.courierId === want) || opts[0];
+        return { serviceable: true, courierName: pick.name, courierId: pick.courierId, options: opts.slice(0, 8), note: `Velocity serves ${q.to}; no rate given (${short(data?.message || data?.error || data).slice(0, 120)})` };
+      }
+      const why = data?.message || data?.error || data?.errors || data;
+      if (status >= 400 || data?.status === "FAILURE" || data?.status === 0) throw new Error(short(why).slice(0, 200));
+      return { serviceable: false, note: `Velocity has no courier for ${q.to} at ${q.weight} kg (${short(why).slice(0, 150)})` };
+    }
     const want = String(acc.options?.carrierId || "");
     if (want && !options.some((o) => o.courierId === want)) return { serviceable: false, note: `Your chosen Velocity carrier (${want}) doesn't serve ${q.to}`, options };
     const pick = options.find((o) => o.courierId === want) || options[0];
-    return { serviceable: true, charge: pick.charge, etd: pick.etd, courierName: pick.name, courierId: pick.courierId, breakdown: pick.breakdown, zone: String(data.result?.shipment_details?.zone || ""), options: options.slice(0, 8) };
+    return { serviceable: true, charge: pick.charge ?? undefined, etd: pick.etd, courierName: pick.name, courierId: pick.courierId, breakdown: pick.breakdown, zone: String(res.shipment_details?.zone || ""), options: options.slice(0, 8) };
   },
 
   async shadowfax(acc, q) {
