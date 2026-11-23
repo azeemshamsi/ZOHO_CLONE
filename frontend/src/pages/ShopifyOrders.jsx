@@ -303,7 +303,7 @@ function LinePackages({ lines, packages, onChanged }) {
 }
 
 // Save the weight and size typed when booking as a package type, and give it to the order's product.
-function SaveAsPackage({ dims, lines, onSaved }) {
+function SaveAsPackage({ dims, lines, onSaved, bookRef }) {
   const prods = (lines || []).filter((l) => l.item);
   const oneProduct = prods.length === 1;
   const [name, setName] = useState(
@@ -314,7 +314,11 @@ function SaveAsPackage({ dims, lines, onSaved }) {
   );
   const [assign, setAssign] = useState(oneProduct);
   const [busy, setBusy] = useState(false);
-  const save = async () => {
+  // Booking with "Use it for this product" ticked saves it too, even without clicking Save.
+  if (bookRef)
+    bookRef.current =
+      assign && name.trim() && prods.length ? () => save(true) : null;
+  const save = async (booking = false) => {
     setBusy(true);
     try {
       const { data } = await api.post("/shopify/package-types", {
@@ -327,9 +331,9 @@ function SaveAsPackage({ dims, lines, onSaved }) {
       toast(
         `Package type “${data.name}” saved${data.assigned ? ` and set on ${prods.map((l) => l.sku || l.title).join(", ")}` : ""}`,
       );
-      onSaved(data);
+      if (!booking) onSaved(data);
     } catch (e) {
-      toast(errMsg(e), "error");
+      toast(`Package type not saved: ${errMsg(e)}`, "error");
     }
     setBusy(false);
   };
@@ -353,7 +357,7 @@ function SaveAsPackage({ dims, lines, onSaved }) {
           type="button"
           className="btn"
           disabled={busy || !name.trim()}
-          onClick={save}
+          onClick={() => save()}
         >
           {busy ? "Saving…" : "Save package type"}
         </button>
@@ -773,6 +777,7 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [saved, setSaved] = useState(false);
+  const savePkgRef = useRef(null);
   const [pickupFrom, setPickupFrom] = useState(""); // "" automatic | "own" | "seller:<id>"
   const [sellerList, setSellerList] = useState([]);
   // Several boxes (one order): null = one box with everything, else [{ lines: [{ lineId, quantity }], pkg }].
@@ -904,6 +909,11 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
   const go = async () => {
     setBusy(true);
     try {
+      // The weight and size typed here, kept as the product's package type when that box is ticked.
+      if (single && mode === "manual" && manualOk && !saved && !boxes && savePkgRef.current) {
+        await savePkgRef.current();
+        setSaved(true);
+      }
       const { data } = await api.post("/shopify/orders/ship", {
         ids,
         account: pick.account,
@@ -1039,6 +1049,7 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
           )}
           {single && mode === "manual" && manualOk && !saved && (
             <SaveAsPackage
+              bookRef={savePkgRef}
               dims={manualPkg}
               lines={order?.lines || quotes?.orders?.[0]?.lines}
               onSaved={(pt) => {
