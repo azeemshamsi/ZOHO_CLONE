@@ -96,10 +96,23 @@ export function ShippingCalculator() {
               </tr>
             </thead>
             <tbody>
-              {r.rows.map((q) => (
-                <tr key={q.account} className={q.serviceable === false ? "muted" : ""}>
+              {r.rows
+                // Aggregators' couriers each on their own line; everything cheapest first, unserviceable last.
+                .flatMap((q) =>
+                  q.options?.length && q.serviceable !== false
+                    ? q.options.map((o) => ({ ...q, key: `${q.account}|${o.courierId}`, sub: o.name, charge: o.charge, source: "api", breakdown: null, serviceable: true }))
+                    : [{ ...q, key: q.account }],
+                )
+                .sort(
+                  (a, b) =>
+                    (a.serviceable === false ? 2 : a.serviceable ? 0 : 1) - (b.serviceable === false ? 2 : b.serviceable ? 0 : 1) ||
+                    (a.charge ?? 1e12) - (b.charge ?? 1e12),
+                )
+                .map((q) => (
+                <tr key={q.key} className={q.serviceable === false ? "muted" : ""}>
                   <td>
                     {q.name}
+                    {q.sub && <span className="muted"> · {q.sub}</span>}
                     {q.edl && <span className="pill pill-amber" style={{ marginLeft: 6 }}>EDL</span>}
                   </td>
                   <td className="small">{q.serviceable === true ? "Serviceable" : q.serviceable === false ? <span className="text-red">Not serviceable</span> : "Not checked"}{q.note && <div className="muted small">{q.note}</div>}</td>

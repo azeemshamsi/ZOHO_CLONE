@@ -237,8 +237,18 @@ const ChargeCell = ({ r }) =>
     <span className="muted small">No rate{r.edl ? " · EDL" : ""}</span>
   );
 
-// Flatten courier rows: an aggregator (Shiprocket) lists each of its couriers as its own choice.
+// Flatten courier rows: an aggregator (Shiprocket, Velocity, BigShip, Cargo) lists each of its couriers as its own
+// choice. All of them together: serviceable first, then cheapest first, couriers without a rate after those.
+const rankServ = (r) =>
+  r.serviceable === false ? 2 : r.serviceable === true ? 0 : 1;
 const choicesOf = (rows) =>
+  flatChoices(rows).sort(
+    (a, b) =>
+      rankServ(a) - rankServ(b) ||
+      (a.charge ?? 1e12) - (b.charge ?? 1e12) ||
+      String(a.name).localeCompare(String(b.name)),
+  );
+const flatChoices = (rows) =>
   rows.flatMap((r) =>
     r.options?.length && r.serviceable !== false
       ? r.options.map((o) => ({
