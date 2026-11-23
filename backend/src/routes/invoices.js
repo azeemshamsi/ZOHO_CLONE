@@ -104,10 +104,29 @@ router.put(
     if (fields.total < invoice.amountPaid + invoice.creditsApplied) {
       throw new HttpError(400, "The new total is less than the payments and credits already applied to this invoice");
     }
+    // Another customer: the payments made only for this invoice go with it (e.g. a cash sale whose buyer is now
+    // known), so Cash in hand stays as it was and neither customer is left with a balance from it.
+    const Payment = require("../models/Payment");
+    const newCustomer = fields.customer && String(fields.customer) !== String(invoice.customer);
+    let pays = [];
+    if (newCustomer) {
+      pays = await Payment.find({ organization: req.org, "allocations.invoice": invoice._id });
+      const shared = pays.find((p) => p.allocations.some((x) => String(x.invoice) !== String(invoice._id)) || (p.unusedAmount || 0) > 0);
+      if (shared)
+        throw new HttpError(400, `Payment ${shared.paymentNumber} also covers other invoices (or has an unused amount), so it can't move with this invoice — change that payment's customer first, or keep the customer`);
+      const CreditNote = require("../models/CreditNote");
+      if (await CreditNote.exists({ organization: req.org, invoice: invoice._id }))
+        throw new HttpError(400, "This invoice has a credit note; change the customer there first");
+    }
     const status = invoice.status === "draft" ? data.status || "draft" : invoice.status;
     invoice.set({ ...fields, status });
     settleInvoice(invoice);
     await invoice.save();
+    if (newCustomer && pays.length)
+      await Payment.updateMany(
+        { _id: { $in: pays.map((p) => p._id) } },
+        { $set: { customer: invoice.customer, customerName: invoice.customerName } },
+      );
     res.send(invoice);
   })
 );
