@@ -7,8 +7,15 @@ const taxRound = (n) => Math.round(Number((Number(n) * 100).toFixed(6))) / 100;
  * Intra-state supply (business state == place of supply): tax split equally into CGST + SGST.
  * Inter-state supply: whole tax is IGST.
  */
-function computeTotals({ lineItems = [], orgState, placeOfSupply, shippingCharge = 0, adjustment = 0 }) {
-  const isInterState = Boolean(placeOfSupply) && Boolean(orgState) && placeOfSupply !== orgState;
+function computeTotals({
+  lineItems = [],
+  orgState,
+  placeOfSupply,
+  shippingCharge = 0,
+  adjustment = 0,
+}) {
+  const isInterState =
+    Boolean(placeOfSupply) && Boolean(orgState) && placeOfSupply !== orgState;
   let subTotal = 0;
   let cgst = 0;
   let sgst = 0;
@@ -16,12 +23,27 @@ function computeTotals({ lineItems = [], orgState, placeOfSupply, shippingCharge
 
   const lines = lineItems.map((li) => {
     const quantity = Number(li.quantity) || 0;
-    const rate = Number(li.rate) || 0;
     const discount = Math.min(Math.max(Number(li.discount) || 0, 0), 100);
     const taxRate = Number(li.taxRate) || 0;
+    // GST-inclusive line (e.g. cartage incl. GST): the amount entered includes the tax; the rate is what's before it.
+    const rate =
+      li.taxInclusive && Number(li.grossRate) > 0
+        ? Math.round((Number(li.grossRate) / (1 + taxRate / 100)) * 10000) /
+          10000
+        : Number(li.rate) || 0;
     const amount = taxRound(quantity * rate * (1 - discount / 100));
     const tax = (amount * taxRate) / 100;
-    const line = { ...li, quantity, rate, discount, taxRate, amount, cgst: 0, sgst: 0, igst: 0 };
+    const line = {
+      ...li,
+      quantity,
+      rate,
+      discount,
+      taxRate,
+      amount,
+      cgst: 0,
+      sgst: 0,
+      igst: 0,
+    };
     if (isInterState) {
       line.igst = taxRound(tax);
     } else {
@@ -40,9 +62,23 @@ function computeTotals({ lineItems = [], orgState, placeOfSupply, shippingCharge
   sgst = round2(sgst);
   igst = round2(igst);
   const taxTotal = round2(cgst + sgst + igst);
-  const total = round2(subTotal + taxTotal + (Number(shippingCharge) || 0) + (Number(adjustment) || 0));
+  const total = round2(
+    subTotal +
+      taxTotal +
+      (Number(shippingCharge) || 0) +
+      (Number(adjustment) || 0),
+  );
 
-  return { lineItems: lines, isInterState, subTotal, cgst, sgst, igst, taxTotal, total };
+  return {
+    lineItems: lines,
+    isInterState,
+    subTotal,
+    cgst,
+    sgst,
+    igst,
+    taxTotal,
+    total,
+  };
 }
 
 module.exports = { computeTotals, taxRound };

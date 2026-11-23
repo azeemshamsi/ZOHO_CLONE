@@ -16,6 +16,8 @@ const lineItemJoi = Joi.object({
   discount: Joi.number().min(0).max(100),
   taxRate: Joi.number().min(0).max(100),
   account: Joi.string().allow(""),
+  taxInclusive: Joi.boolean(),
+  grossRate: Joi.number().min(0),
 });
 
 const addrJoi = Joi.object({ street: Joi.string().allow(""), city: Joi.string().allow(""), state: Joi.string().allow(""), pincode: Joi.string().allow(""), country: Joi.string().allow("") });

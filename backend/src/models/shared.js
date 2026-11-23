@@ -17,6 +17,8 @@ const lineItemSchema = new mongoose.Schema(
     cgst: { type: Number, default: 0 },
     sgst: { type: Number, default: 0 },
     igst: { type: Number, default: 0 },
+    taxInclusive: { type: Boolean, default: undefined }, // the amount entered (grossRate) includes GST; rate = the part before GST
+    grossRate: { type: Number, default: undefined },
     account: { type: String, default: "" }, // account the line posts to — bills/vendor credits: expense (blank = purchases/COGS); invoices/credit notes: income (blank = Sales)
   },
   { _id: false }

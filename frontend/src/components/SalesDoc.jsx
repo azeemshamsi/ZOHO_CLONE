@@ -1,12 +1,40 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { STATES, GST_RATES, PAYMENT_TERMS, PAYMENT_MODES, stateName } from "../lib/constants";
+import {
+  STATES,
+  GST_RATES,
+  PAYMENT_TERMS,
+  PAYMENT_MODES,
+  stateName,
+} from "../lib/constants";
 import BankAccountSelect from "./BankAccountSelect";
 import { CREDIT_REASONS, VENDOR_CREDIT_REASONS } from "../lib/docKinds";
-import { money, amount, date, isoDate, addDays, round2, inWords } from "../lib/format";
-import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Status } from "./ui";
+import {
+  money,
+  amount,
+  date,
+  isoDate,
+  addDays,
+  round2,
+  inWords,
+} from "../lib/format";
+import {
+  PageHeader,
+  Spinner,
+  Empty,
+  Field,
+  SearchBox,
+  useDebounced,
+  toast,
+  Status,
+} from "./ui";
 import Icon from "./Icon";
 import { useLocations } from "../lib/locations";
 import { QrImage } from "./GstPanel";
@@ -14,7 +42,14 @@ import SearchSelect, { partyOptions, itemOptions } from "./SearchSelect";
 import { useBack } from "../lib/backNav";
 
 /* ======================= List ======================= */
-export function DocList({ kind, filters, columns, emptyText, summary, headerExtra }) {
+export function DocList({
+  kind,
+  filters,
+  columns,
+  emptyText,
+  summary,
+  headerExtra,
+}) {
   const [rows, setRows] = useState(null);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
@@ -25,42 +60,92 @@ export function DocList({ kind, filters, columns, emptyText, summary, headerExtr
   const navigate = useNavigate();
   const goBack = useBack();
   const nameOf = (r) => r.customerName || r.vendorName || "";
-  const parties = useMemo(() => [...new Set((rows || []).map(nameOf).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [rows]);
-  const day = (d) => (d ? new Date(new Date(d).getTime() + 5.5 * 3600000).toISOString().slice(0, 10) : "");
-  const shown = (rows || []).filter((r) => (!party || nameOf(r) === party) && (!from || day(r.date) >= from) && (!to || day(r.date) <= to));
+  const parties = useMemo(
+    () =>
+      [...new Set((rows || []).map(nameOf).filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [rows],
+  );
+  const day = (d) =>
+    d
+      ? new Date(new Date(d).getTime() + 5.5 * 3600000)
+          .toISOString()
+          .slice(0, 10)
+      : "";
+  const shown = (rows || []).filter(
+    (r) =>
+      (!party || nameOf(r) === party) &&
+      (!from || day(r.date) >= from) &&
+      (!to || day(r.date) <= to),
+  );
   const narrowed = !!(party || from || to);
 
   useEffect(() => {
     setRows(null);
-    api.get(kind.api, { params: { q: dq, status } }).then((r) => setRows(r.data));
+    api
+      .get(kind.api, { params: { q: dq, status } })
+      .then((r) => setRows(r.data));
   }, [dq, status, kind.api]);
 
   return (
     <>
       <PageHeader title={kind.plural}>
-        <select className="select-inline" value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select
+          className="select-inline"
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+        >
           {filters.map(([v, l]) => (
             <option key={v} value={v}>
               {l}
             </option>
           ))}
         </select>
-        <select className="select-inline" value={party} onChange={(e) => setParty(e.target.value)} style={{ maxWidth: 220 }} title={kind.party === "vendor" ? "Vendor" : "Customer"}>
-          <option value="">{kind.party === "vendor" ? "All vendors" : "All customers"}</option>
+        <select
+          className="select-inline"
+          value={party}
+          onChange={(e) => setParty(e.target.value)}
+          style={{ maxWidth: 220 }}
+          title={kind.party === "vendor" ? "Vendor" : "Customer"}
+        >
+          <option value="">
+            {kind.party === "vendor" ? "All vendors" : "All customers"}
+          </option>
           {parties.map((p) => (
             <option key={p} value={p}>
               {p}
             </option>
           ))}
         </select>
-        <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} title="From date" />
-        <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} title="To date" />
+        <input
+          type="date"
+          value={from}
+          max={to || undefined}
+          onChange={(e) => setFrom(e.target.value)}
+          title="From date"
+        />
+        <input
+          type="date"
+          value={to}
+          min={from || undefined}
+          onChange={(e) => setTo(e.target.value)}
+          title="To date"
+        />
         {narrowed && (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => (setParty(""), setFrom(""), setTo(""))}>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => (setParty(""), setFrom(""), setTo(""))}
+          >
             Clear
           </button>
         )}
-        <SearchBox value={q} onChange={setQ} placeholder={`Search ${kind.plural.toLowerCase()}`} />
+        <SearchBox
+          value={q}
+          onChange={setQ}
+          placeholder={`Search ${kind.plural.toLowerCase()}`}
+        />
         {headerExtra}
         <Link to={`${kind.route}/new`} className="btn btn-primary">
           <Icon name="plus" size={16} /> New
@@ -71,7 +156,11 @@ export function DocList({ kind, filters, columns, emptyText, summary, headerExtr
       ) : shown.length === 0 ? (
         <Empty
           icon="doc"
-          title={q || status !== "all" || narrowed ? `No ${kind.plural.toLowerCase()} found` : `Create your first ${kind.label.toLowerCase()}`}
+          title={
+            q || status !== "all" || narrowed
+              ? `No ${kind.plural.toLowerCase()} found`
+              : `Create your first ${kind.label.toLowerCase()}`
+          }
           text={emptyText}
           action={
             <Link to={`${kind.route}/new`} className="btn btn-primary">
@@ -95,9 +184,15 @@ export function DocList({ kind, filters, columns, emptyText, summary, headerExtr
               </thead>
               <tbody>
                 {shown.map((r) => (
-                  <tr key={r._id} onClick={() => navigate(`${kind.route}/${r._id}`)}>
+                  <tr
+                    key={r._id}
+                    onClick={() => navigate(`${kind.route}/${r._id}`)}
+                  >
                     {columns.map((c) => (
-                      <td key={c.label} className={`${c.num ? "num" : ""} ${c.cls || ""}`}>
+                      <td
+                        key={c.label}
+                        className={`${c.num ? "num" : ""} ${c.cls || ""}`}
+                      >
                         {c.render(r)}
                       </td>
                     ))}
@@ -113,10 +208,36 @@ export function DocList({ kind, filters, columns, emptyText, summary, headerExtr
 }
 
 /* ======================= Form ======================= */
-const blankLine = () => ({ item: "", name: "", description: "", hsnSac: "", unit: "", quantity: 1, rate: 0, discount: 0, taxRate: 18 });
+const blankLine = () => ({
+  item: "",
+  name: "",
+  description: "",
+  hsnSac: "",
+  unit: "",
+  quantity: 1,
+  rate: 0,
+  discount: 0,
+  taxRate: 18,
+});
 // Half a paisa rounds up (as GST, Tally and the server do).
 const taxRound = (n) => Math.round(Number((Number(n) * 100).toFixed(6))) / 100;
-const lineAmount = (l) => taxRound((Number(l.quantity) || 0) * (Number(l.rate) || 0) * (1 - (Number(l.discount) || 0) / 100));
+// A GST-inclusive line (cartage incl. GST): the amount entered includes the tax; the rate is the part before it.
+const netRate = (l) =>
+  l.taxInclusive && Number(l.grossRate) > 0
+    ? Math.round(
+        (Number(l.grossRate) / (1 + (Number(l.taxRate) || 0) / 100)) * 10000,
+      ) / 10000
+    : Number(l.rate) || 0;
+const lineAmount = (l) =>
+  taxRound(
+    (Number(l.quantity) || 0) *
+      netRate(l) *
+      (1 - (Number(l.discount) || 0) / 100),
+  );
+const CARTAGE = {
+  cartage_excl: "Cartage (Exclusive of GST)",
+  cartage_incl: "Cartage (Inclusive of GST)",
+};
 const cleanLine = (l) => ({
   item: l.item || "",
   name: l.name,
@@ -124,7 +245,10 @@ const cleanLine = (l) => ({
   hsnSac: l.hsnSac || "",
   unit: l.unit || "",
   quantity: l.quantity,
-  rate: l.rate,
+  rate: netRate(l),
+  ...(l.taxInclusive
+    ? { taxInclusive: true, grossRate: Number(l.grossRate) || 0 }
+    : {}),
   discount: l.discount || 0,
   taxRate: l.taxRate || 0,
   ...(l.account ? { account: l.account } : {}), // imported purchase lines keep their expense account
@@ -147,8 +271,12 @@ function calc(lines, orgState, pos, shipping, adjustment) {
       taxByRate[r].sgst += taxRound(tax / 2);
     }
   }
-  const taxTotal = round2(Object.values(taxByRate).reduce((s, t) => s + t.cgst + t.sgst + t.igst, 0));
-  const total = round2(sub + taxTotal + (Number(shipping) || 0) + (Number(adjustment) || 0));
+  const taxTotal = round2(
+    Object.values(taxByRate).reduce((s, t) => s + t.cgst + t.sgst + t.igst, 0),
+  );
+  const total = round2(
+    sub + taxTotal + (Number(shipping) || 0) + (Number(adjustment) || 0),
+  );
   return { inter, sub: round2(sub), taxByRate, total };
 }
 
@@ -162,13 +290,22 @@ function SellerOrderAdder({ vendor, onAdd }) {
     if (!q.trim()) return;
     setBusy(true);
     try {
-      const { data } = await api.get("/purchase-orders/seller-order", { params: { vendor, q: q.trim() } });
-      if (data.warnings.length && !window.confirm(`${data.order.name}: ${data.warnings.join(". ")}.\n\nAdd it to this purchase order anyway?`)) {
+      const { data } = await api.get("/purchase-orders/seller-order", {
+        params: { vendor, q: q.trim() },
+      });
+      if (
+        data.warnings.length &&
+        !window.confirm(
+          `${data.order.name}: ${data.warnings.join(". ")}.\n\nAdd it to this purchase order anyway?`,
+        )
+      ) {
         setBusy(false);
         return;
       }
       onAdd(data);
-      toast(`${data.order.name} added — ${data.lineItems.length} line${data.lineItems.length === 1 ? "" : "s"}, ₹${data.amount}`);
+      toast(
+        `${data.order.name} added — ${data.lineItems.length} line${data.lineItems.length === 1 ? "" : "s"}, ₹${data.amount}`,
+      );
       setQ("");
     } catch (e) {
       toast(errMsg(e), "error");
@@ -176,7 +313,15 @@ function SellerOrderAdder({ vendor, onAdd }) {
     setBusy(false);
   };
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+    <div
+      style={{
+        display: "flex",
+        gap: 8,
+        alignItems: "center",
+        flexWrap: "wrap",
+        marginTop: 8,
+      }}
+    >
       <span className="small muted">Seller's order:</span>
       <input
         style={{ width: 180 }}
@@ -190,7 +335,12 @@ function SellerOrderAdder({ vendor, onAdd }) {
           }
         }}
       />
-      <button type="button" className="btn btn-sm" disabled={busy} onClick={add}>
+      <button
+        type="button"
+        className="btn btn-sm"
+        disabled={busy}
+        onClick={add}
+      >
         {busy ? "Finding…" : "Add order"}
       </button>
     </div>
@@ -211,7 +361,12 @@ export function DocForm({ kind, recurring = false }) {
   const [busy, setBusy] = useState(false);
   const [autoNumber, setAutoNumber] = useState("");
   // New invoice paid on the spot (a cash sale): record the receipt with it.
-  const [paidNow, setPaidNow] = useState({ on: false, mode: "cash", bankAccount: "", reference: "" });
+  const [paidNow, setPaidNow] = useState({
+    on: false,
+    mode: "cash",
+    bankAccount: "",
+    reference: "",
+  });
   const canPayNow = kind.key === "invoice" && !id && !recurring;
   const { branches, warehouses } = useLocations();
   const [currencies, setCurrencies] = useState([]);
@@ -221,7 +376,13 @@ export function DocForm({ kind, recurring = false }) {
   const [expenseLedgers, setExpenseLedgers] = useState([]);
   const [tdsLedgers, setTdsLedgers] = useState([]);
   const [tdsRate, setTdsRate] = useState("");
-  const ledgerKind = recurring ? "" : ["invoice", "creditNote"].includes(kind.key) ? "sales" : ["bill", "vendorCredit"].includes(kind.key) ? "purchase" : "";
+  const ledgerKind = recurring
+    ? ""
+    : ["invoice", "creditNote"].includes(kind.key)
+      ? "sales"
+      : ["bill", "vendorCredit"].includes(kind.key)
+        ? "purchase"
+        : "";
   useEffect(() => {
     if (!ledgerKind) return;
     api
@@ -232,8 +393,26 @@ export function DocForm({ kind, recurring = false }) {
         // Bills: expense ledgers too (Amazon commission, freight…), and TDS ledgers for the TDS line.
         if (ledgerKind === "purchase") {
           // Tally's Direct Expenses come in as Cost Of Goods Sold, Indirect Expenses as Expense.
-          setExpenseLedgers(live.filter((a) => a.ledgerKind !== "purchase" && ["Expense", "Other Expense", "Cost Of Goods Sold"].includes(a.group) && a.code !== "cogs"));
-          setTdsLedgers(live.filter((a) => ["Other Current Liability", "Other Liability", "Current Liability"].includes(a.group) && /tds/i.test(a.name)));
+          setExpenseLedgers(
+            live.filter(
+              (a) =>
+                a.ledgerKind !== "purchase" &&
+                ["Expense", "Other Expense", "Cost Of Goods Sold"].includes(
+                  a.group,
+                ) &&
+                a.code !== "cogs",
+            ),
+          );
+          setTdsLedgers(
+            live.filter(
+              (a) =>
+                [
+                  "Other Current Liability",
+                  "Other Liability",
+                  "Current Liability",
+                ].includes(a.group) && /tds/i.test(a.name),
+            ),
+          );
         }
       })
       .catch(() => {});
@@ -243,9 +422,19 @@ export function DocForm({ kind, recurring = false }) {
       .catch(() => {});
   }, [ledgerKind]);
   useEffect(() => {
-    api.get("/currencies").then((r) => setCurrencies(r.data)).catch(() => {});
+    api
+      .get("/currencies")
+      .then((r) => setCurrencies(r.data))
+      .catch(() => {});
   }, []);
-  const stockKind = ["invoice", "bill", "creditNote", "vendorCredit", "salesOrder", "purchaseOrder"].includes(kind.key);
+  const stockKind = [
+    "invoice",
+    "bill",
+    "creditNote",
+    "vendorCredit",
+    "salesOrder",
+    "purchaseOrder",
+  ].includes(kind.key);
   // Credit notes (customers) and vendor credits (vendors) can point at an invoice / bill.
   const isCN = kind.key === "creditNote" || kind.key === "vendorCredit";
   const second = kind.second;
@@ -257,8 +446,12 @@ export function DocForm({ kind, recurring = false }) {
   const linkNumber = isVendor ? "billNumber" : "invoiceNumber";
 
   useEffect(() => {
-    api.get(partyApi, { params: { status: "active" } }).then((r) => setCustomers(r.data));
-    api.get("/items", { params: { status: "active" } }).then((r) => setItems(r.data));
+    api
+      .get(partyApi, { params: { status: "active" } })
+      .then((r) => setCustomers(r.data));
+    api
+      .get("/items", { params: { status: "active" } })
+      .then((r) => setItems(r.data));
   }, [partyApi]);
 
   useEffect(() => {
@@ -283,7 +476,15 @@ export function DocForm({ kind, recurring = false }) {
           status: "draft",
           invoice: "",
           reason: "",
-          sched: { name: p.name, every: p.every, unit: p.unit, startDate: isoDate(p.startDate), endDate: p.endDate ? isoDate(p.endDate) : "", never: !p.endDate, createAs: p.createAs },
+          sched: {
+            name: p.name,
+            every: p.every,
+            unit: p.unit,
+            startDate: isoDate(p.startDate),
+            endDate: p.endDate ? isoDate(p.endDate) : "",
+            never: !p.endDate,
+            createAs: p.createAs,
+          },
         });
       });
       return;
@@ -299,16 +500,29 @@ export function DocForm({ kind, recurring = false }) {
           ref: data[kind.refField] || "",
           date: isoDate(data.date),
           paymentTerms: data.paymentTerms ?? 0,
-          second: second && data[second.field] ? isoDate(data[second.field]) : "",
+          second:
+            second && data[second.field] ? isoDate(data[second.field]) : "",
           placeOfSupply: data.placeOfSupply,
           billingAddress: addrOf(data.billingAddress),
-          shipTo: { name: data.shipTo?.name || "", phone: data.shipTo?.phone || "", ...addrOf(data.shipTo) },
+          shipTo: {
+            name: data.shipTo?.name || "",
+            phone: data.shipTo?.phone || "",
+            ...addrOf(data.shipTo),
+          },
           lineItems: data.lineItems.map(cleanLine),
           shippingCharge: data.shippingCharge,
           adjustment: data.adjustment,
           adjustmentAccount: data.adjustmentAccount || "",
           // Imported Tally invoices carry their sales ledger on the lines: show it when every line uses the same one.
-          ledger: data.ledger || (["invoice", "creditNote"].includes(kind.key) && data.lineItems.length && data.lineItems.every((l) => l.account && l.account === data.lineItems[0].account) ? data.lineItems[0].account : ""),
+          ledger:
+            data.ledger ||
+            (["invoice", "creditNote"].includes(kind.key) &&
+            data.lineItems.length &&
+            data.lineItems.every(
+              (l) => l.account && l.account === data.lineItems[0].account,
+            )
+              ? data.lineItems[0].account
+              : ""),
           customerNotes: data.customerNotes,
           terms: data.terms,
           status: data.status,
@@ -320,7 +534,12 @@ export function DocForm({ kind, recurring = false }) {
         };
         if (copyOf) {
           // New number (a vendor's bill number is typed in), draft, not tied to the original's PO.
-          Object.assign(f, { number: "", status: "draft", purchaseOrder: "", copiedFrom: data[kind.numberField] || "copy" });
+          Object.assign(f, {
+            number: "",
+            status: "draft",
+            purchaseOrder: "",
+            copiedFrom: data[kind.numberField] || "copy",
+          });
         }
         setForm(f);
       });
@@ -334,7 +553,11 @@ export function DocForm({ kind, recurring = false }) {
       ref: "",
       date: today,
       paymentTerms: terms,
-      second: second?.terms ? addDays(today, terms) : second?.defaultDays ? addDays(today, second.defaultDays) : "",
+      second: second?.terms
+        ? addDays(today, terms)
+        : second?.defaultDays
+          ? addDays(today, second.defaultDays)
+          : "",
       placeOfSupply: "",
       lineItems: [blankLine()],
       shippingCharge: 0,
@@ -347,7 +570,17 @@ export function DocForm({ kind, recurring = false }) {
       purchaseOrder: "",
       branch: "",
       warehouse: "",
-      sched: recurring ? { name: "", every: 1, unit: "month", startDate: today, endDate: "", never: true, createAs: "final" } : null,
+      sched: recurring
+        ? {
+            name: "",
+            every: 1,
+            unit: "month",
+            startDate: today,
+            endDate: "",
+            never: true,
+            createAs: "final",
+          }
+        : null,
     };
     const fromInvoice = isCN && params.get(linkKey);
     const fromPO = kind.key === "bill" && params.get("po");
@@ -359,7 +592,7 @@ export function DocForm({ kind, recurring = false }) {
           invoice: data._id,
           placeOfSupply: data.placeOfSupply,
           lineItems: data.lineItems.map(cleanLine),
-        })
+        }),
       );
     } else if (fromPO) {
       api.get(`/purchase-orders/${fromPO}`).then(({ data }) =>
@@ -373,14 +606,32 @@ export function DocForm({ kind, recurring = false }) {
           shippingCharge: data.shippingCharge,
           adjustment: data.adjustment,
           adjustmentAccount: data.adjustmentAccount || "", // e.g. a marketplace seller's deduction: stays with the purchase
-        })
+        }),
       );
     } else setForm(base);
-  }, [id, kind, organization, params, second, isCN, party, isVendor, linkKey, linkApi, recurring]);
+  }, [
+    id,
+    kind,
+    organization,
+    params,
+    second,
+    isCN,
+    party,
+    isVendor,
+    linkKey,
+    linkApi,
+    recurring,
+  ]);
 
   // Customer picked from the URL: apply their defaults once customers load.
   useEffect(() => {
-    if (!id && form && form.customer && !form.placeOfSupply && customers.length) {
+    if (
+      !id &&
+      form &&
+      form.customer &&
+      !form.placeOfSupply &&
+      customers.length
+    ) {
       const c = customers.find((x) => x._id === form.customer);
       if (c)
         setForm((f) => ({
@@ -388,7 +639,9 @@ export function DocForm({ kind, recurring = false }) {
           placeOfSupply: c.placeOfSupply || organization?.state || "",
           paymentTerms: c.paymentTerms,
           second: second?.terms ? addDays(f.date, c.paymentTerms) : f.second,
-          ...(f.billingAddress && hasAddr(f.billingAddress) ? {} : addressesFor(c)),
+          ...(f.billingAddress && hasAddr(f.billingAddress)
+            ? {}
+            : addressesFor(c)),
         }));
     }
   }, [customers, form, id, organization, second]);
@@ -396,24 +649,34 @@ export function DocForm({ kind, recurring = false }) {
   // Credit notes / vendor credits: load the party's invoices or bills to reference.
   useEffect(() => {
     if (!isCN || !form?.customer) return setCustInvoices([]);
-    api.get(linkApi, { params: { [party]: form.customer } }).then((r) => setCustInvoices(r.data.filter((i) => i.status !== "draft")));
+    api
+      .get(linkApi, { params: { [party]: form.customer } })
+      .then((r) => setCustInvoices(r.data.filter((i) => i.status !== "draft")));
   }, [isCN, form?.customer, linkApi, party]);
 
   // The next number depends on the branch (branches can have their own series).
   const branchForNumber = form?.branch || "";
   useEffect(() => {
     if (id || recurring || kind.numberAuto === false) return;
-    api.get(`${kind.api}/next-number`, { params: { branch: branchForNumber || undefined } }).then((r) => setAutoNumber(r.data.number));
+    api
+      .get(`${kind.api}/next-number`, {
+        params: { branch: branchForNumber || undefined },
+      })
+      .then((r) => setAutoNumber(r.data.number));
   }, [id, recurring, kind, branchForNumber]);
 
-  const totals = useMemo(
-    () => {
-      if (!form) return null;
-      const home = branches.find((b) => b._id === form.branch)?.state || organization?.state; // GST from the branch's state
-      return calc(form.lineItems, home, form.placeOfSupply || home, form.shippingCharge, form.adjustment);
-    },
-    [form, organization, branches]
-  );
+  const totals = useMemo(() => {
+    if (!form) return null;
+    const home =
+      branches.find((b) => b._id === form.branch)?.state || organization?.state; // GST from the branch's state
+    return calc(
+      form.lineItems,
+      home,
+      form.placeOfSupply || home,
+      form.shippingCharge,
+      form.adjustment,
+    );
+  }, [form, organization, branches]);
 
   if (!form) return <Spinner />;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
@@ -432,16 +695,31 @@ export function DocForm({ kind, recurring = false }) {
       ...addressesFor(c),
       placeOfSupply: c?.placeOfSupply || organization?.state || "",
       paymentTerms: c ? c.paymentTerms : form.paymentTerms,
-      second: second?.terms && c ? addDays(form.date, c.paymentTerms) : form.second,
+      second:
+        second?.terms && c ? addDays(form.date, c.paymentTerms) : form.second,
     });
   };
 
-  const setLine = (i, patch) => setForm({ ...form, lineItems: form.lineItems.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
+  const setLine = (i, patch) =>
+    setForm({
+      ...form,
+      lineItems: form.lineItems.map((l, j) =>
+        j === i ? { ...l, ...patch } : l,
+      ),
+    });
   const pickItem = (i, itemId) => {
     const it = items.find((x) => x._id === itemId);
     if (!it) return setLine(i, { item: "" });
     const rate = isVendor ? it.purchaseRate || it.rate : it.rate;
-    setLine(i, { item: it._id, name: it.name, description: it.description, hsnSac: it.hsnSac, unit: it.unit, rate, taxRate: it.taxRate });
+    setLine(i, {
+      item: it._id,
+      name: it.name,
+      description: it.description,
+      hsnSac: it.hsnSac,
+      unit: it.unit,
+      rate,
+      taxRate: it.taxRate,
+    });
   };
 
   const submit = async (status) => {
@@ -456,16 +734,22 @@ export function DocForm({ kind, recurring = false }) {
         [kind.refField]: form.ref,
         date: form.date,
         placeOfSupply: form.placeOfSupply,
-        ...(!isVendor && form.billingAddress ? { billingAddress: form.billingAddress, shipTo: form.shipTo } : {}),
+        ...(!isVendor && form.billingAddress
+          ? { billingAddress: form.billingAddress, shipTo: form.shipTo }
+          : {}),
         shippingCharge: Number(form.shippingCharge || 0),
         adjustment: Number(form.adjustment || 0),
-        ...(isVendor && form.adjustmentAccount ? { adjustmentAccount: form.adjustmentAccount } : {}),
+        ...(isVendor && form.adjustmentAccount
+          ? { adjustmentAccount: form.adjustmentAccount }
+          : {}),
         ...(ledgerKind ? { ledger: form.ledger || "" } : {}),
         customerNotes: form.customerNotes,
         terms: form.terms,
         branch: form.branch || null,
         warehouse: form.warehouse || null,
-        ...(cur !== "INR" ? { exchangeRate: Number(form.exchangeRate) || undefined } : {}),
+        ...(cur !== "INR"
+          ? { exchangeRate: Number(form.exchangeRate) || undefined }
+          : {}),
         status,
         lineItems: form.lineItems
           .filter((l) => l.name.trim())
@@ -473,9 +757,10 @@ export function DocForm({ kind, recurring = false }) {
             ...l,
             item: l.item || null,
             quantity: Number(l.quantity),
-            rate: Number(l.rate),
+            rate: netRate(l),
             discount: Number(l.discount || 0),
             taxRate: Number(l.taxRate || 0),
+            ...(l.taxInclusive ? { grossRate: Number(l.grossRate) || 0 } : {}),
           })),
       };
       if (second) body[second.field] = form.second || null;
@@ -485,19 +770,38 @@ export function DocForm({ kind, recurring = false }) {
         body.reason = form.reason;
       }
       if (form.purchaseOrder) body.purchaseOrder = form.purchaseOrder;
-      if (kind.key === "purchaseOrder" && form.sellerOrders?.length) body.sellerOrders = form.sellerOrders;
+      if (kind.key === "purchaseOrder" && form.sellerOrders?.length)
+        body.sellerOrders = form.sellerOrders;
       if (recurring) {
         const sc = form.sched;
         const template = { ...body };
-        ["date", "status", "dueDate", "paymentTerms", "invoiceNumber"].forEach((k) => delete template[k]);
+        ["date", "status", "dueDate", "paymentTerms", "invoiceNumber"].forEach(
+          (k) => delete template[k],
+        );
         if (kind.key === "bill") template.billNumber = form.number || "RB";
-        const rbody = { kind: kind.key, name: sc.name, every: Number(sc.every), unit: sc.unit, startDate: sc.startDate, endDate: sc.never ? null : sc.endDate, paymentTerms: Number(form.paymentTerms || 0), createAs: sc.createAs, template };
-        const { data } = id ? await api.put(`/recurring/${id}`, rbody) : await api.post("/recurring", rbody);
-        toast(`Recurring ${kind.label.toLowerCase()} ${id ? "updated" : "created"}`);
+        const rbody = {
+          kind: kind.key,
+          name: sc.name,
+          every: Number(sc.every),
+          unit: sc.unit,
+          startDate: sc.startDate,
+          endDate: sc.never ? null : sc.endDate,
+          paymentTerms: Number(form.paymentTerms || 0),
+          createAs: sc.createAs,
+          template,
+        };
+        const { data } = id
+          ? await api.put(`/recurring/${id}`, rbody)
+          : await api.post("/recurring", rbody);
+        toast(
+          `Recurring ${kind.label.toLowerCase()} ${id ? "updated" : "created"}`,
+        );
         navigate(`/recurring-${kind.key}s/${data._id}`);
         return;
       }
-      const { data } = id ? await api.put(`${kind.api}/${id}`, body) : await api.post(kind.api, body);
+      const { data } = id
+        ? await api.put(`${kind.api}/${id}`, body)
+        : await api.post(kind.api, body);
       if (canPayNow && paidNow.on && status !== "draft" && data.total > 0) {
         try {
           const { data: p } = await api.post("/payments", {
@@ -509,9 +813,14 @@ export function DocForm({ kind, recurring = false }) {
             reference: paidNow.reference || "",
             allocations: [{ invoice: data._id, amount: data.total }],
           });
-          toast(`${kind.label} ${data.invoiceNumber} created and marked paid (${p.paymentNumber})`);
+          toast(
+            `${kind.label} ${data.invoiceNumber} created and marked paid (${p.paymentNumber})`,
+          );
         } catch (e) {
-          toast(`${kind.label} created, but the payment wasn't recorded: ${errMsg(e)}`, "error");
+          toast(
+            `${kind.label} created, but the payment wasn't recorded: ${errMsg(e)}`,
+            "error",
+          );
         }
       } else toast(`${kind.label} ${id ? "updated" : "created"}`);
       navigate(`${kind.route}/${data._id}`);
@@ -522,12 +831,30 @@ export function DocForm({ kind, recurring = false }) {
   };
 
   const isDraft = !recurring && (!id || form.status === "draft");
-  const title = recurring ? (id ? `Edit ${form.sched.name}` : `New Recurring ${kind.label}`) : id ? `Edit ${form.number}` : form.copiedFrom ? `New ${kind.label} (copy of ${form.copiedFrom})` : `New ${kind.label}`;
-  const setSched = (k, v) => setForm({ ...form, sched: { ...form.sched, [k]: v } });
+  const title = recurring
+    ? id
+      ? `Edit ${form.sched.name}`
+      : `New Recurring ${kind.label}`
+    : id
+      ? `Edit ${form.number}`
+      : form.copiedFrom
+        ? `New ${kind.label} (copy of ${form.copiedFrom})`
+        : `New ${kind.label}`;
+  const setSched = (k, v) =>
+    setForm({ ...form, sched: { ...form.sched, [k]: v } });
 
   return (
     <>
-      <PageHeader title={title} back={recurring ? `/recurring-${kind.key}s${id ? `/${id}` : ""}` : id ? `${kind.route}/${id}` : kind.route} />
+      <PageHeader
+        title={title}
+        back={
+          recurring
+            ? `/recurring-${kind.key}s${id ? `/${id}` : ""}`
+            : id
+              ? `${kind.route}/${id}`
+              : kind.route
+        }
+      />
       <form className="card form doc-form" onSubmit={(e) => e.preventDefault()}>
         <div className="form-grid">
           <Field label={isVendor ? "Vendor Name" : "Customer Name"} required>
@@ -540,7 +867,11 @@ export function DocForm({ kind, recurring = false }) {
                 placeholder={`Search ${party}s by name, GSTIN or phone`}
                 emptyText={`No ${party} found — add one with +`}
               />
-              <Link to={`${partyApi}/new`} className="btn btn-sm" title={`New ${party}`}>
+              <Link
+                to={`${partyApi}/new`}
+                className="btn btn-sm"
+                title={`New ${party}`}
+              >
                 <Icon name="plus" size={14} />
               </Link>
             </div>
@@ -553,19 +884,41 @@ export function DocForm({ kind, recurring = false }) {
                 </span>
               )}
               <span>
-                {isVendor ? "Payables" : "Receivables"}: <b>{money(isVendor ? customer.payables : customer.receivables, customer.currency)}</b>
+                {isVendor ? "Payables" : "Receivables"}:{" "}
+                <b>
+                  {money(
+                    isVendor ? customer.payables : customer.receivables,
+                    customer.currency,
+                  )}
+                </b>
               </span>
             </div>
           )}
           {customer && !isVendor && form.billingAddress && (
             <div className="row-2 addr-row">
-              <AddressEditor label="Bill To" value={form.billingAddress} onChange={(v) => setForm({ ...form, billingAddress: v })} />
-              <AddressEditor label="Ship To" withName value={form.shipTo} onChange={(v) => setForm({ ...form, shipTo: v })} />
+              <AddressEditor
+                label="Bill To"
+                value={form.billingAddress}
+                onChange={(v) => setForm({ ...form, billingAddress: v })}
+              />
+              <AddressEditor
+                label="Ship To"
+                withName
+                value={form.shipTo}
+                onChange={(v) => setForm({ ...form, shipTo: v })}
+              />
             </div>
           )}
           <div className={ledgerKind ? "row-2" : ""}>
-            <Field label={isVendor ? "Source of Supply" : "Place of Supply"} required>
-              <select value={form.placeOfSupply} onChange={set("placeOfSupply")} required>
+            <Field
+              label={isVendor ? "Source of Supply" : "Place of Supply"}
+              required
+            >
+              <select
+                value={form.placeOfSupply}
+                onChange={set("placeOfSupply")}
+                required
+              >
                 <option value="">Select</option>
                 {STATES.map(([c, n]) => (
                   <option key={c} value={c}>
@@ -576,11 +929,22 @@ export function DocForm({ kind, recurring = false }) {
             </Field>
             {ledgerKind && (
               <Field
-                label={ledgerKind === "sales" ? "Sales Ledger" : "Purchase Ledger"}
+                label={
+                  ledgerKind === "sales" ? "Sales Ledger" : "Purchase Ledger"
+                }
                 hint={
                   ledgers.length ? undefined : (
                     <>
-                      None yet — <Link to={ledgerKind === "sales" ? "/sales-ledgers" : "/purchase-ledgers"}>create ledgers</Link>
+                      None yet —{" "}
+                      <Link
+                        to={
+                          ledgerKind === "sales"
+                            ? "/sales-ledgers"
+                            : "/purchase-ledgers"
+                        }
+                      >
+                        create ledgers
+                      </Link>
                     </>
                   )
                 }
@@ -589,10 +953,25 @@ export function DocForm({ kind, recurring = false }) {
                   value={form.ledger || ""}
                   onChange={(e) =>
                     // Picking a ledger on a sales document moves every line to it (imported lines can carry their own).
-                    setForm({ ...form, ledger: e.target.value, ...(ledgerKind === "sales" ? { lineItems: form.lineItems.map(({ account, ...l }) => l) } : {}) })
+                    setForm({
+                      ...form,
+                      ledger: e.target.value,
+                      ...(ledgerKind === "sales"
+                        ? {
+                            lineItems: form.lineItems.map(
+                              ({ account, ...l }) =>
+                                CARTAGE[account] ? { ...l, account } : l,
+                            ),
+                          }
+                        : {}),
+                    })
                   }
                 >
-                  <option value="">{ledgerKind === "sales" ? "Sales (default)" : "Cost of Goods Sold (default)"}</option>
+                  <option value="">
+                    {ledgerKind === "sales"
+                      ? "Sales (default)"
+                      : "Cost of Goods Sold (default)"}
+                  </option>
                   {/* Grouped under their master ledger (e.g. "Invoice Sale"), then the rest. */}
                   {ledgerGroups.map((g) => (
                     <optgroup key={g._id} label={g.name}>
@@ -606,13 +985,20 @@ export function DocForm({ kind, recurring = false }) {
                     </optgroup>
                   ))}
                   {(() => {
-                    const rest = ledgers.filter((a) => !ledgerGroups.some((g) => g.members.includes(a.code)));
+                    const rest = ledgers.filter(
+                      (a) =>
+                        !ledgerGroups.some((g) => g.members.includes(a.code)),
+                    );
                     const opts = rest.map((a) => (
                       <option key={a.code} value={a.code}>
                         {a.name}
                       </option>
                     ));
-                    return ledgerGroups.length && rest.length ? <optgroup label="Other ledgers">{opts}</optgroup> : opts;
+                    return ledgerGroups.length && rest.length ? (
+                      <optgroup label="Other ledgers">{opts}</optgroup>
+                    ) : (
+                      opts
+                    );
                   })()}
                   {expenseLedgers.length > 0 && (
                     <optgroup label="Expense ledgers (direct and indirect expenses)">
@@ -623,15 +1009,23 @@ export function DocForm({ kind, recurring = false }) {
                       ))}
                     </optgroup>
                   )}
-                  {form.ledger && !ledgers.some((a) => a.code === form.ledger) && !expenseLedgers.some((a) => a.code === form.ledger) && <option value={form.ledger}>(current ledger)</option>}
+                  {form.ledger &&
+                    !ledgers.some((a) => a.code === form.ledger) &&
+                    !expenseLedgers.some((a) => a.code === form.ledger) && (
+                      <option value={form.ledger}>(current ledger)</option>
+                    )}
                 </select>
               </Field>
             )}
           </div>
-          {(branches.some((b) => b.active) || (stockKind && warehouses.length > 1)) && (
+          {(branches.some((b) => b.active) ||
+            (stockKind && warehouses.length > 1)) && (
             <div className="row-2">
               {branches.some((b) => b.active) && (
-                <Field label="Branch" hint="GST is worked out from the branch's state">
+                <Field
+                  label="Branch"
+                  hint="GST is worked out from the branch's state"
+                >
                   <select value={form.branch || ""} onChange={set("branch")}>
                     <option value="">Head Office</option>
                     {branches
@@ -646,10 +1040,19 @@ export function DocForm({ kind, recurring = false }) {
               )}
               {stockKind && warehouses.length > 1 && (
                 <Field label="Warehouse">
-                  <select value={form.warehouse || ""} onChange={set("warehouse")}>
-                    <option value="">{warehouses.find((w) => w.primary)?.name || "Primary"} (primary)</option>
+                  <select
+                    value={form.warehouse || ""}
+                    onChange={set("warehouse")}
+                  >
+                    <option value="">
+                      {warehouses.find((w) => w.primary)?.name || "Primary"}{" "}
+                      (primary)
+                    </option>
                     {warehouses
-                      .filter((w) => !w.primary && (w.active || w._id === form.warehouse))
+                      .filter(
+                        (w) =>
+                          !w.primary && (w.active || w._id === form.warehouse),
+                      )
                       .map((w) => (
                         <option key={w._id} value={w._id}>
                           {w.name}
@@ -662,19 +1065,41 @@ export function DocForm({ kind, recurring = false }) {
           )}
           {cur !== "INR" && (
             <div className="row-2">
-              <Field label={`Exchange Rate (1 ${cur} = ₹)`} required hint={curRate ? `Current rate in Settings: ₹${curRate}` : `Add ${cur} in Settings → Currencies`}>
-                <input type="number" step="0.0001" min="0" value={form.exchangeRate && form.exchangeRate !== 1 ? form.exchangeRate : curRate || ""} onChange={set("exchangeRate")} />
+              <Field
+                label={`Exchange Rate (1 ${cur} = ₹)`}
+                required
+                hint={
+                  curRate
+                    ? `Current rate in Settings: ₹${curRate}`
+                    : `Add ${cur} in Settings → Currencies`
+                }
+              >
+                <input
+                  type="number"
+                  step="0.0001"
+                  min="0"
+                  value={
+                    form.exchangeRate && form.exchangeRate !== 1
+                      ? form.exchangeRate
+                      : curRate || ""
+                  }
+                  onChange={set("exchangeRate")}
+                />
               </Field>
               <div className="customer-chip" style={{ alignSelf: "end" }}>
                 <span>
-                  Amounts are in <b>{cur}</b>. Your books record them in ₹ at this rate.
+                  Amounts are in <b>{cur}</b>. Your books record them in ₹ at
+                  this rate.
                 </span>
               </div>
             </div>
           )}
           {isCN && (
             <div className="row-2">
-              <Field label={isVendor ? "Bill#" : "Invoice#"} hint={`The ${linkKey} this credit is for (optional)`}>
+              <Field
+                label={isVendor ? "Bill#" : "Invoice#"}
+                hint={`The ${linkKey} this credit is for (optional)`}
+              >
                 <select value={form.invoice} onChange={set("invoice")}>
                   <option value="">None</option>
                   {custInvoices.map((i) => (
@@ -686,9 +1111,11 @@ export function DocForm({ kind, recurring = false }) {
               </Field>
               <Field label="Reason">
                 <select value={form.reason} onChange={set("reason")}>
-                  {(isVendor ? VENDOR_CREDIT_REASONS : CREDIT_REASONS).map((r) => (
-                    <option key={r}>{r}</option>
-                  ))}
+                  {(isVendor ? VENDOR_CREDIT_REASONS : CREDIT_REASONS).map(
+                    (r) => (
+                      <option key={r}>{r}</option>
+                    ),
+                  )}
                 </select>
               </Field>
             </div>
@@ -696,13 +1123,29 @@ export function DocForm({ kind, recurring = false }) {
           {recurring && (
             <>
               <Field label="Profile Name" required>
-                <input required value={form.sched.name} onChange={(e) => setSched("name", e.target.value)} placeholder="e.g. Monthly AMC" />
+                <input
+                  required
+                  value={form.sched.name}
+                  onChange={(e) => setSched("name", e.target.value)}
+                  placeholder="e.g. Monthly AMC"
+                />
               </Field>
               <div className="row-3">
                 <Field label="Repeat Every" required>
                   <div className="inline-add">
-                    <input type="number" min="1" max="365" required value={form.sched.every} onChange={(e) => setSched("every", e.target.value)} style={{ width: 80 }} />
-                    <select value={form.sched.unit} onChange={(e) => setSched("unit", e.target.value)}>
+                    <input
+                      type="number"
+                      min="1"
+                      max="365"
+                      required
+                      value={form.sched.every}
+                      onChange={(e) => setSched("every", e.target.value)}
+                      style={{ width: 80 }}
+                    />
+                    <select
+                      value={form.sched.unit}
+                      onChange={(e) => setSched("unit", e.target.value)}
+                    >
                       {[
                         ["day", "Day(s)"],
                         ["week", "Week(s)"],
@@ -716,18 +1159,52 @@ export function DocForm({ kind, recurring = false }) {
                     </select>
                   </div>
                 </Field>
-                <Field label="Start On" required hint={form.sched.startDate < isoDate() ? "Past dates are created straight away" : ""}>
-                  <input type="date" required value={form.sched.startDate} onChange={(e) => setSched("startDate", e.target.value)} />
+                <Field
+                  label="Start On"
+                  required
+                  hint={
+                    form.sched.startDate < isoDate()
+                      ? "Past dates are created straight away"
+                      : ""
+                  }
+                >
+                  <input
+                    type="date"
+                    required
+                    value={form.sched.startDate}
+                    onChange={(e) => setSched("startDate", e.target.value)}
+                  />
                 </Field>
                 <Field label="Ends On">
                   {form.sched.never ? (
                     <label className="check">
-                      <input type="checkbox" checked onChange={() => setSched("never", false)} /> Never expires
+                      <input
+                        type="checkbox"
+                        checked
+                        onChange={() => setSched("never", false)}
+                      />{" "}
+                      Never expires
                     </label>
                   ) : (
                     <div className="inline-add">
-                      <input type="date" required value={form.sched.endDate} min={form.sched.startDate} onChange={(e) => setSched("endDate", e.target.value)} />
-                      <button type="button" className="btn btn-sm" title="Never expires" onClick={() => setForm({ ...form, sched: { ...form.sched, never: true, endDate: "" } })}>
+                      <input
+                        type="date"
+                        required
+                        value={form.sched.endDate}
+                        min={form.sched.startDate}
+                        onChange={(e) => setSched("endDate", e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        title="Never expires"
+                        onClick={() =>
+                          setForm({
+                            ...form,
+                            sched: { ...form.sched, never: true, endDate: "" },
+                          })
+                        }
+                      >
                         <Icon name="x" size={14} />
                       </button>
                     </div>
@@ -737,84 +1214,137 @@ export function DocForm({ kind, recurring = false }) {
               <div className="row-3">
                 {kind.key !== "expense" && (
                   <Field label="Payment Terms">
-                    <select value={form.paymentTerms} onChange={set("paymentTerms")}>
+                    <select
+                      value={form.paymentTerms}
+                      onChange={set("paymentTerms")}
+                    >
                       {PAYMENT_TERMS.map(([v, l]) => (
                         <option key={v} value={v}>
                           {l}
                         </option>
                       ))}
-                      {!PAYMENT_TERMS.some(([v]) => v === Number(form.paymentTerms)) && <option value={form.paymentTerms}>Net {form.paymentTerms}</option>}
+                      {!PAYMENT_TERMS.some(
+                        ([v]) => v === Number(form.paymentTerms),
+                      ) && (
+                        <option value={form.paymentTerms}>
+                          Net {form.paymentTerms}
+                        </option>
+                      )}
                     </select>
                   </Field>
                 )}
                 <Field label={`Create ${kind.plural} As`}>
-                  <select value={form.sched.createAs} onChange={(e) => setSched("createAs", e.target.value)}>
-                    <option value="final">{kind.key === "invoice" ? "Sent (unpaid)" : "Open"}</option>
+                  <select
+                    value={form.sched.createAs}
+                    onChange={(e) => setSched("createAs", e.target.value)}
+                  >
+                    <option value="final">
+                      {kind.key === "invoice" ? "Sent (unpaid)" : "Open"}
+                    </option>
                     <option value="draft">Draft</option>
                   </select>
                 </Field>
                 {kind.key === "bill" && (
-                  <Field label="Bill# Prefix" hint="Each bill gets this plus its date, e.g. RENT-20261101">
-                    <input value={form.number} onChange={set("number")} placeholder="RB" />
+                  <Field
+                    label="Bill# Prefix"
+                    hint="Each bill gets this plus its date, e.g. RENT-20261101"
+                  >
+                    <input
+                      value={form.number}
+                      onChange={set("number")}
+                      placeholder="RB"
+                    />
                   </Field>
                 )}
               </div>
             </>
           )}
           {!recurring && (
-          <>
-          <div className="row-2">
-            <Field label={kind.numberLabel} required>
-              <input
-                value={form.number}
-                required={kind.numberAuto === false}
-                placeholder={kind.numberAuto === false ? "" : autoNumber || "Auto-generated"}
-                onChange={set("number")}
-              />
-            </Field>
-            <Field label={kind.refLabel}>
-              <input value={form.ref} onChange={set("ref")} />
-            </Field>
-          </div>
-          <div className={second?.terms ? "row-3" : "row-2"}>
-            <Field label={kind.dateLabel} required>
-              <input
-                type="date"
-                required
-                value={form.date}
-                onChange={(e) =>
-                  setForm({ ...form, date: e.target.value, second: second?.terms ? addDays(e.target.value, form.paymentTerms) : form.second })
-                }
-              />
-            </Field>
-            {second?.terms && (
-              <Field label="Terms">
-                <select
-                  value={form.paymentTerms}
-                  onChange={(e) => setForm({ ...form, paymentTerms: e.target.value, second: addDays(form.date, e.target.value) })}
-                >
-                  {PAYMENT_TERMS.map(([v, l]) => (
-                    <option key={v} value={v}>
-                      {l}
-                    </option>
-                  ))}
-                  {!PAYMENT_TERMS.some(([v]) => v === Number(form.paymentTerms)) && <option value={form.paymentTerms}>Net {form.paymentTerms}</option>}
-                </select>
-              </Field>
-            )}
-            {second && (
-              <Field label={second.label} required={second.required}>
-                <input type="date" required={second.required} value={form.second} min={form.date} onChange={set("second")} />
-              </Field>
-            )}
-          </div>
-          </>
+            <>
+              <div className="row-2">
+                <Field label={kind.numberLabel} required>
+                  <input
+                    value={form.number}
+                    required={kind.numberAuto === false}
+                    placeholder={
+                      kind.numberAuto === false
+                        ? ""
+                        : autoNumber || "Auto-generated"
+                    }
+                    onChange={set("number")}
+                  />
+                </Field>
+                <Field label={kind.refLabel}>
+                  <input value={form.ref} onChange={set("ref")} />
+                </Field>
+              </div>
+              <div className={second?.terms ? "row-3" : "row-2"}>
+                <Field label={kind.dateLabel} required>
+                  <input
+                    type="date"
+                    required
+                    value={form.date}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        date: e.target.value,
+                        second: second?.terms
+                          ? addDays(e.target.value, form.paymentTerms)
+                          : form.second,
+                      })
+                    }
+                  />
+                </Field>
+                {second?.terms && (
+                  <Field label="Terms">
+                    <select
+                      value={form.paymentTerms}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          paymentTerms: e.target.value,
+                          second: addDays(form.date, e.target.value),
+                        })
+                      }
+                    >
+                      {PAYMENT_TERMS.map(([v, l]) => (
+                        <option key={v} value={v}>
+                          {l}
+                        </option>
+                      ))}
+                      {!PAYMENT_TERMS.some(
+                        ([v]) => v === Number(form.paymentTerms),
+                      ) && (
+                        <option value={form.paymentTerms}>
+                          Net {form.paymentTerms}
+                        </option>
+                      )}
+                    </select>
+                  </Field>
+                )}
+                {second && (
+                  <Field label={second.label} required={second.required}>
+                    <input
+                      type="date"
+                      required={second.required}
+                      value={form.second}
+                      min={form.date}
+                      onChange={set("second")}
+                    />
+                  </Field>
+                )}
+              </div>
+            </>
           )}
         </div>
 
         <h4 className="section-title">
           Item Table
-          <span className="muted small">{totals.inter ? "Inter-state supply · IGST" : "Intra-state supply · CGST + SGST"}</span>
+          <span className="muted small">
+            {totals.inter
+              ? "Inter-state supply · IGST"
+              : "Intra-state supply · CGST + SGST"}
+          </span>
         </h4>
         <div className="line-table-wrap">
           <table className="line-table">
@@ -833,23 +1363,64 @@ export function DocForm({ kind, recurring = false }) {
               {form.lineItems.map((l, i) => (
                 <tr key={i}>
                   <td>
-                    <SearchSelect className="item-pick" value={l.item} options={itemOpts} onChange={(v) => pickItem(i, v)} placeholder="Search items by name, SKU or HSN…" emptyText="No item found — type the name below" />
-                    <input placeholder="Item name" value={l.name} onChange={(e) => setLine(i, { name: e.target.value })} required={i === 0} />
-                    <input className="small-input" placeholder="Description" value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} />
-                    <input className="small-input mono" placeholder="HSN/SAC" value={l.hsnSac} onChange={(e) => setLine(i, { hsnSac: e.target.value })} />
+                    <SearchSelect
+                      className="item-pick"
+                      value={l.item}
+                      options={itemOpts}
+                      onChange={(v) => pickItem(i, v)}
+                      placeholder="Search items by name, SKU or HSN…"
+                      emptyText="No item found — type the name below"
+                    />
+                    <input
+                      placeholder="Item name"
+                      value={l.name}
+                      onChange={(e) => setLine(i, { name: e.target.value })}
+                      required={i === 0}
+                    />
+                    <input
+                      className="small-input"
+                      placeholder="Description"
+                      value={l.description}
+                      onChange={(e) =>
+                        setLine(i, { description: e.target.value })
+                      }
+                    />
+                    <input
+                      className="small-input mono"
+                      placeholder="HSN/SAC"
+                      value={l.hsnSac}
+                      onChange={(e) => setLine(i, { hsnSac: e.target.value })}
+                    />
+                    {CARTAGE[l.account] && (
+                      <span className="pill pill-blue small">
+                        {CARTAGE[l.account]}
+                      </span>
+                    )}
                   </td>
                   <td data-label="Quantity">
-                    <input type="number" step="any" min="0" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} />
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={l.quantity}
+                      onChange={(e) => setLine(i, { quantity: e.target.value })}
+                    />
                     {l.unit && <span className="muted small">{l.unit}</span>}
                     {(() => {
                       const it = l.item && items.find((x) => x._id === l.item);
                       if (!it || !it.trackInventory) return null;
                       const pw = warehouses.find((w) => w.primary)?._id;
                       const wid = form.warehouse || pw;
-                      const here = warehouses.length > 1 && wid ? it.byWarehouse?.[wid] ?? 0 : it.stockOnHand;
+                      const here =
+                        warehouses.length > 1 && wid
+                          ? (it.byWarehouse?.[wid] ?? 0)
+                          : it.stockOnHand;
                       const short = Number(l.quantity || 0) > here;
                       return (
-                        <div className={`small ${short ? "text-danger" : "muted"}`} title="Stock on hand">
+                        <div
+                          className={`small ${short ? "text-danger" : "muted"}`}
+                          title="Stock on hand"
+                        >
                           Stock: {here} {it.unit}
                           {warehouses.length > 1 && " here"}
                         </div>
@@ -857,13 +1428,47 @@ export function DocForm({ kind, recurring = false }) {
                     })()}
                   </td>
                   <td data-label={`Rate (${cur})`}>
-                    <input type="number" step="0.01" min="0" value={l.rate} onChange={(e) => setLine(i, { rate: e.target.value })} />
+                    {l.taxInclusive ? (
+                      <>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={l.grossRate}
+                          onChange={(e) =>
+                            setLine(i, { grossRate: e.target.value })
+                          }
+                          title="Amount including GST"
+                        />
+                        <div className="muted small">
+                          incl. GST · {amount(netRate(l))} + GST
+                        </div>
+                      </>
+                    ) : (
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={l.rate}
+                        onChange={(e) => setLine(i, { rate: e.target.value })}
+                      />
+                    )}
                   </td>
                   <td data-label="Discount %">
-                    <input type="number" step="0.01" min="0" max="100" value={l.discount} onChange={(e) => setLine(i, { discount: e.target.value })} />
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      value={l.discount}
+                      onChange={(e) => setLine(i, { discount: e.target.value })}
+                    />
                   </td>
                   <td data-label="GST">
-                    <select value={l.taxRate} onChange={(e) => setLine(i, { taxRate: e.target.value })}>
+                    <select
+                      value={l.taxRate}
+                      onChange={(e) => setLine(i, { taxRate: e.target.value })}
+                    >
                       {GST_RATES.map((r) => (
                         <option key={r} value={r}>
                           {r}%
@@ -871,14 +1476,21 @@ export function DocForm({ kind, recurring = false }) {
                       ))}
                     </select>
                   </td>
-                  <td className="num strong" data-label="Amount">{amount(lineAmount(l))}</td>
+                  <td className="num strong" data-label="Amount">
+                    {amount(lineAmount(l))}
+                  </td>
                   <td className="line-del">
                     {form.lineItems.length > 1 && (
                       <button
                         type="button"
                         className="icon-btn"
                         title="Remove row"
-                        onClick={() => setForm({ ...form, lineItems: form.lineItems.filter((_, j) => j !== i) })}
+                        onClick={() =>
+                          setForm({
+                            ...form,
+                            lineItems: form.lineItems.filter((_, j) => j !== i),
+                          })
+                        }
                       >
                         <Icon name="x" size={16} />
                       </button>
@@ -889,17 +1501,50 @@ export function DocForm({ kind, recurring = false }) {
             </tbody>
           </table>
         </div>
-        <button type="button" className="link-btn add-row" onClick={() => setForm({ ...form, lineItems: [...form.lineItems, blankLine()] })}>
+        <button
+          type="button"
+          className="link-btn add-row"
+          onClick={() =>
+            setForm({ ...form, lineItems: [...form.lineItems, blankLine()] })
+          }
+        >
           <Icon name="plus" size={14} /> Add another line
         </button>
+        {["invoice", "bill", "creditNote", "vendorCredit"].includes(
+          kind.key,
+        ) && (
+          <CartageAdder
+            onAdd={(line) =>
+              setForm((f) => ({
+                ...f,
+                lineItems: [
+                  ...f.lineItems.filter((x) => x.name.trim() || x.item),
+                  line,
+                ],
+              }))
+            }
+          />
+        )}
         {kind.key === "purchaseOrder" && !recurring && (
           <SellerOrderAdder
             vendor={form.customer}
             onAdd={(r) =>
               setForm((f) => ({
                 ...f,
-                lineItems: [...f.lineItems.filter((l) => l.name.trim()), ...r.lineItems.map((l) => ({ ...blankLine(), ...l }))],
-                sellerOrders: [...(f.sellerOrders || []).filter((x) => x.order !== String(r.order.id)), { order: String(r.order.id), seller: String(r.seller.id), amount: r.amount }],
+                lineItems: [
+                  ...f.lineItems.filter((l) => l.name.trim()),
+                  ...r.lineItems.map((l) => ({ ...blankLine(), ...l })),
+                ],
+                sellerOrders: [
+                  ...(f.sellerOrders || []).filter(
+                    (x) => x.order !== String(r.order.id),
+                  ),
+                  {
+                    order: String(r.order.id),
+                    seller: String(r.seller.id),
+                    amount: r.amount,
+                  },
+                ],
               }))
             }
           />
@@ -907,8 +1552,17 @@ export function DocForm({ kind, recurring = false }) {
 
         <div className="invoice-bottom">
           <div className="stack">
-            <Field label={isVendor ? "Notes" : "Customer Notes"} hint={isVendor ? "Internal note, not shown to the vendor" : undefined}>
-              <textarea rows={3} value={form.customerNotes} onChange={set("customerNotes")} />
+            <Field
+              label={isVendor ? "Notes" : "Customer Notes"}
+              hint={
+                isVendor ? "Internal note, not shown to the vendor" : undefined
+              }
+            >
+              <textarea
+                rows={3}
+                value={form.customerNotes}
+                onChange={set("customerNotes")}
+              />
             </Field>
             {!isVendor && (
               <Field label="Terms & Conditions">
@@ -938,11 +1592,17 @@ export function DocForm({ kind, recurring = false }) {
                     <span>{amount(t.sgst)}</span>
                   </div>
                 </div>
-              )
+              ),
             )}
             <div className="tot-row">
               <span>Shipping Charges</span>
-              <input type="number" step="0.01" min="0" value={form.shippingCharge} onChange={set("shippingCharge")} />
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.shippingCharge}
+                onChange={set("shippingCharge")}
+              />
             </div>
             {kind.key === "bill" && (
               <TdsRow
@@ -955,17 +1615,31 @@ export function DocForm({ kind, recurring = false }) {
                 onCreated={(a) => setTdsLedgers([...tdsLedgers, a])}
               />
             )}
-            {!(kind.key === "bill" && tdsLedgers.some((a) => a.code === form.adjustmentAccount)) && (
+            {!(
+              kind.key === "bill" &&
+              tdsLedgers.some((a) => a.code === form.adjustmentAccount)
+            ) && (
               <div className="tot-row">
                 <span>Adjustment</span>
-                <input type="number" step="0.01" value={form.adjustment} onChange={set("adjustment")} />
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.adjustment}
+                  onChange={set("adjustment")}
+                />
               </div>
             )}
-            {kind.key === "bill" && !form.adjustmentAccount && Number(form.adjustment) <= -1 && (
-              <div className="small text-amber" style={{ textAlign: "right" }}>
-                A deduction here goes to Rounding & Adjustments. If it's TDS, use the TDS row above so it goes to the TDS ledger.
-              </div>
-            )}
+            {kind.key === "bill" &&
+              !form.adjustmentAccount &&
+              Number(form.adjustment) <= -1 && (
+                <div
+                  className="small text-amber"
+                  style={{ textAlign: "right" }}
+                >
+                  A deduction here goes to Rounding & Adjustments. If it's TDS,
+                  use the TDS row above so it goes to the TDS ledger.
+                </div>
+              )}
             <div className="tot-row tot-total">
               <span>Total ({cur})</span>
               <span>{amount(totals.total)}</span>
@@ -976,12 +1650,24 @@ export function DocForm({ kind, recurring = false }) {
         {canPayNow && (
           <div className="card" style={{ marginTop: 16, padding: 14 }}>
             <label className="check">
-              <input type="checkbox" checked={paidNow.on} onChange={(e) => setPaidNow({ ...paidNow, on: e.target.checked })} /> Payment received now (cash sale / paid on the spot)
+              <input
+                type="checkbox"
+                checked={paidNow.on}
+                onChange={(e) =>
+                  setPaidNow({ ...paidNow, on: e.target.checked })
+                }
+              />{" "}
+              Payment received now (cash sale / paid on the spot)
             </label>
             {paidNow.on && (
               <div className="row-3" style={{ marginTop: 10 }}>
                 <Field label="Mode">
-                  <select value={paidNow.mode} onChange={(e) => setPaidNow({ ...paidNow, mode: e.target.value })}>
+                  <select
+                    value={paidNow.mode}
+                    onChange={(e) =>
+                      setPaidNow({ ...paidNow, mode: e.target.value })
+                    }
+                  >
                     {PAYMENT_MODES.map(([v, l]) => (
                       <option key={v} value={v}>
                         {l}
@@ -989,12 +1675,28 @@ export function DocForm({ kind, recurring = false }) {
                     ))}
                   </select>
                 </Field>
-                <BankAccountSelect label="Received In" value={paidNow.bankAccount} mode={paidNow.mode} onChange={(v) => setPaidNow({ ...paidNow, bankAccount: v })} />
+                <BankAccountSelect
+                  label="Received In"
+                  value={paidNow.bankAccount}
+                  mode={paidNow.mode}
+                  onChange={(v) => setPaidNow({ ...paidNow, bankAccount: v })}
+                />
                 <Field label="Reference#">
-                  <input value={paidNow.reference} onChange={(e) => setPaidNow({ ...paidNow, reference: e.target.value })} />
+                  <input
+                    value={paidNow.reference}
+                    onChange={(e) =>
+                      setPaidNow({ ...paidNow, reference: e.target.value })
+                    }
+                  />
                 </Field>
-                <p className="muted small" style={{ gridColumn: "1 / -1", margin: 0 }}>
-                  The full total ({amount(totals.total)}) is recorded as received against this invoice. For a walk-in buyer, pick a customer named "Cash" — you can change the customer later from the invoice's ⋯ menu.
+                <p
+                  className="muted small"
+                  style={{ gridColumn: "1 / -1", margin: 0 }}
+                >
+                  The full total ({amount(totals.total)}) is recorded as
+                  received against this invoice. For a walk-in buyer, pick a
+                  customer named "Cash" — you can change the customer later from
+                  the invoice's ⋯ menu.
                 </p>
               </div>
             )}
@@ -1004,12 +1706,23 @@ export function DocForm({ kind, recurring = false }) {
         <div className="form-footer sticky-footer">
           {isDraft ? (
             kind.saveButtons.map((b) => (
-              <button key={b.status} type="button" className={`btn ${b.primary ? "btn-primary" : ""}`} disabled={busy} onClick={() => submit(b.status)}>
+              <button
+                key={b.status}
+                type="button"
+                className={`btn ${b.primary ? "btn-primary" : ""}`}
+                disabled={busy}
+                onClick={() => submit(b.status)}
+              >
                 {b.label}
               </button>
             ))
           ) : (
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => submit(undefined)}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy}
+              onClick={() => submit(undefined)}
+            >
               Save
             </button>
           )}
@@ -1024,9 +1737,30 @@ export function DocForm({ kind, recurring = false }) {
 
 /* ======================= Printable document ======================= */
 const hasAddr = (a) => Boolean(a && (a.street || a.city || a.pincode));
-const addrOf = (a = {}) => ({ street: a.street || "", city: a.city || "", state: a.state || "", pincode: a.pincode || "", country: a.country || "India" });
+const addrOf = (a = {}) => ({
+  street: a.street || "",
+  city: a.city || "",
+  state: a.state || "",
+  pincode: a.pincode || "",
+  country: a.country || "India",
+});
 // Bill To / Ship To from a customer's saved addresses.
-const addressesFor = (c) => (c ? { billingAddress: addrOf(c.billingAddress), shipTo: { name: c.displayName, phone: c.phone || "", ...addrOf(hasAddr(c.shippingAddress) ? c.shippingAddress : c.billingAddress) } } : { billingAddress: addrOf(), shipTo: { name: "", phone: "", ...addrOf() } });
+const addressesFor = (c) =>
+  c
+    ? {
+        billingAddress: addrOf(c.billingAddress),
+        shipTo: {
+          name: c.displayName,
+          phone: c.phone || "",
+          ...addrOf(
+            hasAddr(c.shippingAddress) ? c.shippingAddress : c.billingAddress,
+          ),
+        },
+      }
+    : {
+        billingAddress: addrOf(),
+        shipTo: { name: "", phone: "", ...addrOf() },
+      };
 
 function AddressEditor({ label, value, onChange, withName }) {
   const [open, setOpen] = useState(false);
@@ -1035,27 +1769,51 @@ function AddressEditor({ label, value, onChange, withName }) {
     <div className="addr-box">
       <div className="addr-head">
         <span className="doc-label">{label}</span>
-        <button type="button" className="link-btn small" onClick={() => setOpen(!open)}>
+        <button
+          type="button"
+          className="link-btn small"
+          onClick={() => setOpen(!open)}
+        >
           {open ? "Done" : "Change"}
         </button>
       </div>
       {!open ? (
         <div className="doc-small">
           {withName && value.name && <strong>{value.name}</strong>}
-          {hasAddr(value) ? <Addr a={value} /> : <div className="muted">No address</div>}
+          {hasAddr(value) ? (
+            <Addr a={value} />
+          ) : (
+            <div className="muted">No address</div>
+          )}
           {withName && value.phone && <div>{value.phone}</div>}
         </div>
       ) : (
         <div className="addr-edit">
           {withName && (
             <div className="row-2">
-              <input placeholder="Name" value={value.name || ""} onChange={set("name")} />
-              <input placeholder="Phone" value={value.phone || ""} onChange={set("phone")} />
+              <input
+                placeholder="Name"
+                value={value.name || ""}
+                onChange={set("name")}
+              />
+              <input
+                placeholder="Phone"
+                value={value.phone || ""}
+                onChange={set("phone")}
+              />
             </div>
           )}
-          <input placeholder="Street address" value={value.street || ""} onChange={set("street")} />
+          <input
+            placeholder="Street address"
+            value={value.street || ""}
+            onChange={set("street")}
+          />
           <div className="row-3">
-            <input placeholder="City" value={value.city || ""} onChange={set("city")} />
+            <input
+              placeholder="City"
+              value={value.city || ""}
+              onChange={set("city")}
+            />
             <select value={value.state || ""} onChange={set("state")}>
               <option value="">State</option>
               {STATES.map(([c, n]) => (
@@ -1064,7 +1822,11 @@ function AddressEditor({ label, value, onChange, withName }) {
                 </option>
               ))}
             </select>
-            <input placeholder="Pincode" value={value.pincode || ""} onChange={set("pincode")} />
+            <input
+              placeholder="Pincode"
+              value={value.pincode || ""}
+              onChange={set("pincode")}
+            />
           </div>
         </div>
       )}
@@ -1073,14 +1835,38 @@ function AddressEditor({ label, value, onChange, withName }) {
 }
 
 function Addr({ a = {} }) {
-  const lines = [a.street, a.city, [stateName(a.state), a.pincode].filter(Boolean).join(" "), a.country].filter(Boolean);
+  const lines = [
+    a.street,
+    a.city,
+    [stateName(a.state), a.pincode].filter(Boolean).join(" "),
+    a.country,
+  ].filter(Boolean);
   return lines.map((l, i) => <div key={i}>{l}</div>);
 }
 
-export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, balance, extraTotals = [], extraInfo = [], partyLabel = "Bill To" }) {
+export function DocPaper({
+  doc,
+  org: baseOrg,
+  title,
+  number,
+  meta = [],
+  ribbon,
+  balance,
+  extraTotals = [],
+  extraInfo = [],
+  partyLabel = "Bill To",
+}) {
   const { branches } = useLocations();
   const br = doc.branch && branches.find((b) => b._id === doc.branch);
-  const org = br ? { ...baseOrg, gstin: br.gstin || baseOrg.gstin, address: br.address, phone: br.phone || baseOrg.phone, email: br.email || baseOrg.email } : baseOrg;
+  const org = br
+    ? {
+        ...baseOrg,
+        gstin: br.gstin || baseOrg.gstin,
+        address: br.address,
+        phone: br.phone || baseOrg.phone,
+        email: br.email || baseOrg.email,
+      }
+    : baseOrg;
   const taxRows = {};
   doc.lineItems.forEach((l) => {
     if (!l.taxRate) return;
@@ -1091,7 +1877,9 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
   });
   return (
     <div className="invoice-doc">
-      {ribbon && <div className={`ribbon ribbon-${ribbon.cls}`}>{ribbon.text}</div>}
+      {ribbon && (
+        <div className={`ribbon ribbon-${ribbon.cls}`}>{ribbon.text}</div>
+      )}
       {doc.einvoice?.status === "generated" && (
         <div className="doc-irn">
           <div>
@@ -1099,7 +1887,9 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
               <b>IRN:</b> <span className="mono">{doc.einvoice.irn}</span>
             </div>
             <div>
-              <b>Ack No:</b> {doc.einvoice.ackNo} &nbsp; <b>Ack Date:</b> {doc.einvoice.ackDate && new Date(doc.einvoice.ackDate).toLocaleString("en-IN")}
+              <b>Ack No:</b> {doc.einvoice.ackNo} &nbsp; <b>Ack Date:</b>{" "}
+              {doc.einvoice.ackDate &&
+                new Date(doc.einvoice.ackDate).toLocaleString("en-IN")}
             </div>
             {doc.eway?.status === "generated" && (
               <div>
@@ -1107,16 +1897,19 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
               </div>
             )}
           </div>
-          {doc.einvoice.signedQr && <QrImage text={doc.einvoice.signedQr} size={96} />}
+          {doc.einvoice.signedQr && (
+            <QrImage text={doc.einvoice.signedQr} size={96} />
+          )}
         </div>
       )}
-      {doc.einvoice?.status !== "generated" && doc.eway?.status === "generated" && (
-        <div className="doc-irn">
-          <div>
-            <b>E-Way Bill No:</b> {doc.eway.ewbNo}
+      {doc.einvoice?.status !== "generated" &&
+        doc.eway?.status === "generated" && (
+          <div className="doc-irn">
+            <div>
+              <b>E-Way Bill No:</b> {doc.eway.ewbNo}
+            </div>
           </div>
-        </div>
-      )}
+        )}
       <div className="doc-head">
         <div className="doc-brand">
           <div>
@@ -1147,7 +1940,9 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
           <strong>{doc.customerName || doc.vendorName}</strong>
           <div className="doc-small">
             <Addr a={doc.billingAddress} />
-            {(doc.customerGstin || doc.vendorGstin) && <div>GSTIN {doc.customerGstin || doc.vendorGstin}</div>}
+            {(doc.customerGstin || doc.vendorGstin) && (
+              <div>GSTIN {doc.customerGstin || doc.vendorGstin}</div>
+            )}
           </div>
         </div>
         {!doc.vendorName && hasAddr(doc.shipTo) && (
@@ -1171,7 +1966,9 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
                 </tr>
               ))}
             <tr>
-              <td>{doc.vendorName ? "Source of Supply" : "Place of Supply"} :</td>
+              <td>
+                {doc.vendorName ? "Source of Supply" : "Place of Supply"} :
+              </td>
               <td>
                 {stateName(doc.placeOfSupply)} ({doc.placeOfSupply})
               </td>
@@ -1205,14 +2002,20 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
               <td className="di-no">{i + 1}</td>
               <td className="di-name">
                 <strong>{l.name}</strong>
-                {l.description && <div className="doc-small">{l.description}</div>}
-                {l.discount > 0 && <div className="doc-small">Discount {l.discount}%</div>}
+                {l.description && (
+                  <div className="doc-small">{l.description}</div>
+                )}
+                {l.discount > 0 && (
+                  <div className="doc-small">Discount {l.discount}%</div>
+                )}
               </td>
               <td data-label="HSN/SAC">{l.hsnSac}</td>
               <td className="num" data-label="Qty">
                 {l.quantity} {l.unit}
               </td>
-              <td className="num" data-label="Rate">{amount(l.rate)}</td>
+              <td className="num" data-label="Rate">
+                {amount(l.rate)}
+              </td>
               {doc.isInterState ? (
                 <td className="num" data-label="IGST">
                   {amount(l.igst)}
@@ -1230,7 +2033,9 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
                   </td>
                 </>
               )}
-              <td className="num di-amt" data-label="Amount">{amount(l.amount)}</td>
+              <td className="num di-amt" data-label="Amount">
+                {amount(l.amount)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -1239,10 +2044,17 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
       <div className="doc-foot">
         <div className="doc-words">
           <div className="doc-label">Total In Words</div>
-          <em>{doc.currency && doc.currency !== "INR" ? inWords(doc.total).replace("Indian Rupee", doc.currency).replace("Paise", "Cents") : inWords(doc.total)}</em>
+          <em>
+            {doc.currency && doc.currency !== "INR"
+              ? inWords(doc.total)
+                  .replace("Indian Rupee", doc.currency)
+                  .replace("Paise", "Cents")
+              : inWords(doc.total)}
+          </em>
           {doc.currency && doc.currency !== "INR" && (
             <div className="doc-small">
-              Amounts in {doc.currency}. Exchange rate 1 {doc.currency} = ₹{doc.exchangeRate} (₹{amount(doc.total * doc.exchangeRate)})
+              Amounts in {doc.currency}. Exchange rate 1 {doc.currency} = ₹
+              {doc.exchangeRate} (₹{amount(doc.total * doc.exchangeRate)})
             </div>
           )}
           {extraInfo.map(([k, v]) => (
@@ -1293,7 +2105,7 @@ export function DocPaper({ doc, org: baseOrg, title, number, meta = [], ribbon, 
                     <td>{amount(t.sgst)}</td>
                   </tr>,
                 ]
-              )
+              ),
             )}
             {doc.shippingCharge ? (
               <tr>
@@ -1363,26 +2175,48 @@ export function MiniTable({ title, columns, rows, empty = "None" }) {
   );
 }
 
-export const dateCol = (label = "Date", field = "date") => ({ label, render: (r) => date(r[field]) });
-export const statusCol = { label: "Status", render: (r) => <Status value={r.displayStatus || r.status} /> };
-export const moneyCol = (label, field) => ({ label, num: true, render: (r) => money(r[field]) });
+export const dateCol = (label = "Date", field = "date") => ({
+  label,
+  render: (r) => date(r[field]),
+});
+export const statusCol = {
+  label: "Status",
+  render: (r) => <Status value={r.displayStatus || r.status} />,
+};
+export const moneyCol = (label, field) => ({
+  label,
+  num: true,
+  render: (r) => money(r[field]),
+});
 
 // TDS deducted on a bill (commission, freight, professional fees…): taken off what the vendor is owed and credited
 // to a TDS payable ledger (the bill's adjustment, posted to that ledger). TDS is on the taxable value, not on GST.
 const TDS_SECTIONS = [
-  ["194C", "Contractors / freight (194C)", 2, "1% for an individual or HUF, 2% for others"],
+  [
+    "194C",
+    "Contractors / freight (194C)",
+    2,
+    "1% for an individual or HUF, 2% for others",
+  ],
   ["194H", "Commission or brokerage (194H)", 2, ""],
-  ["194J", "Professional or technical fees (194J)", 10, "2% for technical services"],
+  [
+    "194J",
+    "Professional or technical fees (194J)",
+    10,
+    "2% for technical services",
+  ],
   ["194I", "Rent (194I)", 10, "2% for plant and machinery"],
   ["194Q", "Purchase of goods (194Q)", 0.1, ""],
 ];
 function TdsRow({ form, setForm, taxable, ledgers, rate, setRate, onCreated }) {
   const on = ledgers.some((a) => a.code === form.adjustmentAccount);
   const [busy, setBusy] = useState(false);
-  const amountOf = (r) => -Math.round(((Number(taxable) || 0) * (Number(r) || 0)) / 100);
+  const amountOf = (r) =>
+    -Math.round(((Number(taxable) || 0) * (Number(r) || 0)) / 100);
   // Keep the TDS in step with the bill's taxable value.
   useEffect(() => {
-    if (on && rate !== "") setForm((f) => ({ ...f, adjustment: amountOf(rate) }));
+    if (on && rate !== "")
+      setForm((f) => ({ ...f, adjustment: amountOf(rate) }));
   }, [taxable, rate, on]);
   const pick = async (v) => {
     if (!v) return setForm({ ...form, adjustmentAccount: "", adjustment: 0 });
@@ -1392,8 +2226,16 @@ function TdsRow({ form, setForm, taxable, ledgers, rate, setRate, onCreated }) {
       const sec = TDS_SECTIONS.find((x) => x[0] === v.slice(4));
       setBusy(true);
       try {
-        const { data } = await api.post("/accounts", { name: `TDS Payable u/s ${sec[0]}`, group: "Other Current Liability", description: `TDS deducted on ${sec[1].replace(/ \(.*\)/, "").toLowerCase()} (${sec[0]})` });
-        const a = { code: String(data._id || data.code), name: data.name, group: data.group };
+        const { data } = await api.post("/accounts", {
+          name: `TDS Payable u/s ${sec[0]}`,
+          group: "Other Current Liability",
+          description: `TDS deducted on ${sec[1].replace(/ \(.*\)/, "").toLowerCase()} (${sec[0]})`,
+        });
+        const a = {
+          code: String(data._id || data.code),
+          name: data.name,
+          group: data.group,
+        };
         onCreated(a);
         code = a.code;
       } catch (e) {
@@ -1404,7 +2246,9 @@ function TdsRow({ form, setForm, taxable, ledgers, rate, setRate, onCreated }) {
       r = String(sec[2]);
     }
     if (r === "") {
-      const name = (ledgers.find((a) => a.code === code)?.name || "").toUpperCase();
+      const name = (
+        ledgers.find((a) => a.code === code)?.name || ""
+      ).toUpperCase();
       r = String(TDS_SECTIONS.find((x) => name.includes(x[0]))?.[2] ?? "");
     }
     setRate(r);
@@ -1414,7 +2258,12 @@ function TdsRow({ form, setForm, taxable, ledgers, rate, setRate, onCreated }) {
     return (
       <div className="tot-row">
         <span>TDS</span>
-        <select value="" disabled={busy} onChange={(e) => pick(e.target.value)} style={{ maxWidth: 210 }}>
+        <select
+          value=""
+          disabled={busy}
+          onChange={(e) => pick(e.target.value)}
+          style={{ maxWidth: 210 }}
+        >
           <option value="">No TDS</option>
           {ledgers.map((a) => (
             <option key={a.code} value={a.code}>
@@ -1422,7 +2271,9 @@ function TdsRow({ form, setForm, taxable, ledgers, rate, setRate, onCreated }) {
             </option>
           ))}
           <optgroup label="Create a TDS ledger">
-            {TDS_SECTIONS.filter((x) => !ledgers.some((a) => a.name.toUpperCase().includes(x[0]))).map((x) => (
+            {TDS_SECTIONS.filter(
+              (x) => !ledgers.some((a) => a.name.toUpperCase().includes(x[0])),
+            ).map((x) => (
               <option key={x[0]} value={`new:${x[0]}`}>
                 + {x[1]}
               </option>
@@ -1432,12 +2283,20 @@ function TdsRow({ form, setForm, taxable, ledgers, rate, setRate, onCreated }) {
       </div>
     );
   if (!on) return null;
-  const sec = TDS_SECTIONS.find((x) => (ledgers.find((a) => a.code === form.adjustmentAccount)?.name || "").toUpperCase().includes(x[0]));
+  const sec = TDS_SECTIONS.find((x) =>
+    (ledgers.find((a) => a.code === form.adjustmentAccount)?.name || "")
+      .toUpperCase()
+      .includes(x[0]),
+  );
   return (
     <>
       <div className="tot-row">
         <span>TDS</span>
-        <select value={form.adjustmentAccount} onChange={(e) => pick(e.target.value)} style={{ maxWidth: 210 }}>
+        <select
+          value={form.adjustmentAccount}
+          onChange={(e) => pick(e.target.value)}
+          style={{ maxWidth: 210 }}
+        >
           <option value="">No TDS</option>
           {ledgers.map((a) => (
             <option key={a.code} value={a.code}>
@@ -1451,12 +2310,128 @@ function TdsRow({ form, setForm, taxable, ledgers, rate, setRate, onCreated }) {
           Rate % on {amount(taxable)}
           {sec?.[3] ? <div className="muted small">{sec[3]}</div> : null}
         </span>
-        <input type="number" step="0.01" min="0" value={rate} onChange={(e) => setRate(e.target.value)} style={{ maxWidth: 90 }} />
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={rate}
+          onChange={(e) => setRate(e.target.value)}
+          style={{ maxWidth: 90 }}
+        />
       </div>
       <div className="tot-row">
         <span>TDS deducted</span>
-        <input type="number" step="1" value={form.adjustment} onChange={(e) => (setRate(""), setForm({ ...form, adjustment: e.target.value }))} />
+        <input
+          type="number"
+          step="1"
+          value={form.adjustment}
+          onChange={(e) => (
+            setRate(""),
+            setForm({ ...form, adjustment: e.target.value })
+          )}
+        />
       </div>
     </>
+  );
+}
+
+// Cartage as a line of its own, posted to one of the two cartage ledgers: GST added on top (exclusive), or the
+// amount entered already includes GST (inclusive) and the tax is worked out of it.
+function CartageAdder({ onAdd }) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ kind: "cartage_excl", amount: "", taxRate: 18 });
+  if (!open)
+    return (
+      <button
+        type="button"
+        className="link-btn add-row"
+        style={{ marginLeft: 16 }}
+        onClick={() => setOpen(true)}
+      >
+        <Icon name="plus" size={14} /> Add cartage
+      </button>
+    );
+  const amt = Number(f.amount) || 0;
+  const r = Number(f.taxRate) || 0;
+  const incl = f.kind === "cartage_incl";
+  const net = incl ? amt / (1 + r / 100) : amt;
+  const add = () => {
+    if (!(amt > 0)) return toast("Enter the cartage amount", "error");
+    onAdd({
+      ...blankLine(),
+      name: "Cartage",
+      hsnSac: "9965",
+      quantity: 1,
+      rate: Math.round(net * 10000) / 10000,
+      taxRate: r,
+      account: f.kind,
+      ...(incl ? { taxInclusive: true, grossRate: amt } : {}),
+    });
+    setF({ ...f, amount: "" });
+    setOpen(false);
+  };
+  return (
+    <div
+      className="card"
+      style={{
+        margin: "8px 0",
+        padding: 12,
+        display: "flex",
+        gap: 10,
+        flexWrap: "wrap",
+        alignItems: "flex-end",
+      }}
+    >
+      <Field label="Cartage">
+        <select
+          value={f.kind}
+          onChange={(e) => setF({ ...f, kind: e.target.value })}
+        >
+          <option value="cartage_excl">
+            Exclusive of GST (GST added on top)
+          </option>
+          <option value="cartage_incl">
+            Inclusive of GST (amount includes GST)
+          </option>
+        </select>
+      </Field>
+      <Field label={incl ? "Amount incl. GST" : "Amount before GST"}>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={f.amount}
+          onChange={(e) => setF({ ...f, amount: e.target.value })}
+          style={{ width: 130 }}
+          autoFocus
+        />
+      </Field>
+      <Field label="GST">
+        <select
+          value={f.taxRate}
+          onChange={(e) => setF({ ...f, taxRate: e.target.value })}
+        >
+          {GST_RATES.map((x) => (
+            <option key={x} value={x}>
+              {x}%
+            </option>
+          ))}
+        </select>
+      </Field>
+      <div className="small muted" style={{ paddingBottom: 8 }}>
+        {amt > 0 &&
+          `${incl ? "Before GST" : "GST"} ₹${(incl ? net : (amt * r) / 100).toFixed(2)} · total ₹${(incl ? amt : amt * (1 + r / 100)).toFixed(2)}`}
+      </div>
+      <button type="button" className="btn btn-primary btn-sm" onClick={add}>
+        Add
+      </button>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        onClick={() => setOpen(false)}
+      >
+        Cancel
+      </button>
+    </div>
   );
 }
