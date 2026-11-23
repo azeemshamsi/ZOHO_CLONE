@@ -318,11 +318,13 @@ const QUOTES = {
       .map((x) => {
         const ch = x.charges || {};
         const total = num(ch.total_forward_charges ?? ch.total_charges ?? ch.total ?? x.total_charges ?? x.rate ?? x.charge);
+        const txt = (v) => (v == null ? "" : typeof v === "object" ? Object.values(v).filter((y) => typeof y !== "object").join(" ") : String(v));
+        const ed = x.expected_delivery;
         return {
-          courierId: String(x.carrier_id || x.id),
-          name: x.carrier_name || x.carrier_code || x.name || String(x.carrier_id),
+          courierId: txt(x.carrier_id || x.id),
+          name: txt(x.carrier_name || x.carrier_code || x.name || x.carrier_id),
           charge: total > 0 ? r2(total + num(x.platform_fee)) : null,
-          etd: x.expected_delivery?.delivery || "",
+          etd: txt(ed && typeof ed === "object" ? ed.delivery || ed.edd || "" : ed),
           breakdown: total > 0 ? { freight: r2(num(ch.forward_freight_charges)), cod_charge: r2(num(ch.cod_charges)) } : undefined,
         };
       })
@@ -334,7 +336,7 @@ const QUOTES = {
         .catch(() => null);
       const sl = sv?.data?.result?.serviceability_results || [];
       if (sl.length) {
-        const opts = sl.map((x) => ({ courierId: String(x.carrier_id), name: x.carrier_name, charge: null, etd: "" }));
+        const opts = sl.map((x) => ({ courierId: String(x.carrier_id), name: String(x.carrier_name || x.carrier_id), charge: null, etd: "" }));
         const want = String(acc.options?.carrierId || "");
         const pick = opts.find((o) => o.courierId === want) || opts[0];
         return { serviceable: true, courierName: pick.name, courierId: pick.courierId, options: opts.slice(0, 8), note: `Velocity serves ${q.to}; no rate given (${short(data?.message || data?.error || data).slice(0, 120)})` };
@@ -382,7 +384,12 @@ async function quoteAccount(acc, s) {
   if (!s.cod && acc.options?.codOnly) return { ...out, serviceable: false, note: `${acc.name} is set up for COD only` };
   try {
     const r = await withTimeout(QUOTES[acc.carrier](acc, q), 15000);
-    Object.assign(out, { serviceable: r.serviceable ?? null, etd: r.etd || "", note: r.note || "", courierName: r.courierName, courierId: r.courierId, options: r.options });
+    // Courier APIs can answer with objects where text is expected: only text reaches the page.
+    const t = (v) => (v == null ? "" : typeof v === "object" ? JSON.stringify(v).slice(0, 200) : String(v));
+    const opts = Array.isArray(r.options)
+      ? r.options.map((o) => ({ ...o, courierId: t(o.courierId), name: t(o.name), etd: t(o.etd), charge: Number(o.charge) > 0 ? Number(o.charge) : null }))
+      : undefined;
+    Object.assign(out, { serviceable: r.serviceable ?? null, etd: t(r.etd), note: t(r.note), courierName: r.courierName == null ? undefined : t(r.courierName), courierId: r.courierId == null ? undefined : t(r.courierId), options: opts });
     if (r.charge > 0) Object.assign(out, { charge: r.charge, source: "api", breakdown: r.breakdown, zone: r.zone });
   } catch (e) {
     out.note = `Couldn't check: ${e.message}`;
