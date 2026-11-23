@@ -1010,3 +1010,18 @@ tr.clickable:hover td { background: var(--brand-50); }
 /* Manufacturing journal (like Tally): components left, made items + additional costs right */
 .mfg-grid { display: grid; gap: 18px; }
 @media (min-width: 1000px) { .mfg-grid { grid-template-columns: 1fr 1fr; } }
+
+/* Stock Room: product photo grid */
+.sr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+.sr-card { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.sr-img { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 1 / 1; width: 100%; padding: 0; border: 0; background: var(--bg-soft, #f1f5f9); color: var(--muted, #94a3b8); cursor: pointer; }
+.sr-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sr-qty { position: absolute; top: 10px; right: 10px; padding: 3px 9px; border-radius: 6px; font-size: 12px; font-weight: 700; color: #fff; }
+.sr-qty.in { background: #166534; }
+.sr-qty.out { background: #c2410c; }
+.sr-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 2px; }
+.sr-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-hist { margin-top: 8px; align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }
+.sr-thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; }
+@media (max-width: 600px) { .sr-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } }
+.text-green { color: #15803d; }

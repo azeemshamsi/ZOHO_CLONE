@@ -33,6 +33,7 @@ import { ShopifySettings } from "./pages/ShopifySettings";
 import { PackageTypes } from "./pages/PackageTypes";
 import { ShippingCalculator } from "./pages/ShippingCalculator";
 import { Inventory } from "./pages/Inventory";
+import StockRoom from "./pages/StockRoom";
 import { ReturnScan } from "./pages/ReturnScan";
 import { AwbScan } from "./pages/AwbScan";
 import { GstCompliance } from "./pages/GstCompliance";
@@ -120,6 +121,7 @@ export default function App() {
           <Route path="package-types" element={<PackageTypes />} />
           <Route path="shipping-calculator" element={<ShippingCalculator />} />
           <Route path="inventory" element={<Inventory />} />
+          <Route path="stock-room" element={<StockRoom />} />
           <Route path="returns-scan" element={<ReturnScan />} />
           <Route path="awb-scan" element={<AwbScan />} />
           <Route path="no-access" element={<div className="card center no-access"><h3>No pages to show</h3><p className="muted">Your role doesn't include any part of the app yet. Ask an admin.</p></div>} />

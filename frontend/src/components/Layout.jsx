@@ -12,6 +12,7 @@ import DeviceGate from "./DeviceGate";
 const NAV = [
   { to: "/", label: "Home", icon: "home", end: true },
   { to: "/inbox", label: "Inbox", icon: "chat", mod: "inbox" },
+  { to: "/stock-room", label: "Stock Room", icon: "grid", mod: "stock_room", feature: "stockRoom" },
   {
     label: "Items",
     icon: "box",
@@ -149,6 +150,7 @@ const PATH_MODULES = [
   ["/shipping-calculator", ["store_shipping", "store_settings", "store_orders"]],
   ["/sellers", "store_sellers"],
   ["/inventory", "inventory"],
+  ["/stock-room", "stock_room"],
   ["/gst", "gst"],
   ["/itc", ["gst", "purchases", "accountant", "reports"]],
   ["/flipkart-sales", "sales.flipkart"],
@@ -255,7 +257,7 @@ export default function Layout() {
   const sellerPage = location.pathname === "/seller" || location.pathname.startsWith("/seller/");
   const level = sellerPage ? (isSeller ? "full" : "none") : isSuper ? (user?.superadmin ? "full" : "none") : mod ? levelOf(user, mod) : "full";
   // A marketplace seller sees only their dashboard.
-  const nav = isSeller ? [{ to: "/seller", label: "My orders & stock", icon: "bag", end: true }] : NAV.filter((n) => (n.to === "/" ? can(user, HOME_MODS) : !n.mod || can(user, n.mod)));
+  const nav = isSeller ? [{ to: "/seller", label: "My orders & stock", icon: "bag", end: true }] : NAV.filter((n) => (n.feature ? organization?.[n.feature] !== false : true) && (n.to === "/" ? can(user, HOME_MODS) : !n.mod || can(user, n.mod)));
   // Roles without the dashboard (e.g. Returns Desk) go straight to their page.
   if (location.pathname === "/" && level === "none" && homeFor(user) !== "/") return <Navigate to={homeFor(user)} replace />;
 

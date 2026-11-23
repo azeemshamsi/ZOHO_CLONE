@@ -380,6 +380,7 @@ app.use(
   require("./routes/shopify"),
 );
 app.use("/api/stock", auth, permit("inventory"), require("./routes/stock"));
+app.use("/api/stock-room", auth, permit("stock_room"), require("./routes/stockRoom"));
 app.use("/api/import", auth, permit("settings"), require("./routes/import"));
 app.use("/api/users", auth, permit("settings"), require("./routes/users"));
 app.use("/api/roles", auth, permit("settings"), require("./routes/roles"));

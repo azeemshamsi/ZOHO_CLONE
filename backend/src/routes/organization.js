@@ -55,6 +55,16 @@ router.put(
   }),
 );
 
+// Stock Room tab on / off.
+router.put(
+  "/stock-room",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ stockRoom: Joi.boolean().required() }), req.body);
+    await Organization.updateOne({ _id: req.org }, { $set: { stockRoom: d.stockRoom } });
+    res.send({ stockRoom: d.stockRoom });
+  }),
+);
+
 // Stock valuation: FIFO, or Average Cost like Tally (closing stock and cost of goods sold follow it).
 router.put(
   "/costing",

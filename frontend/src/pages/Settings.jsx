@@ -222,6 +222,7 @@ export default function Settings() {
         </div>
       </form>
       <StockCosting />
+      <StockRoomToggle />
       <EmailSettings />
       <AiSettings />
       <ReminderSettings />
@@ -746,6 +747,44 @@ function DeleteCompany() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// The Stock Room tab (photo view of stock on hand) on or off for everyone in the company.
+function StockRoomToggle() {
+  const { organization, setOrganization } = useAuth();
+  const [on, setOn] = useState(organization?.stockRoom !== false);
+  const [busy, setBusy] = useState(false);
+  const save = async (val) => {
+    setBusy(true);
+    try {
+      await api.put("/organization/stock-room", { stockRoom: val });
+      setOn(val);
+      setOrganization?.({ ...organization, stockRoom: val });
+      toast(val ? "Stock Room turned on" : "Stock Room turned off");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="card form" style={{ marginTop: 18 }}>
+      <h4 className="section-title" style={{ marginTop: 0 }}>
+        Stock Room
+      </h4>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={busy}
+          onChange={(e) => save(e.target.checked)}
+        />{" "}
+        <b>Show the Stock Room tab</b> — product photos with the stock on hand
+        and each product's recent ins and outs, straight from the inventory.
+        Give it to a user with the <b>Stock Room</b> role (alone or with
+        others) in Users.
+      </label>
     </div>
   );
 }
