@@ -2,8 +2,12 @@
  * Inventory engine. Like the ledger, stock is derived from documents on every request:
  *   in  — opening stock, bills, credit notes (sales returns), positive adjustments
  *   out — invoices, vendor credits (returns to vendor), negative adjustments
- * Costing is FIFO. Selling more than is in stock is allowed; the shortfall is costed at the last
+ * Costing is FIFO by default. Selling more than is in stock is allowed; the shortfall is costed at the last
  * known unit cost and trued up against Cost of Goods Sold when stock next comes in.
+ * costing "average" values stock like Tally's Average Cost: for each financial year (April–March), one rate per
+ * item = (value at the start of the year + everything bought in the year) / (quantity at the start + quantity
+ * bought), up to the report date. Sales and other stock out are costed at that rate, so closing stock = quantity
+ * × rate, as in Tally's Stock Summary.
  *
  * For every document the engine returns `inv`: the change in inventory value it caused. The
  * ledger posts exactly that to the Inventory Asset account, so the account always equals the
@@ -11,51 +15,190 @@
  */
 const { round2 } = require("./http");
 
-const ORDER = { opening: 0, bill: 1, adjIn: 2, creditNote: 3, transfer: 4, invoice: 5, vendorCredit: 6, adjOut: 7, adjValue: 8 };
+const ORDER = {
+  opening: 0,
+  bill: 1,
+  adjIn: 2,
+  creditNote: 3,
+  transfer: 4,
+  invoice: 5,
+  vendorCredit: 6,
+  adjOut: 7,
+  adjValue: 8,
+};
 const live = (d) => !["draft", "void"].includes(d.status);
 
-function computeStock({ items, invoices = [], creditNotes = [], bills = [], vendorCredits = [], adjustments = [], transfers = [], primary = null, to = null }) {
+// Financial year an entry falls in (India: April–March), e.g. 2026 for 1 Apr 2026 – 31 Mar 2027.
+const fyOf = (d) => {
+  const t = new Date(new Date(d).getTime() + 5.5 * 3600000);
+  return t.getUTCMonth() >= 3 ? t.getUTCFullYear() : t.getUTCFullYear() - 1;
+};
+
+function computeStock({
+  items,
+  invoices = [],
+  creditNotes = [],
+  bills = [],
+  vendorCredits = [],
+  adjustments = [],
+  transfers = [],
+  primary = null,
+  to = null,
+  costing = "fifo",
+}) {
   // Quantities are also tracked per warehouse; no warehouse = the primary warehouse.
   const W = (w) => (w ? String(w) : primary ? String(primary) : "primary");
-  const tracked = new Map(items.filter((i) => i.trackInventory).map((i) => [String(i._id), i]));
+  const tracked = new Map(
+    items.filter((i) => i.trackInventory).map((i) => [String(i._id), i]),
+  );
   const events = [];
   const push = (e) => tracked.has(e.item) && events.push(e);
 
   for (const it of tracked.values()) {
     if (it.openingStock)
-      events.push({ kind: "opening", item: String(it._id), wh: W(it.openingWarehouse), date: it.openingStockDate || it.createdAt, seq: 0, qty: it.openingStock, cost: round2(it.openingStock * (it.openingStockRate || 0)), doc: { type: "Opening Stock", id: it._id, number: "", party: "" } });
+      events.push({
+        kind: "opening",
+        item: String(it._id),
+        wh: W(it.openingWarehouse),
+        date: it.openingStockDate || it.createdAt,
+        seq: 0,
+        qty: it.openingStock,
+        cost: round2(it.openingStock * (it.openingStockRate || 0)),
+        doc: { type: "Opening Stock", id: it._id, number: "", party: "" },
+      });
   }
-  const lines = (d, cb) => (d.lineItems || []).forEach((l, i) => l.item && cb(String(l.item), l, i));
+  const lines = (d, cb) =>
+    (d.lineItems || []).forEach((l, i) => l.item && cb(String(l.item), l, i));
   const meta = (type, d, number, party) => ({ type, id: d._id, number, party });
   for (const b of bills.filter(live))
-    lines(b, (item, l) => push({ kind: "bill", item, wh: W(b.warehouse), date: b.date, seq: b.createdAt, qty: l.quantity, cost: l.amount * (Number(b.exchangeRate) || 1), doc: meta("Bill", b, b.billNumber, b.vendorName) }));
+    lines(b, (item, l) =>
+      push({
+        kind: "bill",
+        item,
+        wh: W(b.warehouse),
+        date: b.date,
+        seq: b.createdAt,
+        qty: l.quantity,
+        cost: l.amount * (Number(b.exchangeRate) || 1),
+        doc: meta("Bill", b, b.billNumber, b.vendorName),
+      }),
+    );
   for (const c of creditNotes.filter(live))
-    lines(c, (item, l) => push({ kind: "creditNote", item, wh: W(c.warehouse), date: c.date, seq: c.createdAt, qty: l.quantity, doc: meta("Credit Note", c, c.number, c.customerName) }));
+    lines(c, (item, l) =>
+      push({
+        kind: "creditNote",
+        item,
+        wh: W(c.warehouse),
+        date: c.date,
+        seq: c.createdAt,
+        qty: l.quantity,
+        doc: meta("Credit Note", c, c.number, c.customerName),
+      }),
+    );
   for (const i of invoices.filter(live))
-    lines(i, (item, l) => push({ kind: "invoice", item, wh: W(i.warehouse), date: i.date, seq: i.createdAt, qty: l.quantity, doc: meta("Invoice", i, i.invoiceNumber, i.customerName) }));
+    lines(i, (item, l) =>
+      push({
+        kind: "invoice",
+        item,
+        wh: W(i.warehouse),
+        date: i.date,
+        seq: i.createdAt,
+        qty: l.quantity,
+        doc: meta("Invoice", i, i.invoiceNumber, i.customerName),
+      }),
+    );
   for (const v of vendorCredits.filter(live))
-    lines(v, (item, l) => push({ kind: "vendorCredit", item, wh: W(v.warehouse), date: v.date, seq: v.createdAt, qty: l.quantity, doc: meta("Vendor Credit", v, v.number, v.vendorName) }));
+    lines(v, (item, l) =>
+      push({
+        kind: "vendorCredit",
+        item,
+        wh: W(v.warehouse),
+        date: v.date,
+        seq: v.createdAt,
+        qty: l.quantity,
+        doc: meta("Vendor Credit", v, v.number, v.vendorName),
+      }),
+    );
   for (const a of adjustments.filter((a) => a.status === "adjusted"))
     a.lines.forEach((l) => {
-      const doc = meta("Inventory Adjustment", a, a.reference || a.number, a.reason);
+      const doc = meta(
+        "Inventory Adjustment",
+        a,
+        a.reference || a.number,
+        a.reason,
+      );
       const wh = W(a.warehouse);
-      if (a.mode === "value") push({ kind: "adjValue", item: String(l.item), wh, date: a.date, seq: a.createdAt, qty: 0, value: l.valueAdjusted || 0, doc });
-      else if (l.quantityAdjusted > 0) push({ kind: "adjIn", item: String(l.item), wh, date: a.date, seq: a.createdAt, qty: l.quantityAdjusted, rate: l.costPrice, doc });
-      else if (l.quantityAdjusted < 0) push({ kind: "adjOut", item: String(l.item), wh, date: a.date, seq: a.createdAt, qty: -l.quantityAdjusted, doc });
+      if (a.mode === "value")
+        push({
+          kind: "adjValue",
+          item: String(l.item),
+          wh,
+          date: a.date,
+          seq: a.createdAt,
+          qty: 0,
+          value: l.valueAdjusted || 0,
+          doc,
+        });
+      else if (l.quantityAdjusted > 0)
+        push({
+          kind: "adjIn",
+          item: String(l.item),
+          wh,
+          date: a.date,
+          seq: a.createdAt,
+          qty: l.quantityAdjusted,
+          rate: l.costPrice,
+          doc,
+        });
+      else if (l.quantityAdjusted < 0)
+        push({
+          kind: "adjOut",
+          item: String(l.item),
+          wh,
+          date: a.date,
+          seq: a.createdAt,
+          qty: -l.quantityAdjusted,
+          doc,
+        });
     });
 
   for (const t of transfers.filter((t) => t.status === "transferred"))
-    t.lines.forEach((l) => push({ kind: "transfer", item: String(l.item), from: W(t.from), wh: W(t.to), date: t.date, seq: t.createdAt, qty: l.quantity, doc: { type: "Transfer Order", id: t._id, number: t.number, party: "" } }));
+    t.lines.forEach((l) =>
+      push({
+        kind: "transfer",
+        item: String(l.item),
+        from: W(t.from),
+        wh: W(t.to),
+        date: t.date,
+        seq: t.createdAt,
+        qty: l.quantity,
+        doc: { type: "Transfer Order", id: t._id, number: t.number, party: "" },
+      }),
+    );
   if (to) {
     const end = new Date(to);
-    for (let i = events.length - 1; i >= 0; i--) if (new Date(events[i].date) > end) events.splice(i, 1);
+    for (let i = events.length - 1; i >= 0; i--)
+      if (new Date(events[i].date) > end) events.splice(i, 1);
   }
-  events.sort((a, b) => new Date(a.date) - new Date(b.date) || ORDER[a.kind] - ORDER[b.kind] || new Date(a.seq || 0) - new Date(b.seq || 0));
+  events.sort(
+    (a, b) =>
+      new Date(a.date) - new Date(b.date) ||
+      ORDER[a.kind] - ORDER[b.kind] ||
+      new Date(a.seq || 0) - new Date(b.seq || 0),
+  );
 
   const state = {};
   const docInv = {}; // "Type|id" -> inventory value change
   const docCost = {}; // "Type|id" -> cost of goods for that doc (invoices: COGS; vendor credits: cost removed)
-  for (const it of tracked.values()) state[String(it._id)] = { item: it, layers: [], lastCost: it.purchaseRate || 0, lastOutCost: null, moves: [], wh: {} };
+  for (const it of tracked.values())
+    state[String(it._id)] = {
+      item: it,
+      layers: [],
+      lastCost: it.purchaseRate || 0,
+      lastOutCost: null,
+      moves: [],
+      wh: {},
+    };
 
   const qtyOf = (s) => round2(s.layers.reduce((t, l) => t + l.qty, 0));
   const valOf = (s) => round2(s.layers.reduce((t, l) => t + l.qty * l.unit, 0));
@@ -102,13 +245,121 @@ function computeStock({ items, invoices = [], creditNotes = [], bills = [], vend
     return round2(cost);
   }
 
+  // Average cost: what comes in during each financial year, per item (quantity and value that set the year's rate).
+  const average = costing === "average";
+  const inThisYear = {}; // "item|fy" -> { qty, value }
+  if (average)
+    for (const e of events) {
+      const valued =
+        e.kind === "opening" ||
+        e.kind === "bill" ||
+        (e.kind === "adjIn" && e.rate > 0) ||
+        e.kind === "adjValue";
+      if (!valued) continue;
+      const k = `${e.item}|${fyOf(e.date)}`;
+      const a = (inThisYear[k] = inThisYear[k] || { qty: 0, value: 0 });
+      a.qty += e.kind === "adjValue" ? 0 : e.qty;
+      a.value +=
+        e.kind === "adjValue"
+          ? e.value || 0
+          : e.kind === "adjIn"
+            ? e.qty * e.rate
+            : e.cost;
+    }
+  // The year's rate for an item, fixed when its first entry of that year comes (from the value carried in).
+  const rateFor = (s, e) => {
+    const fy = fyOf(e.date);
+    if (s.fy !== fy) {
+      const q = qtyOf(s);
+      const v = valOf(s);
+      const a = inThisYear[`${e.item}|${fy}`] || { qty: 0, value: 0 };
+      const Q = q + a.qty;
+      s.fy = fy;
+      s.rate = Q > 0 ? (v + a.value) / Q : q > 0 ? v / q : s.lastCost;
+      if (s.rate > 0) s.lastCost = s.rate;
+    }
+    return s.rate;
+  };
+  // Average cost keeps one pool per item: { qty, value } as a single layer.
+  const pool = (s, qty, value) =>
+    (s.layers =
+      Math.abs(qty) > 1e-9
+        ? [{ qty: round2(qty), unit: qty ? value / qty : 0 }]
+        : []);
+
   for (const e of events) {
     const s = state[e.item];
     const bump = (w, q) => (s.wh[w] = round2((s.wh[w] || 0) + q));
+    if (average && e.kind !== "transfer") {
+      const before = valOf(s);
+      const q0 = s.layers.reduce((t, l) => t + l.qty, 0);
+      const v0 = s.layers.reduce((t, l) => t + l.qty * l.unit, 0);
+      const rate = rateFor(s, e);
+      let q = q0;
+      let v = v0;
+      let unitCost = rate;
+      if (e.kind === "opening" || e.kind === "bill") {
+        unitCost = e.qty ? e.cost / e.qty : 0;
+        q += e.qty;
+        v += e.cost;
+      } else if (e.kind === "adjIn") {
+        unitCost = e.rate > 0 ? e.rate : rate;
+        q += e.qty;
+        v += e.qty * unitCost;
+      } else if (e.kind === "creditNote") {
+        q += e.qty;
+        v += e.qty * rate;
+      } else if (e.kind === "adjValue") {
+        v += e.value || 0;
+        unitCost = 0;
+      } else {
+        q -= e.qty;
+        v -= e.qty * rate;
+        if (e.kind === "invoice") s.lastOutCost = rate;
+      }
+      pool(s, q, v);
+      const change = round2(valOf(s) - before);
+      const key = `${e.doc.type}|${e.doc.id}`;
+      docInv[key] = round2((docInv[key] || 0) + change);
+      if (
+        e.kind === "invoice" ||
+        e.kind === "vendorCredit" ||
+        e.kind === "adjOut"
+      )
+        docCost[key] = round2((docCost[key] || 0) - change);
+      const isIn = ["opening", "bill", "adjIn", "creditNote"].includes(e.kind);
+      if (e.kind !== "adjValue") bump(e.wh, isIn ? e.qty : -e.qty);
+      s.moves.push({
+        date: e.date,
+        ...e.doc,
+        qtyIn: isIn ? e.qty : 0,
+        qtyOut: isIn || e.kind === "adjValue" ? 0 : e.qty,
+        value: change,
+        unitCost: round2(unitCost),
+        qty: qtyOf(s),
+        stockValue: valOf(s),
+        warehouse: e.wh,
+      });
+      continue;
+    }
     if (e.kind === "transfer") {
       bump(e.from, -e.qty);
       bump(e.wh, e.qty);
-      s.moves.push({ date: e.date, ...e.doc, party: `${e.from} → ${e.wh}`, from: e.from, to: e.wh, qtyIn: 0, qtyOut: 0, transfer: e.qty, value: 0, unitCost: 0, qty: qtyOf(s), stockValue: valOf(s), warehouse: e.wh });
+      s.moves.push({
+        date: e.date,
+        ...e.doc,
+        party: `${e.from} → ${e.wh}`,
+        from: e.from,
+        to: e.wh,
+        qtyIn: 0,
+        qtyOut: 0,
+        transfer: e.qty,
+        value: 0,
+        unitCost: 0,
+        qty: qtyOf(s),
+        stockValue: valOf(s),
+        warehouse: e.wh,
+      });
       continue;
     }
     const before = valOf(s);
@@ -133,7 +384,12 @@ function computeStock({ items, invoices = [], creditNotes = [], bills = [], vend
     const change = round2(valOf(s) - before);
     const key = `${e.doc.type}|${e.doc.id}`;
     docInv[key] = round2((docInv[key] || 0) + change);
-    if (e.kind === "invoice" || e.kind === "vendorCredit" || e.kind === "adjOut") docCost[key] = round2((docCost[key] || 0) - change);
+    if (
+      e.kind === "invoice" ||
+      e.kind === "vendorCredit" ||
+      e.kind === "adjOut"
+    )
+      docCost[key] = round2((docCost[key] || 0) - change);
     const isIn = ["opening", "bill", "adjIn", "creditNote"].includes(e.kind);
     if (e.kind !== "adjValue") bump(e.wh, isIn ? e.qty : -e.qty);
     s.moves.push({
@@ -150,7 +406,16 @@ function computeStock({ items, invoices = [], creditNotes = [], bills = [], vend
   }
 
   const summary = {};
-  for (const [id, s] of Object.entries(state)) summary[id] = { item: s.item, qty: qtyOf(s), value: valOf(s), moves: s.moves, avgCost: round2(avg(s)), byWarehouse: s.wh, layers: s.layers.map((l) => ({ qty: l.qty, unit: round2(l.unit) })) };
+  for (const [id, s] of Object.entries(state))
+    summary[id] = {
+      item: s.item,
+      qty: qtyOf(s),
+      value: valOf(s),
+      moves: s.moves,
+      avgCost: round2(avg(s)),
+      byWarehouse: s.wh,
+      layers: s.layers.map((l) => ({ qty: l.qty, unit: round2(l.unit) })),
+    };
   return { items: summary, docInv, docCost };
 }
 
@@ -166,26 +431,64 @@ async function loadStock(org, { to } = {}) {
   const TransferOrder = require("../models/TransferOrder");
   const Warehouse = require("../models/Warehouse");
   const { raw } = require("../config/baseCurrency");
-  const [items, invoices, creditNotes, bills, vendorCredits, adjustments, transfers, primaryWh] = await raw(() => Promise.all([
-    Item.find({ organization: org }).lean(),
-    Invoice.find(live).lean(),
-    CreditNote.find(live).lean(),
-    Bill.find(live).lean(),
-    VendorCredit.find(live).lean(),
-    InventoryAdjustment.find({ organization: org, status: "adjusted" }).lean(),
-    TransferOrder.find({ organization: org, status: "transferred" }).lean(),
-    Warehouse.findOne({ organization: org, primary: true }).lean(),
-  ]));
-  return computeStock({ items, invoices, creditNotes, bills, vendorCredits, adjustments, transfers, primary: primaryWh?._id, to });
+  const [
+    items,
+    invoices,
+    creditNotes,
+    bills,
+    vendorCredits,
+    adjustments,
+    transfers,
+    primaryWh,
+  ] = await raw(() =>
+    Promise.all([
+      Item.find({ organization: org }).lean(),
+      Invoice.find(live).lean(),
+      CreditNote.find(live).lean(),
+      Bill.find(live).lean(),
+      VendorCredit.find(live).lean(),
+      InventoryAdjustment.find({
+        organization: org,
+        status: "adjusted",
+      }).lean(),
+      TransferOrder.find({ organization: org, status: "transferred" }).lean(),
+      Warehouse.findOne({ organization: org, primary: true }).lean(),
+    ]),
+  );
+  return computeStock({
+    items,
+    invoices,
+    creditNotes,
+    bills,
+    vendorCredits,
+    adjustments,
+    transfers,
+    primary: primaryWh?._id,
+    to,
+    costing: await costingOf(org),
+  });
+}
+
+// The company's stock valuation method: "fifo" (default) or "average" (like Tally's Average Cost).
+async function costingOf(org) {
+  const Organization = require("../models/Organization");
+  const o = await Organization.findById(org, { inventoryCosting: 1 }).lean();
+  return o?.inventoryCosting === "average" ? "average" : "fifo";
 }
 
 // Quantity committed to confirmed sales orders not yet invoiced, per item.
 async function committedStock(org) {
   const SalesOrder = require("../models/SalesOrder");
-  const orders = await SalesOrder.find({ organization: org, status: "confirmed" }).lean();
+  const orders = await SalesOrder.find({
+    organization: org,
+    status: "confirmed",
+  }).lean();
   const m = {};
-  for (const o of orders) for (const l of o.lineItems) if (l.item) m[String(l.item)] = round2((m[String(l.item)] || 0) + l.quantity);
+  for (const o of orders)
+    for (const l of o.lineItems)
+      if (l.item)
+        m[String(l.item)] = round2((m[String(l.item)] || 0) + l.quantity);
   return m;
 }
 
-module.exports = { computeStock, loadStock, committedStock };
+module.exports = { computeStock, loadStock, committedStock, costingOf, fyOf };

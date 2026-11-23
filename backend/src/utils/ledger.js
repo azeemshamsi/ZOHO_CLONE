@@ -209,6 +209,7 @@ async function buildEntries(org, { to } = {}) {
     bills,
     vendorCredits: vcs,
     adjustments,
+    costing: await require("./inventory").costingOf(org),
   });
   const inv = (type, id) => docInv[`${type}|${id}`] || 0;
 

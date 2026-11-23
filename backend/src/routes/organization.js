@@ -11,7 +11,10 @@ const address = Joi.object({
   country: Joi.string().allow(""),
 });
 
-router.get("/", ah(async (req, res) => res.send(await Organization.findById(req.org))));
+router.get(
+  "/",
+  ah(async (req, res) => res.send(await Organization.findById(req.org))),
+);
 
 router.put(
   "/",
@@ -42,11 +45,32 @@ router.put(
         defaultNotes: Joi.string().allow(""),
         defaultTerms: Joi.string().allow(""),
       }),
-      req.body
+      req.body,
     );
-    const org = await Organization.findByIdAndUpdate(req.org, data, { new: true, runValidators: true });
+    const org = await Organization.findByIdAndUpdate(req.org, data, {
+      new: true,
+      runValidators: true,
+    });
     res.send(org);
-  })
+  }),
+);
+
+// Stock valuation: FIFO, or Average Cost like Tally (closing stock and cost of goods sold follow it).
+router.put(
+  "/costing",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        inventoryCosting: Joi.string().valid("fifo", "average").required(),
+      }),
+      req.body,
+    );
+    await Organization.updateOne(
+      { _id: req.org },
+      { $set: { inventoryCosting: d.inventoryCosting } },
+    );
+    res.send({ inventoryCosting: d.inventoryCosting });
+  }),
 );
 
 // Outgoing email account: a mailbox over SMTP, or Brevo / Resend over HTTPS (works where SMTP ports are blocked).
@@ -64,20 +88,47 @@ router.put(
         apiKey: Joi.string().allow("").trim(), // blank = keep the saved key
         fromName: Joi.string().allow("").trim(),
       }),
-      req.body
+      req.body,
     );
     const org = await Organization.findById(req.org);
     const old = org.smtp || {};
     const api = data.provider !== "smtp";
-    if (api && data.user && !data.apiKey && !(old.apiKey && old.provider === data.provider)) throw new HttpError(400, "Enter the API key");
+    if (
+      api &&
+      data.user &&
+      !data.apiKey &&
+      !(old.apiKey && old.provider === data.provider)
+    )
+      throw new HttpError(400, "Enter the API key");
     const pass = data.pass ? data.pass.replace(/\s+/g, "") : old.pass || "";
-    const apiKey = (data.apiKey || "").replace(/\s+/g, "") || (old.provider === data.provider ? old.apiKey : "") || "";
+    const apiKey =
+      (data.apiKey || "").replace(/\s+/g, "") ||
+      (old.provider === data.provider ? old.apiKey : "") ||
+      "";
     org.smtp = api
-      ? { provider: data.provider, host: "", port: 587, secure: false, user: data.user, pass: "", apiKey: data.user ? apiKey : "", fromName: data.fromName }
-      : { provider: "smtp", host: data.host, port: data.port, secure: data.secure, user: data.user, pass: data.host ? pass : "", apiKey: "", fromName: data.fromName };
+      ? {
+          provider: data.provider,
+          host: "",
+          port: 587,
+          secure: false,
+          user: data.user,
+          pass: "",
+          apiKey: data.user ? apiKey : "",
+          fromName: data.fromName,
+        }
+      : {
+          provider: "smtp",
+          host: data.host,
+          port: data.port,
+          secure: data.secure,
+          user: data.user,
+          pass: data.host ? pass : "",
+          apiKey: "",
+          fromName: data.fromName,
+        };
     await org.save();
     res.send(org);
-  })
+  }),
 );
 
 router.post(
@@ -90,27 +141,54 @@ router.post(
       text: `Hi ${req.user.name},\n\nYour email settings work. Invoices, quotes and reminders will be sent from this account.\n\nMGI`,
     });
     res.send({ message: `Test email sent to ${req.user.email}` });
-  })
+  }),
 );
 
 router.put(
   "/reminders",
   ah(async (req, res) => {
-    const data = validate(Joi.object({ enabled: Joi.boolean().required(), days: Joi.array().items(Joi.number().integer().min(0).max(365)).max(6).default([]) }), req.body);
-    const org = await Organization.findByIdAndUpdate(req.org, { reminders: { enabled: data.enabled, days: [...new Set(data.days)].sort((a, b) => a - b) } }, { new: true });
+    const data = validate(
+      Joi.object({
+        enabled: Joi.boolean().required(),
+        days: Joi.array()
+          .items(Joi.number().integer().min(0).max(365))
+          .max(6)
+          .default([]),
+      }),
+      req.body,
+    );
+    const org = await Organization.findByIdAndUpdate(
+      req.org,
+      {
+        reminders: {
+          enabled: data.enabled,
+          days: [...new Set(data.days)].sort((a, b) => a - b),
+        },
+      },
+      { new: true },
+    );
     res.send(org);
-  })
+  }),
 );
 
 // Google Gemini key for reading scanned bills and photos (blank key = keep the saved one).
 router.put(
   "/ai",
   ah(async (req, res) => {
-    const d = validate(Joi.object({ geminiKey: Joi.string().allow("").trim(), model: Joi.string().allow("").trim().max(60), remove: Joi.boolean().default(false) }), req.body);
+    const d = validate(
+      Joi.object({
+        geminiKey: Joi.string().allow("").trim(),
+        model: Joi.string().allow("").trim().max(60),
+        remove: Joi.boolean().default(false),
+      }),
+      req.body,
+    );
     const org = await Organization.findById(req.org);
     const old = org.ai || {};
-    const key = d.remove ? "" : (d.geminiKey || "").replace(/\s+/g, "") || old.geminiKey || "";
-    const model = d.remove ? "" : d.model ?? old.model ?? "";
+    const key = d.remove
+      ? ""
+      : (d.geminiKey || "").replace(/\s+/g, "") || old.geminiKey || "";
+    const model = d.remove ? "" : (d.model ?? old.model ?? "");
     let resolvedModel = old.resolvedModel || "";
     let warning = "";
     if (key && (d.geminiKey || d.model !== undefined)) {
@@ -126,7 +204,7 @@ router.put(
     await org.save();
     if (warning) return res.send({ ...org.toJSON(), warning });
     res.send(org);
-  })
+  }),
 );
 
 router.post(
@@ -142,7 +220,7 @@ router.post(
       await org.save();
     }
     res.send({ message: `Gemini is connected (model ${model})` });
-  })
+  }),
 );
 
 module.exports = router;

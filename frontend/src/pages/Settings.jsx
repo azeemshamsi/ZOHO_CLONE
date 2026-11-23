@@ -12,7 +12,14 @@ export default function Settings() {
           name: organization.name || "",
           gstin: organization.gstin || "",
           state: organization.state || "",
-          address: { street: "", city: "", state: "", pincode: "", country: "India", ...organization.address },
+          address: {
+            street: "",
+            city: "",
+            state: "",
+            pincode: "",
+            country: "India",
+            ...organization.address,
+          },
           email: organization.email || "",
           phone: organization.phone || "",
           website: organization.website || "",
@@ -29,14 +36,15 @@ export default function Settings() {
           defaultNotes: organization.defaultNotes || "",
           defaultTerms: organization.defaultTerms || "",
         }
-      : null
+      : null,
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   if (!form) return <Spinner />;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
-  const setA = (k) => (e) => setForm({ ...form, address: { ...form.address, [k]: e.target.value } });
+  const setA = (k) => (e) =>
+    setForm({ ...form, address: { ...form.address, [k]: e.target.value } });
 
   const submit = async (e) => {
     e.preventDefault();
@@ -59,15 +67,28 @@ export default function Settings() {
 
   return (
     <>
-      <PageHeader title="Organization Profile" subtitle="These details appear on your invoices and receipts." />
+      <PageHeader
+        title="Organization Profile"
+        subtitle="These details appear on your invoices and receipts."
+      />
       <form className="card form" onSubmit={submit}>
         <div className="form-grid">
           <Field label="Organization Name" required>
             <input required value={form.name} onChange={set("name")} />
           </Field>
           <div className="row-2">
-            <Field label="GSTIN" hint="Leave blank if you're not GST-registered">
-              <input className="mono" maxLength={15} value={form.gstin} onChange={(e) => setForm({ ...form, gstin: e.target.value.toUpperCase() })} />
+            <Field
+              label="GSTIN"
+              hint="Leave blank if you're not GST-registered"
+            >
+              <input
+                className="mono"
+                maxLength={15}
+                value={form.gstin}
+                onChange={(e) =>
+                  setForm({ ...form, gstin: e.target.value.toUpperCase() })
+                }
+              />
             </Field>
             <Field label="Business Location (State)" required>
               <select required value={form.state} onChange={set("state")}>
@@ -80,7 +101,11 @@ export default function Settings() {
             </Field>
           </div>
           <Field label="Street Address">
-            <textarea rows={2} value={form.address.street} onChange={setA("street")} />
+            <textarea
+              rows={2}
+              value={form.address.street}
+              onChange={setA("street")}
+            />
           </Field>
           <div className="row-2">
             <Field label="City">
@@ -107,10 +132,16 @@ export default function Settings() {
         <div className="form-grid">
           <div className="row-3">
             <Field label="Invoice Number Prefix">
-              <input value={form.invoicePrefix} onChange={set("invoicePrefix")} />
+              <input
+                value={form.invoicePrefix}
+                onChange={set("invoicePrefix")}
+              />
             </Field>
             <Field label="Payment Number Prefix">
-              <input value={form.paymentPrefix} onChange={set("paymentPrefix")} />
+              <input
+                value={form.paymentPrefix}
+                onChange={set("paymentPrefix")}
+              />
             </Field>
             <Field label="Quote Number Prefix">
               <input value={form.quotePrefix} onChange={set("quotePrefix")} />
@@ -118,27 +149,48 @@ export default function Settings() {
           </div>
           <div className="row-3">
             <Field label="Sales Order Number Prefix">
-              <input value={form.salesOrderPrefix} onChange={set("salesOrderPrefix")} />
+              <input
+                value={form.salesOrderPrefix}
+                onChange={set("salesOrderPrefix")}
+              />
             </Field>
             <Field label="Credit Note Number Prefix">
-              <input value={form.creditNotePrefix} onChange={set("creditNotePrefix")} />
+              <input
+                value={form.creditNotePrefix}
+                onChange={set("creditNotePrefix")}
+              />
             </Field>
             <Field label="Payment Made Number Prefix">
-              <input value={form.vendorPaymentPrefix} onChange={set("vendorPaymentPrefix")} />
+              <input
+                value={form.vendorPaymentPrefix}
+                onChange={set("vendorPaymentPrefix")}
+              />
             </Field>
           </div>
           <div className="row-3">
             <Field label="Journal Number Prefix">
-              <input value={form.journalPrefix} onChange={set("journalPrefix")} />
+              <input
+                value={form.journalPrefix}
+                onChange={set("journalPrefix")}
+              />
             </Field>
             <Field label="Purchase Order Number Prefix">
-              <input value={form.purchaseOrderPrefix} onChange={set("purchaseOrderPrefix")} />
+              <input
+                value={form.purchaseOrderPrefix}
+                onChange={set("purchaseOrderPrefix")}
+              />
             </Field>
             <Field label="Vendor Credit Number Prefix">
-              <input value={form.vendorCreditPrefix} onChange={set("vendorCreditPrefix")} />
+              <input
+                value={form.vendorCreditPrefix}
+                onChange={set("vendorCreditPrefix")}
+              />
             </Field>
             <Field label="Default Payment Terms">
-              <select value={form.defaultPaymentTerms} onChange={set("defaultPaymentTerms")}>
+              <select
+                value={form.defaultPaymentTerms}
+                onChange={set("defaultPaymentTerms")}
+              >
                 {PAYMENT_TERMS.map(([v, l]) => (
                   <option key={v} value={v}>
                     {l}
@@ -148,10 +200,18 @@ export default function Settings() {
             </Field>
           </div>
           <Field label="Default Customer Notes">
-            <textarea rows={2} value={form.defaultNotes} onChange={set("defaultNotes")} />
+            <textarea
+              rows={2}
+              value={form.defaultNotes}
+              onChange={set("defaultNotes")}
+            />
           </Field>
           <Field label="Default Terms & Conditions">
-            <textarea rows={3} value={form.defaultTerms} onChange={set("defaultTerms")} />
+            <textarea
+              rows={3}
+              value={form.defaultTerms}
+              onChange={set("defaultTerms")}
+            />
           </Field>
         </div>
         {error && <div className="alert alert-error">{error}</div>}
@@ -161,6 +221,7 @@ export default function Settings() {
           </button>
         </div>
       </form>
+      <StockCosting />
       <EmailSettings />
       <AiSettings />
       <ReminderSettings />
@@ -170,34 +231,100 @@ export default function Settings() {
 }
 
 const PRESETS = {
-  brevo: { api: true, help: "Recommended on Render's free plan, which blocks normal (SMTP) email. Free Brevo account (300 emails/day): add your email under Senders and verify it, then create an API key under SMTP & API → API Keys." },
-  resend: { api: true, help: "Works on Render's free plan. Verify your domain (e.g. ordexago.com) in Resend → Domains, create an API key, and send from an address on that domain." },
-  gmail: { host: "smtp.gmail.com", port: 587, secure: false, help: "Use a Gmail App Password (Google Account → Security → 2-Step Verification → App passwords). Needs SMTP, which Render's free plan blocks." },
-  zoho: { host: "smtp.zoho.in", port: 587, secure: false, help: "Use your Zoho Mail password, or an app-specific password if 2FA is on. Needs SMTP, which Render's free plan blocks." },
-  outlook: { host: "smtp.office365.com", port: 587, secure: false, help: "Use your Microsoft 365 / Outlook password or app password. Needs SMTP, which Render's free plan blocks." },
-  custom: { host: "", port: 587, secure: false, help: "Get the SMTP host, port and login from your email provider. Needs SMTP, which Render's free plan blocks." },
+  brevo: {
+    api: true,
+    help: "Recommended on Render's free plan, which blocks normal (SMTP) email. Free Brevo account (300 emails/day): add your email under Senders and verify it, then create an API key under SMTP & API → API Keys.",
+  },
+  resend: {
+    api: true,
+    help: "Works on Render's free plan. Verify your domain (e.g. ordexago.com) in Resend → Domains, create an API key, and send from an address on that domain.",
+  },
+  gmail: {
+    host: "smtp.gmail.com",
+    port: 587,
+    secure: false,
+    help: "Use a Gmail App Password (Google Account → Security → 2-Step Verification → App passwords). Needs SMTP, which Render's free plan blocks.",
+  },
+  zoho: {
+    host: "smtp.zoho.in",
+    port: 587,
+    secure: false,
+    help: "Use your Zoho Mail password, or an app-specific password if 2FA is on. Needs SMTP, which Render's free plan blocks.",
+  },
+  outlook: {
+    host: "smtp.office365.com",
+    port: 587,
+    secure: false,
+    help: "Use your Microsoft 365 / Outlook password or app password. Needs SMTP, which Render's free plan blocks.",
+  },
+  custom: {
+    host: "",
+    port: 587,
+    secure: false,
+    help: "Get the SMTP host, port and login from your email provider. Needs SMTP, which Render's free plan blocks.",
+  },
 };
 
 function EmailSettings() {
   const { organization, setOrganization } = useAuth();
   const s = organization?.smtp || {};
-  const savedPreset = s.provider && s.provider !== "smtp" ? s.provider : Object.entries(PRESETS).find(([k, p]) => !p.api && k !== "custom" && p.host === s.host)?.[0] || (s.host ? "custom" : "brevo");
+  const savedPreset =
+    s.provider && s.provider !== "smtp"
+      ? s.provider
+      : Object.entries(PRESETS).find(
+          ([k, p]) => !p.api && k !== "custom" && p.host === s.host,
+        )?.[0] || (s.host ? "custom" : "brevo");
   const [preset, setPreset] = useState(savedPreset);
-  const [form, setForm] = useState({ host: s.host || "", port: s.port || 587, secure: !!s.secure, user: s.user || "", pass: "", apiKey: "", fromName: s.fromName || organization?.name || "" });
+  const [form, setForm] = useState({
+    host: s.host || "",
+    port: s.port || 587,
+    secure: !!s.secure,
+    user: s.user || "",
+    pass: "",
+    apiKey: "",
+    fromName: s.fromName || organization?.name || "",
+  });
   const [busy, setBusy] = useState(false);
   const isApi = !!PRESETS[preset].api;
-  const configured = s.user && (s.provider && s.provider !== "smtp" ? s.hasApiKey : s.host && s.hasPassword);
+  const configured =
+    s.user &&
+    (s.provider && s.provider !== "smtp"
+      ? s.hasApiKey
+      : s.host && s.hasPassword);
   const keySaved = s.hasApiKey && s.provider === preset;
-  const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+  const set = (k) => (e) =>
+    setForm({
+      ...form,
+      [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value,
+    });
   const choose = (p) => {
     setPreset(p);
-    if (!PRESETS[p].api) setForm({ ...form, host: PRESETS[p].host, port: PRESETS[p].port, secure: PRESETS[p].secure });
+    if (!PRESETS[p].api)
+      setForm({
+        ...form,
+        host: PRESETS[p].host,
+        port: PRESETS[p].port,
+        secure: PRESETS[p].secure,
+      });
   };
   const save = async (e) => {
     e.preventDefault();
     setBusy(true);
     try {
-      const body = isApi ? { provider: preset, user: form.user, apiKey: form.apiKey, fromName: form.fromName } : { provider: "smtp", ...form, apiKey: "", host: form.host || PRESETS[preset].host, port: Number(form.port) };
+      const body = isApi
+        ? {
+            provider: preset,
+            user: form.user,
+            apiKey: form.apiKey,
+            fromName: form.fromName,
+          }
+        : {
+            provider: "smtp",
+            ...form,
+            apiKey: "",
+            host: form.host || PRESETS[preset].host,
+            port: Number(form.port),
+          };
       const { data } = await api.put("/organization/email", body);
       setOrganization(data);
       setForm({ ...form, host: body.host || "", pass: "", apiKey: "" });
@@ -218,23 +345,54 @@ function EmailSettings() {
     setBusy(false);
   };
   const remove = async () => {
-    const { data } = await api.put("/organization/email", { provider: "smtp", host: "", user: "", pass: "", apiKey: "", fromName: "" });
+    const { data } = await api.put("/organization/email", {
+      provider: "smtp",
+      host: "",
+      user: "",
+      pass: "",
+      apiKey: "",
+      fromName: "",
+    });
     setOrganization(data);
-    setForm({ host: "", port: 587, secure: false, user: "", pass: "", apiKey: "", fromName: organization?.name || "" });
+    setForm({
+      host: "",
+      port: 587,
+      secure: false,
+      user: "",
+      pass: "",
+      apiKey: "",
+      fromName: organization?.name || "",
+    });
     toast("Email account removed");
   };
   return (
-    <form className="card form" id="email" onSubmit={save} style={{ marginTop: 18 }}>
+    <form
+      className="card form"
+      id="email"
+      onSubmit={save}
+      style={{ marginTop: 18 }}
+    >
       <h4 className="section-title" style={{ marginTop: 0 }}>
         Email
-        <span className="muted small">{configured ? `Sending from ${s.user}${s.provider && s.provider !== "smtp" ? ` via ${s.provider === "brevo" ? "Brevo" : "Resend"}` : ""}` : "Not set up — invoices can't be emailed yet"}</span>
+        <span className="muted small">
+          {configured
+            ? `Sending from ${s.user}${s.provider && s.provider !== "smtp" ? ` via ${s.provider === "brevo" ? "Brevo" : "Resend"}` : ""}`
+            : "Not set up — invoices can't be emailed yet"}
+        </span>
       </h4>
-      <p className="muted small">Invoices, quotes, receipts and reminders are sent from this address. Replies go to your organization's email.</p>
+      <p className="muted small">
+        Invoices, quotes, receipts and reminders are sent from this address.
+        Replies go to your organization's email.
+      </p>
       <div className="form-grid">
         <Field label="Send Using">
           <select value={preset} onChange={(e) => choose(e.target.value)}>
-            <option value="brevo">Brevo (HTTPS API) — works on Render free</option>
-            <option value="resend">Resend (HTTPS API) — works on Render free</option>
+            <option value="brevo">
+              Brevo (HTTPS API) — works on Render free
+            </option>
+            <option value="resend">
+              Resend (HTTPS API) — works on Render free
+            </option>
             <option value="gmail">Gmail / Google Workspace (SMTP)</option>
             <option value="zoho">Zoho Mail (SMTP)</option>
             <option value="outlook">Outlook / Microsoft 365 (SMTP)</option>
@@ -245,27 +403,70 @@ function EmailSettings() {
         {preset === "custom" && (
           <div className="row-3">
             <Field label="SMTP Host" required>
-              <input value={form.host} onChange={set("host")} placeholder="smtp.example.com" />
+              <input
+                value={form.host}
+                onChange={set("host")}
+                placeholder="smtp.example.com"
+              />
             </Field>
             <Field label="Port">
               <input type="number" value={form.port} onChange={set("port")} />
             </Field>
             <label className="check" style={{ alignSelf: "end" }}>
-              <input type="checkbox" checked={form.secure} onChange={set("secure")} /> SSL (port 465)
+              <input
+                type="checkbox"
+                checked={form.secure}
+                onChange={set("secure")}
+              />{" "}
+              SSL (port 465)
             </label>
           </div>
         )}
         <div className="row-2">
-          <Field label={isApi ? "Sender Email" : "Email Address"} required hint={preset === "brevo" ? "Must be a verified sender in Brevo" : preset === "resend" ? "Must be on a domain verified in Resend" : ""}>
-            <input type="email" value={form.user} onChange={set("user")} placeholder="accounts@yourbusiness.com" />
+          <Field
+            label={isApi ? "Sender Email" : "Email Address"}
+            required
+            hint={
+              preset === "brevo"
+                ? "Must be a verified sender in Brevo"
+                : preset === "resend"
+                  ? "Must be on a domain verified in Resend"
+                  : ""
+            }
+          >
+            <input
+              type="email"
+              value={form.user}
+              onChange={set("user")}
+              placeholder="accounts@yourbusiness.com"
+            />
           </Field>
           {isApi ? (
-            <Field label="API Key" required={!keySaved} hint={keySaved ? "Saved. Leave blank to keep it." : ""}>
-              <input type="password" value={form.apiKey} onChange={set("apiKey")} autoComplete="new-password" placeholder={preset === "brevo" ? "xkeysib-…" : "re_…"} />
+            <Field
+              label="API Key"
+              required={!keySaved}
+              hint={keySaved ? "Saved. Leave blank to keep it." : ""}
+            >
+              <input
+                type="password"
+                value={form.apiKey}
+                onChange={set("apiKey")}
+                autoComplete="new-password"
+                placeholder={preset === "brevo" ? "xkeysib-…" : "re_…"}
+              />
             </Field>
           ) : (
-            <Field label={preset === "gmail" ? "App Password" : "Password"} required={!s.hasPassword} hint={s.hasPassword ? "Saved. Leave blank to keep it." : ""}>
-              <input type="password" value={form.pass} onChange={set("pass")} autoComplete="new-password" />
+            <Field
+              label={preset === "gmail" ? "App Password" : "Password"}
+              required={!s.hasPassword}
+              hint={s.hasPassword ? "Saved. Leave blank to keep it." : ""}
+            >
+              <input
+                type="password"
+                value={form.pass}
+                onChange={set("pass")}
+                autoComplete="new-password"
+              />
             </Field>
           )}
         </div>
@@ -279,7 +480,12 @@ function EmailSettings() {
         </button>
         {configured && (
           <>
-            <button type="button" className="btn" disabled={busy} onClick={test}>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy}
+              onClick={test}
+            >
               {busy ? "Sending…" : "Send Test Email"}
             </button>
             <button type="button" className="btn btn-ghost" onClick={remove}>
@@ -304,7 +510,10 @@ function ReminderSettings() {
         .split(/[,\s]+/)
         .filter(Boolean)
         .map(Number);
-      const { data } = await api.put("/organization/reminders", { enabled, days: list });
+      const { data } = await api.put("/organization/reminders", {
+        enabled,
+        days: list,
+      });
       setOrganization(data);
       setDays(data.reminders.days.join(", "));
       toast("Reminder settings saved");
@@ -314,13 +523,27 @@ function ReminderSettings() {
   };
   return (
     <form className="card form" onSubmit={save} style={{ marginTop: 18 }}>
-      <h4 className="section-title" style={{ marginTop: 0 }}>Payment Reminders</h4>
+      <h4 className="section-title" style={{ marginTop: 0 }}>
+        Payment Reminders
+      </h4>
       <div className="form-grid">
         <label className="check">
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Email customers automatically when an invoice is overdue
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+          />{" "}
+          Email customers automatically when an invoice is overdue
         </label>
-        <Field label="Remind after (days past due date)" hint="e.g. 3, 10, 30 — one reminder at each step, with the invoice PDF attached. Needs email set up above and an email on the customer.">
-          <input value={days} disabled={!enabled} onChange={(e) => setDays(e.target.value)} />
+        <Field
+          label="Remind after (days past due date)"
+          hint="e.g. 3, 10, 30 — one reminder at each step, with the invoice PDF attached. Needs email set up above and an email on the customer."
+        >
+          <input
+            value={days}
+            disabled={!enabled}
+            onChange={(e) => setDays(e.target.value)}
+          />
         </Field>
       </div>
       <div className="form-footer">
@@ -340,12 +563,21 @@ function AiSettings() {
     e?.preventDefault();
     setBusy(true);
     try {
-      const { data } = await api.put("/organization/ai", { geminiKey: key, model, remove });
+      const { data } = await api.put("/organization/ai", {
+        geminiKey: key,
+        model,
+        remove,
+      });
       const { warning, ...org } = data;
       setOrganization(org);
       setKey("");
       if (warning) toast(warning, "error");
-      else toast(remove ? "Gemini key removed" : `Gemini connected${org.ai?.resolvedModel ? ` (${org.ai.resolvedModel})` : ""} — scanned bills and photos will now be read automatically`);
+      else
+        toast(
+          remove
+            ? "Gemini key removed"
+            : `Gemini connected${org.ai?.resolvedModel ? ` (${org.ai.resolvedModel})` : ""} — scanned bills and photos will now be read automatically`,
+        );
     } catch (err) {
       toast(errMsg(err), "error");
     }
@@ -360,27 +592,62 @@ function AiSettings() {
     }
   };
   return (
-    <form className="card form" id="integrations" onSubmit={save} style={{ marginTop: 18 }}>
+    <form
+      className="card form"
+      id="integrations"
+      onSubmit={save}
+      style={{ marginTop: 18 }}
+    >
       <h4 className="section-title" style={{ marginTop: 0 }}>
         Integrations · Google Gemini
-        <span className="muted small">{ai.hasGeminiKey ? `Connected${ai.model || ai.resolvedModel ? ` · ${ai.model || ai.resolvedModel}` : ""}` : "Not connected"}</span>
+        <span className="muted small">
+          {ai.hasGeminiKey
+            ? `Connected${ai.model || ai.resolvedModel ? ` · ${ai.model || ai.resolvedModel}` : ""}`
+            : "Not connected"}
+        </span>
       </h4>
       <p className="muted small">
-        Reads scanned bills and phone photos in “From bill PDF”. Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a> (sign in with your
-        Google account → Create API key). A Gemini app subscription (Pro/Advanced) doesn't include API access by itself; the API key is separate and has a free allowance.
+        Reads scanned bills and phone photos in “From bill PDF”. Get a free key
+        at{" "}
+        <a
+          href="https://aistudio.google.com/apikey"
+          target="_blank"
+          rel="noreferrer"
+        >
+          aistudio.google.com/apikey
+        </a>{" "}
+        (sign in with your Google account → Create API key). A Gemini app
+        subscription (Pro/Advanced) doesn't include API access by itself; the
+        API key is separate and has a free allowance.
       </p>
       <div className="form-grid">
         <div className="row-2">
-          <Field label="Gemini API key" hint={ai.hasGeminiKey ? "Saved. Leave blank to keep it." : ""}>
-            <input type="password" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="new-password" placeholder={ai.hasGeminiKey ? "••••••••••••" : "AIza…"} />
+          <Field
+            label="Gemini API key"
+            hint={ai.hasGeminiKey ? "Saved. Leave blank to keep it." : ""}
+          >
+            <input
+              type="password"
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              autoComplete="new-password"
+              placeholder={ai.hasGeminiKey ? "••••••••••••" : "AIza…"}
+            />
           </Field>
           <Field label="Model" hint="Leave blank for the latest Flash model">
-            <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="gemini-flash-latest" />
+            <input
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="gemini-flash-latest"
+            />
           </Field>
         </div>
       </div>
       <div className="form-footer">
-        <button className="btn btn-primary" disabled={busy || (!key && !ai.hasGeminiKey)}>
+        <button
+          className="btn btn-primary"
+          disabled={busy || (!key && !ai.hasGeminiKey)}
+        >
           {busy ? "Checking…" : "Save"}
         </button>
         {ai.hasGeminiKey && (
@@ -388,7 +655,11 @@ function AiSettings() {
             <button type="button" className="btn" onClick={test}>
               Test
             </button>
-            <button type="button" className="btn" onClick={(e) => save(e, true)}>
+            <button
+              type="button"
+              className="btn"
+              onClick={(e) => save(e, true)}
+            >
               Remove
             </button>
           </>
@@ -399,16 +670,21 @@ function AiSettings() {
 }
 
 function DeleteCompany() {
-  const { user, organization, organizations, signOut, switchCompany } = useAuth();
+  const { user, organization, organizations, signOut, switchCompany } =
+    useAuth();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   if (user?.role !== "admin") return null;
-  const others = (organizations || []).filter((o) => String(o._id) !== String(organization?._id));
+  const others = (organizations || []).filter(
+    (o) => String(o._id) !== String(organization?._id),
+  );
   const remove = async () => {
     setBusy(true);
     try {
-      const { data } = await api.delete(`/companies/${organization._id}`, { data: { confirmName: name } });
+      const { data } = await api.delete(`/companies/${organization._id}`, {
+        data: { confirmName: name },
+      });
       toast(data.message);
       if (data.next) switchCompany(data.next);
       else {
@@ -422,10 +698,17 @@ function DeleteCompany() {
   };
   return (
     <div className="card danger-zone" style={{ marginTop: 18 }}>
-      <h4 className="section-title" style={{ marginTop: 0 }}>Delete this company</h4>
+      <h4 className="section-title" style={{ marginTop: 0 }}>
+        Delete this company
+      </h4>
       <p className="muted small">
-        Permanently deletes <strong>{organization?.name}</strong> and everything in it: customers, vendors, items, invoices, bills, payments, banking, GST records, store orders, attachments and users' access to it.
-        {others.length ? ` Your other ${others.length === 1 ? "company stays" : "companies stay"} as they are.` : " This is your only company, so your login will be removed too."} This can't be undone — export any reports you need first.
+        Permanently deletes <strong>{organization?.name}</strong> and everything
+        in it: customers, vendors, items, invoices, bills, payments, banking,
+        GST records, store orders, attachments and users' access to it.
+        {others.length
+          ? ` Your other ${others.length === 1 ? "company stays" : "companies stay"} as they are.`
+          : " This is your only company, so your login will be removed too."}{" "}
+        This can't be undone — export any reports you need first.
       </p>
       {!open ? (
         <button className="btn btn-danger" onClick={() => setOpen(true)}>
@@ -433,19 +716,95 @@ function DeleteCompany() {
         </button>
       ) : (
         <div className="form-grid" style={{ maxWidth: 460 }}>
-          <Field label={`Type the company name to confirm: ${organization?.name}`}>
-            <input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          <Field
+            label={`Type the company name to confirm: ${organization?.name}`}
+          >
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+            />
           </Field>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-danger" disabled={busy || name.trim().toLowerCase() !== (organization?.name || "").trim().toLowerCase()} onClick={remove}>
+            <button
+              className="btn btn-danger"
+              disabled={
+                busy ||
+                name.trim().toLowerCase() !==
+                  (organization?.name || "").trim().toLowerCase()
+              }
+              onClick={remove}
+            >
               {busy ? "Deleting…" : "Delete permanently"}
             </button>
-            <button className="btn" onClick={() => (setOpen(false), setName(""))}>
+            <button
+              className="btn"
+              onClick={() => (setOpen(false), setName(""))}
+            >
               Cancel
             </button>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// How stock is valued: FIFO, or Average Cost like Tally (closing stock, cost of goods sold, Stock Summary).
+function StockCosting() {
+  const { organization, setOrganization } = useAuth();
+  const [v, setV] = useState(organization?.inventoryCosting || "fifo");
+  const [busy, setBusy] = useState(false);
+  const save = async (val) => {
+    setBusy(true);
+    try {
+      await api.put("/organization/costing", { inventoryCosting: val });
+      setV(val);
+      setOrganization?.({ ...organization, inventoryCosting: val });
+      toast(
+        val === "average"
+          ? "Stock is now valued at Average Cost, like Tally"
+          : "Stock is now valued FIFO",
+      );
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="card form" style={{ marginTop: 18 }}>
+      <h4 className="section-title" style={{ marginTop: 0 }}>
+        Stock valuation
+      </h4>
+      <div className="form-grid">
+        <label className="check">
+          <input
+            type="radio"
+            name="costing"
+            checked={v === "average"}
+            disabled={busy}
+            onChange={() => save("average")}
+          />{" "}
+          <b>Average Cost (like Tally)</b> — one rate per item for the financial
+          year: (value at the start of the year + purchases) ÷ (quantity at the
+          start + quantity purchased). Closing stock = quantity × that rate, as
+          in Tally's Stock Summary.
+        </label>
+        <label className="check">
+          <input
+            type="radio"
+            name="costing"
+            checked={v === "fifo"}
+            disabled={busy}
+            onChange={() => save("fifo")}
+          />{" "}
+          <b>FIFO</b> — the oldest purchase price is used first.
+        </label>
+        <p className="muted small" style={{ margin: 0 }}>
+          Changing it re-values closing stock and cost of goods sold for all
+          dates; vouchers aren't changed.
+        </p>
+      </div>
     </div>
   );
 }

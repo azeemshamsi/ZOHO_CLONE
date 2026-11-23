@@ -29,6 +29,8 @@ const organizationSchema = new mongoose.Schema(
     creditNotePrefix: { type: String, default: "CN-" },
     vendorPaymentPrefix: { type: String, default: "PM-" },
     journalPrefix: { type: String, default: "MJ-" },
+    // Stock valuation: "fifo", or "average" like Tally's Average Cost (one rate per item per financial year).
+    inventoryCosting: { type: String, enum: ["fifo", "average"], default: "fifo" },
     tallyOpeningStock: { type: Number }, // Tally's Opening Stock ledger balance (from a masters import): item opening values are matched to it
     purchaseOrderPrefix: { type: String, default: "PO-" },
     vendorCreditPrefix: { type: String, default: "DN-" },
