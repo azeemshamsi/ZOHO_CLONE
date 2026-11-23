@@ -47,3 +47,33 @@ test("a cash sale with stock is an invoice to Cash Sales, paid into Cash at once
   assert.deepStrictEqual(pay.allocations, [{ number: inv.number, amount: inv.total }]);
   assert.ok(records.customers.some((c) => c.displayName === "Cash Sales"));
 });
+
+test("Tally Stock Summary as XML: items by OrdexaGo's names, groups skipped, opening column used", () => {
+  const SS = require("../src/utils/import/stockSummary");
+  const row = (n, opq, opv, clq, clv) =>
+    `<DSPACCNAME><DSPDISPNAME>${n}</DSPDISPNAME></DSPACCNAME><DSPSTKINFO><DSPSTKOP><DSPOPQTY>${opq}</DSPOPQTY><DSPOPAMTA>${opv}</DSPOPAMTA></DSPSTKOP><DSPSTKCL><DSPCLQTY>${clq}</DSPCLQTY><DSPCLAMTA>${clv}</DSPCLAMTA></DSPSTKCL></DSPSTKINFO>`;
+  const xml =
+    "<ENVELOPE>" +
+    row("FINISHED GOODS", "", "-1000.00", "", "-800.00") +
+    row("44190020 (Kitchen Ware 5%)", "10 PCS", "-600.00", "8 PCS", "-480.00") +
+    row("Wooden Kitchen Ware Item (5%)", "10 PCS", "-600.00", "8 PCS", "-480.00") +
+    row("WAST AND SCRAP", "", "-400.00", "", "-320.00") +
+    row("WAST AND SCRAP", "20 KG", "-400.00", "16 KG", "-320.00") +
+    row("Mystery", "3 PCS", "-30.00", "", "") +
+    "</ENVELOPE>";
+  const buf = Buffer.from(xml);
+  assert.ok(SS.isStockSummaryXml(buf));
+  const r = SS.parseStockSummaryXml(buf, {
+    items: new Set(["wooden kitchen ware item (5%)", "wast and scrap"]),
+    groups: new Set(["44190020 (kitchen ware 5%)", "wast and scrap"]),
+  });
+  assert.strictEqual(r.column, "opening");
+  assert.deepStrictEqual(
+    r.items.map((i) => [i.name, i.quantity, i.unit, i.value]),
+    [
+      ["Wooden Kitchen Ware Item (5%)", 10, "pcs", 600],
+      ["WAST AND SCRAP", 20, "kg", 400],
+    ],
+  );
+  assert.ok(r.warnings.some((w) => /Mystery/.test(w)));
+});

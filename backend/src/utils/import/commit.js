@@ -1565,6 +1565,16 @@ async function commit(ctx, data, opts, progress) {
         fail("openingStock", o.name, e);
       }
     }
+    // Opening stock set to Tally's books (Stock values / Tally's Opening Stock ledger): the difference entry
+    // follows the items' new values, so the books still show that amount.
+    const target = (await Organization.findById(ctx.org, { tallyOpeningStock: 1 }).lean())
+      ?.tallyOpeningStock;
+    if (target != null) {
+      const r = await require("../openingStock").setOpeningStock(ctx.org, target);
+      warnings.push(
+        `Items' opening stock is now ₹${(r.itemsTotal ?? 0).toLocaleString("en-IN")}; opening stock in the books stays ₹${Number(target).toLocaleString("en-IN")} (the difference is in "Opening Stock Difference (Tally)") — change it in Reports → Stock values`,
+      );
+    }
   }
 
   // Ledgers the imported vouchers post to become sales / purchase ledgers (pickers on invoices and bills).

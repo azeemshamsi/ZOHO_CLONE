@@ -168,10 +168,26 @@ router.post(
     if (!buf.length) throw new HttpError(400, "The file is empty");
     // Tally Stock Summary (Excel) → opening stock per item
     const SS = require("../utils/import/stockSummary");
-    if (/\.xlsx?$/i.test(fileName) && SS.isStockSummary(buf)) {
+    const ssXml = /\.xml$/i.test(fileName) && SS.isStockSummaryXml(buf);
+    if (ssXml || (/\.xlsx?$/i.test(fileName) && SS.isStockSummary(buf))) {
       let ss;
       try {
-        ss = SS.parseStockSummary(buf);
+        if (ssXml) {
+          // The XML can't tell stock groups from items: OrdexaGo's items (Tally's masters) and their groups do.
+          const Item = require("../models/Item");
+          const its = await Item.find(
+            { organization: req.org },
+            { name: 1, category: 1 },
+          ).lean();
+          ss = SS.parseStockSummaryXml(buf, {
+            items: new Set(its.map((i) => String(i.name).trim().toLowerCase())),
+            groups: new Set(
+              its
+                .map((i) => String(i.category || "").trim().toLowerCase())
+                .filter(Boolean),
+            ),
+          });
+        } else ss = SS.parseStockSummary(buf);
       } catch (e) {
         throw new HttpError(
           400,
@@ -186,10 +202,18 @@ router.post(
       const records = emptyRecords();
       records.openingStock = ss.items;
       const id = crypto.randomUUID();
-      const next = ss.asOn ? new Date(ss.asOn.getTime() + 86400000) : null;
+      // XML has no dates: suggest the opening date the items already have (or the financial year's first day).
+      const next = ss.asOn
+        ? new Date(ss.asOn.getTime() + 86400000)
+        : ss.column === "opening"
+          ? new Date(
+              +(await require("../utils/openingStock").openingStockInfo(req.org))
+                .date + 12 * 3600000, // nearest day (dates may be IST midnight)
+            )
+          : null;
       const warnings = [
         ...ss.warnings,
-        `Stock as on ${ss.asOn ? iso(ss.asOn) : "?"}: ${ss.items.length} items worth ₹${ss.items.reduce((t, i) => t + i.value, 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}. It becomes each item's opening stock on the opening date below.`,
+        `${ss.asOn ? `Stock as on ${iso(ss.asOn)}` : `Stock (${ss.column || "closing"} column)`}: ${ss.items.length} items worth ₹${ss.items.reduce((t, i) => t + i.value, 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}. It becomes each item's opening stock on the opening date below.`,
       ];
       previews.set(id, {
         org: String(req.org),

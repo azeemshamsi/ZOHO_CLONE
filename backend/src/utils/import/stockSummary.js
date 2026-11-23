@@ -102,3 +102,111 @@ function parseStockSummary(buf) {
 }
 
 module.exports = { isStockSummary, parseStockSummary };
+
+/* ---------- Tally Stock Summary exported as XML (Alt+E → XML) ----------
+ * A flat list of <DSPACCNAME><DSPDISPNAME>name</…></…><DSPSTKINFO> opening / inwards / outwards / closing </…>
+ * pairs. Groups and items are mixed with nothing to tell them apart (a group of one unit even has a quantity),
+ * and a group can share its name with an item (shown once as the group, then as the item). So the names
+ * decide: OrdexaGo's stock items (from Tally's masters) are items, their groups are skipped. The file has no
+ * dates: the Opening column is used (the stock at the start of the period exported), or Closing when it has
+ * no opening at all. */
+const decodeXml = (buf) => {
+  if (buf[0] === 0xff && buf[1] === 0xfe) return buf.slice(2).toString("utf16le");
+  if (buf[0] === 0xfe && buf[1] === 0xff) {
+    const b = Buffer.from(buf.slice(2));
+    b.swap16();
+    return b.toString("utf16le");
+  }
+  // UTF-16 without a byte-order mark: every other byte is zero.
+  if (buf.length > 4 && buf[1] === 0 && buf[3] === 0) return buf.toString("utf16le");
+  return buf.toString("utf8");
+};
+const ent = (s) =>
+  String(s)
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+    .replace(/\s+/g, " ")
+    .trim();
+
+function isStockSummaryXml(buf) {
+  const t = decodeXml(buf.slice(0, 20000));
+  return /<DSPSTKINFO>/.test(t) && /<DSPACCNAME>/.test(t);
+}
+
+// known = { items: Set of item names (lower case), groups: Set of stock group names (lower case) }
+function parseStockSummaryXml(buf, known = {}) {
+  const text = decodeXml(buf);
+  const tag = (t, b) => ent((new RegExp(`<${t}>([^<]*)</${t}>`).exec(b) || [])[1] || "");
+  const rows = [];
+  const re = /<DSPDISPNAME>([^<]*)<\/DSPDISPNAME>[\s\S]*?<DSPSTKINFO>([\s\S]*?)<\/DSPSTKINFO>/g;
+  for (const m of text.matchAll(re)) {
+    const b = m[2];
+    rows.push({
+      name: ent(m[1]),
+      opq: tag("DSPOPQTY", b),
+      opv: Math.abs(num(tag("DSPOPAMTA", b))),
+      clq: tag("DSPCLQTY", b),
+      clv: Math.abs(num(tag("DSPCLAMTA", b))),
+    });
+  }
+  if (!rows.length) throw new Error("No stock rows found");
+  const useOpening = rows.some((r) => num(r.opq));
+  const q = (r) => (useOpening ? r.opq : r.clq);
+  const v = (r) => (useOpening ? r.opv : r.clv);
+  const items = known.items || new Set();
+  const groups = known.groups || new Set();
+  const haveMasters = items.size > 0;
+  const warnings = [];
+  const pick = new Map(); // name → the item's row (an item listed after a group of the same name wins)
+  const unknown = [];
+  for (const r of rows) {
+    const k = r.name.toLowerCase();
+    if (!r.name || /^grand total$/i.test(r.name)) continue;
+    if (haveMasters) {
+      if (items.has(k)) {
+        if (num(q(r)) || !pick.has(k)) pick.set(k, r);
+      } else if (!groups.has(k) && num(q(r))) unknown.push(r);
+    } else if (num(q(r))) pick.set(k, r);
+  }
+  const out = [];
+  for (const r of pick.values()) {
+    const qty = num(q(r));
+    const value = v(r);
+    if (!qty) continue;
+    if (qty < 0) {
+      warnings.push(`${r.name}: quantity is negative in Tally (${qty}) — skipped`);
+      continue;
+    }
+    out.push({
+      name: r.name,
+      quantity: qty,
+      unit: unitOf(q(r)),
+      rate: value ? Math.round((value / qty) * 10000) / 10000 : 0,
+      value: Math.round(value * 100) / 100,
+    });
+  }
+  if (unknown.length)
+    warnings.push(
+      `${unknown.length} row(s) with a quantity aren't stock items in OrdexaGo, so they were taken as stock groups and left out (import Tally's stock item masters first if any is an item): ${unknown
+        .slice(0, 10)
+        .map((r) => `${r.name} (${q(r)})`)
+        .join(", ")}${unknown.length > 10 ? "…" : ""}`,
+    );
+  if (!haveMasters)
+    warnings.push(
+      "No stock items in OrdexaGo yet, so every row with a quantity was taken as an item — stock groups may be counted twice. Import Tally's masters first.",
+    );
+  warnings.push(
+    useOpening
+      ? "The XML has no dates: its Opening column was used — set the opening date below to the first day of the period you exported from Tally (e.g. 1 Apr)."
+      : "The XML has no dates and no opening stock: its Closing column was used — set the opening date below to the day after the period you exported.",
+  );
+  return { items: out, asOn: null, warnings, column: useOpening ? "opening" : "closing" };
+}
+
+module.exports.isStockSummaryXml = isStockSummaryXml;
+module.exports.parseStockSummaryXml = parseStockSummaryXml;
