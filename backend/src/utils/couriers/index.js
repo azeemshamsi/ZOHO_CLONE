@@ -598,7 +598,199 @@ const custom = {
   async cancel() {},
 };
 
-const CARRIERS = { shiprocket, delhivery, bluedart, dtdc, shadowfax, custom };
+
+/* ---------------- Shiprocket Cargo (B2B, api-cargo.shiprocket.in) ---------------- */
+// One docket for all the boxes of an order. Booking is two steps: order_creation (gives the carriers and the
+// transporter ID for the e-way bill) then order_shipment_association (books it: docket number + label, or, when
+// the account is set to async, a shipment ID whose docket comes later — tracking picks it up).
+const CARGO_TRACK = (awb) => `https://app-cargo.shiprocket.in/tracking/${encodeURIComponent(awb)}`;
+const cargoEmail = (v) => (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v || "").trim()) ? String(v).trim() : "");
+const cargoErr = (d) => {
+  if (!d || typeof d !== "object") return String(d || "");
+  if (d.message || d.detail || d.error) return String(d.message || d.detail || d.error);
+  return Object.entries(d)
+    .filter(([k]) => k !== "success")
+    .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : v}`)
+    .join("; ")
+    .slice(0, 400);
+};
+const shiprocket_cargo = {
+  title: "Shiprocket Cargo",
+  multiPackage: true, // several boxes go on one docket
+  fields: { credentials: ["accessToken", "refreshToken"], options: ["clientId", "warehouseName", "senderEmail", "cargoMode", "deliveryPartnerId"] },
+  help: "Shiprocket Cargo → Account Settings → Additional Settings → API Tokens: copy the Client ID, then Generate API token and copy the Access and Refresh tokens. Warehouse name = the name your pickup address gets in Cargo (it's created on the first booking). Delivery partner ID is optional (blank = the carrier Cargo assigns).",
+  base: (acc) => (acc.baseUrl || "https://api-cargo.shiprocket.in").replace(/\/$/, ""),
+  async token(acc) {
+    if (acc.token && acc.tokenExpires > new Date()) return acc.token;
+    need(acc, ["accessToken", "refreshToken"]);
+    const { status, data } = await request(`${this.base(acc)}/api/token/refresh/`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${acc.credentials.accessToken}` },
+      json: { refresh: acc.credentials.refreshToken },
+      timeout: 20000,
+    });
+    if (!data.access) throw new Error(`Shiprocket Cargo login failed (${status}): ${cargoErr(data) || "check the access and refresh tokens"}`);
+    acc.token = data.access;
+    acc.tokenExpires = new Date(Date.now() + 20 * 3600000); // valid a day
+    await acc.save();
+    return acc.token;
+  },
+  async call(acc, path, opts = {}) {
+    const tok = await this.token(acc);
+    const res = await request(`${this.base(acc)}${path}`, { timeout: 40000, ...opts, headers: { authorization: `Bearer ${tok}` } });
+    if (res.status === 401) {
+      acc.tokenExpires = new Date(0);
+      await acc.save().catch(() => {});
+      throw new Error("Shiprocket Cargo session expired; try again");
+    }
+    return res;
+  },
+  clientId(acc) {
+    const id = parseInt(acc.options?.clientId, 10);
+    if (!id) throw new Error(`${acc.name}: add the Client ID (Cargo → API Tokens) in Shopify Settings → Couriers`);
+    return id;
+  },
+  packages(s) {
+    const list = s.packages?.length ? s.packages : [{ weight: s.weight, length: s.length, breadth: s.breadth, height: s.height }];
+    return list.map((p) => ({ units: 1, weight: r2(Math.max(0.1, Number(p.weight) || 0.5)), length: r2(Number(p.length) || 10), height: r2(Number(p.height) || 10), width: r2(Number(p.breadth) || 10), unit: "cm" }));
+  },
+  async book(acc, s, manual = {}) {
+    pickupOk(acc);
+    const client_id = this.clientId(acc);
+    const p = acc.pickup || {};
+    const pk = this.packages(s);
+    const value = Math.max(1, r2(s.value));
+    const eway = String(manual.ewayBill || "").replace(/\s/g, "");
+    if (value > 50000 && !eway) throw new Error(`Shiprocket Cargo needs an e-way bill number for invoices above ₹50,000 (this one is ₹${value}) — enter it in the booking box`);
+    const senderEmail = cargoEmail(acc.options?.senderEmail) || cargoEmail(p.email);
+    if (!senderEmail) throw new Error(`${acc.name}: add the sender email in Shopify Settings → Couriers`);
+    const c = s.consignee;
+    const today = ymd(new Date());
+    const invNo = String(s.invoiceNumber || s.reference).slice(0, 20);
+    const mode = String(acc.options?.cargoMode || "surface").toLowerCase();
+    const o = await this.call(acc, "/api/external/order_creation/", {
+      method: "POST",
+      json: {
+        client_id,
+        client_order_id: s.reference,
+        no_of_packages: pk.length,
+        approx_weight: r2(pk.reduce((t, x) => t + x.weight, 0)),
+        invoice_value: value,
+        invoice_number: invNo,
+        invoice_date: today,
+        is_insured: false,
+        is_to_pay: false,
+        to_pay_amount: null,
+        is_cod: !!s.cod,
+        ...(s.cod ? { cod_amount: r2(s.codAmount) } : {}),
+        mode_name: mode,
+        source_warehouse_name: String(acc.options?.warehouseName || p.name || s.seller.name).slice(0, 50),
+        source_address_line1: String(p.address).slice(0, 200),
+        source_address_line2: "",
+        source_pincode: String(p.pincode),
+        source_city: p.city || "",
+        source_state: stateName(p.state),
+        sender_contact_person_name: p.name || s.seller.name,
+        sender_contact_person_email: senderEmail,
+        sender_contact_person_contact_no: phone10(p.phone),
+        destination_warehouse_name: `${c.name} ${s.reference}`.slice(0, 50),
+        destination_address_line1: c.address1,
+        destination_address_line2: c.address2 || "",
+        destination_pincode: c.pincode,
+        destination_city: c.city,
+        destination_state: c.stateName,
+        recipient_contact_person_name: c.name,
+        recipient_contact_person_email: cargoEmail(c.email) || senderEmail,
+        recipient_contact_person_contact_no: c.phone,
+        packaging_unit_details: pk,
+        channel_partner: null,
+        po_no: null,
+        po_expiry_date: null,
+        is_appointment_taken: false,
+        source: "API",
+      },
+    });
+    const od = o.data || {};
+    if (!od.order_id) throw new Error(`Shiprocket Cargo didn't create the order (${o.status}): ${cargoErr(od)}`);
+    // The carrier: the one chosen in the booking box ("partnerId:modeId"), else the account's, else Cargo's pick.
+    const list = od.carrier_list || [];
+    const [wantDp, wantMode] = String(manual.courierId || acc.options?.deliveryPartnerId || "").split(":");
+    const hit =
+      (wantDp && list.find((x) => String(x.delivery_partner_id) === wantDp && (!wantMode || String(x.mode_id) === wantMode))) ||
+      (od.delivery_partner_id ? { delivery_partner_id: od.delivery_partner_id, mode_id: od.mode_id, delivery_partner_name: od.delivery_partner_name } : list[0]);
+    if (!hit) throw new Error(`Shiprocket Cargo created order ${od.order_id} but no carrier serves ${c.pincode}`);
+    if (wantDp && String(hit.delivery_partner_id) !== wantDp) throw new Error(`Shiprocket Cargo order ${od.order_id}: delivery partner ${wantDp} isn't offered for this route`);
+    const pickupAt = od.scheduled_pickup_date ? `${od.scheduled_pickup_date} 11:00:00` : `${today} 15:00:00`;
+    const refs = { orderId: od.order_id, deliveryPartnerId: hit.delivery_partner_id, modeId: hit.mode_id, transporterId: hit.transportar_id || od.transportar_id || "" };
+    const a = await this.call(acc, "/api/order_shipment_association/", {
+      method: "POST",
+      json: {
+        client_id,
+        order_id: od.order_id,
+        remarks: `Order ${s.reference}`,
+        recipient_GST: null,
+        mode_id: hit.mode_id,
+        delivery_partner_id: hit.delivery_partner_id,
+        ...(eway ? { eway_bill_no: eway } : {}),
+        invoice_value: value,
+        invoice_number: invNo,
+        invoice_date: today,
+        pickup_date_time: pickupAt,
+        ...(s.cod ? { cod_amount: r2(s.codAmount) } : {}),
+        source: "API",
+      },
+    });
+    const sd = a.data || {};
+    if (!sd.id) throw new Error(`Shiprocket Cargo created order ${od.order_id} but didn't book it (${a.status}): ${cargoErr(sd)}`);
+    refs.shipmentId = sd.id;
+    let awb = sd.waybill_no || "";
+    let labelUrl = sd.label_url || "";
+    // Async accounts: the docket number comes a little later.
+    for (const wait of [5000, 10000, 15000]) {
+      if (awb) break;
+      await new Promise((r) => setTimeout(r, wait));
+      const g = await this.call(acc, `/api/external/get_shipment/${sd.id}`).catch(() => null);
+      awb = g?.data?.waybill_no || "";
+      labelUrl = g?.data?.label_url || labelUrl;
+    }
+    if (sd.child_waybill_nos?.length) refs.childAwbs = sd.child_waybill_nos;
+    const courierName = `Shiprocket Cargo · ${hit.delivery_partner_name || sd.delivery_partner?.name || "carrier"}`;
+    if (!awb) {
+      // Booked: the docket number is fetched on the next tracking update.
+      refs.awbPending = true;
+      return { awb: `CARGO-${sd.id}`, courierName, labelUrl, trackingUrl: "", refs };
+    }
+    return { awb: String(awb), courierName, labelUrl, trackingUrl: CARGO_TRACK(awb), refs };
+  },
+  async track(acc, sh) {
+    let awb = sh.awb;
+    let extra = {};
+    if (sh.refs?.awbPending || /^CARGO-/.test(awb)) {
+      const { data } = await this.call(acc, `/api/external/get_shipment/${sh.refs?.shipmentId || awb.replace(/^CARGO-/, "")}`);
+      if (!data?.waybill_no) return { status: "pending", text: data?.status || "Booked — waiting for the docket number", events: [] };
+      awb = String(data.waybill_no);
+      extra = { awb, labelUrl: data.label_url || "", trackingUrl: CARGO_TRACK(awb), refs: { ...(sh.refs || {}), awbPending: false } };
+    }
+    const { status, data } = await this.call(acc, `/api/shipment/track/${encodeURIComponent(awb)}/`);
+    if (status === 404) return { status: "pending", text: "Not scanned yet", events: [], ...extra };
+    const d = Array.isArray(data) ? data[0] || {} : data || {};
+    const cur = d.status || "";
+    const map = /^(undelivered|rto)/i.test(cur) ? "rto" : /^(lost|damaged|destroyed|disposed off|failed)$/i.test(cur) ? "cancelled" : normStatus(cur);
+    const events = (d.status_history || []).map((e) => ({ at: new Date(e.timestamp || e.added_at), status: e.status + (e.remarks ? ` — ${e.remarks}` : ""), location: e.location || "" }));
+    return { status: /^undelivered$/i.test(cur) ? "in_transit" : map, text: cur, events, ...extra };
+  },
+  async label(acc, sh) {
+    if (sh.labelUrl) return { url: sh.labelUrl };
+    if (!sh.refs?.shipmentId) return null;
+    const { data } = await this.call(acc, `/api/external/get_shipment/${sh.refs.shipmentId}`);
+    return data?.label_url ? { url: data.label_url } : null;
+  },
+  async cancel() {
+    throw new Error("Shiprocket Cargo's API can't cancel a docket — cancel it in the Cargo dashboard (app-cargo.shiprocket.in), then mark it cancelled here");
+  },
+};
+
+const CARRIERS = { shiprocket, shiprocket_cargo, delhivery, bluedart, dtdc, shadowfax, custom };
 
 // Amount to collect on delivery: all of a COD order, the unpaid part of a partly paid one.
 function codOf(order) {

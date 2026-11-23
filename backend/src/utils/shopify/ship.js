@@ -309,6 +309,8 @@ async function bookBoxes({
     return c;
   });
   const base = shipmentFrom(order, org, { weight: 1 }, items).reference;
+  if (CARRIERS[acc.carrier]?.multiPackage)
+    return bookOneDocket({ ctx, order, acc, seller, store, org, items, boxes, manual, skipCheck, codTotal, base });
   const booked = [];
   const problems = [];
   for (let i = 0; i < n; i++) {
@@ -440,6 +442,83 @@ async function bookBoxes({
     charge: booked.reduce((t, x) => t + (x.charge || 0), 0) || null,
     warning: problems.join(" · "),
   };
+}
+
+// Carriers that take several packages on one docket (Shiprocket Cargo): every box in one booking.
+async function bookOneDocket({ ctx, order, acc, seller, store, org, items, boxes, manual, skipCheck, codTotal, base }) {
+  const merged = new Map();
+  for (const b of boxes)
+    for (const l of b.lines) {
+      const m = merged.get(l.lineId) || { lineId: l.lineId, title: l.title, sku: l.sku, unit: l.unit, quantity: 0 };
+      m.quantity += l.quantity / (l.of || 1);
+      merged.set(l.lineId, m);
+    }
+  const lines = [...merged.values()].map((l) => ({ ...l, quantity: Math.round(l.quantity * 1e6) / 1e6 }));
+  const view = boxOrder(order, { lines }, codTotal);
+  const pkgs = [];
+  for (let i = 0; i < boxes.length; i++) {
+    const p = await resolvePackage(boxOrder(order, boxes[i], 0), boxes[i].pkg, ctx.storeOrg || ctx.org, items);
+    if (!p) throw new Error(`Box ${i + 1}: no package type for its products — enter its weight and size`);
+    pkgs.push(p);
+  }
+  const weight = Math.round(pkgs.reduce((t, p) => t + (Number(p.weight) || 0), 0) * 1000) / 1000;
+  const big = [...pkgs].sort((a, b) => b.weight - a.weight)[0];
+  const s = shipmentFrom(view, org, { ...big, weight }, items);
+  s.packages = pkgs.map((p) => ({ weight: p.weight, length: p.length, breadth: p.breadth, height: p.height }));
+  s.reference = base;
+  checkShipment(s);
+  if (s.cod && acc.options?.codEnabled === false) throw new Error(`${acc.name} isn't set up for COD`);
+  const q = await quoteAccount(acc, s);
+  if (q.serviceable === false && !skipCheck) throw new Error(`Not serviceable: ${q.note || s.consignee.pincode}`);
+  const opt = manual.courierId && (q.options || []).find((o) => o.courierId === String(manual.courierId));
+  const charge = opt ? opt.charge : q.charge;
+  const out = await CARRIERS[acc.carrier].book(acc, s, manual);
+  const sh = {
+    account: acc._id,
+    carrier: acc.carrier,
+    courierName: out.courierName,
+    awb: out.awb,
+    labelUrl: out.labelUrl || "",
+    trackingUrl: out.trackingUrl || "",
+    refs: { ...(out.refs || {}), packages: boxes.length },
+    weight: s.weight,
+    length: s.length,
+    breadth: s.breadth,
+    height: s.height,
+    packageName: `${boxes.length} boxes`,
+    charge: charge ?? undefined,
+    chargeSource: charge != null ? (opt ? "api" : q.source) : "",
+    codAmount: s.cod ? s.codAmount : 0,
+    bookedAt: new Date(),
+    trackStatus: "pending",
+    events: [],
+    lines: lines.map(({ lineId, title, sku, quantity }) => ({ lineId, title, sku, quantity })),
+    ...(seller ? { seller: seller._id, pickup: { ...acc.pickup, seller: String(seller._id), sellerName: seller.name } } : {}),
+  };
+  let warning = "";
+  if (store?.fulfillInShopify && (!order.channel || order.channel === "shopify")) {
+    try {
+      sh.shopifyFulfilled = await fulfillInShopify(store, order, sh, sh.lines);
+    } catch (e) {
+      warning = `Booked, but not marked fulfilled in Shopify (${e.message})`;
+    }
+  }
+  if (out.refs?.awbPending)
+    warning = [warning, "Shiprocket Cargo booked it; the docket number comes in a minute or two (Refresh tracking)"].filter(Boolean).join(" · ");
+  order.shipment = sh;
+  order.extraShipments = undefined;
+  order.boxes = boxes.map((b, i) => ({
+    box: i + 1,
+    lines: b.lines.map(({ lineId, title, sku, quantity, part, of }) => ({ lineId, title, sku, quantity, ...(of ? { part, of } : {}) })),
+    booked: true,
+  }));
+  order.status = "ready_to_ship";
+  order.statusChangedAt = new Date();
+  order.markModified("shipment");
+  order.markModified("extraShipments");
+  order.markModified("boxes");
+  await saveBooking(order, ["shipment", "extraShipments", "boxes", "status", "statusChangedAt"]);
+  return { awb: out.awb, courierName: out.courierName, boxes: boxes.length, of: boxes.length, charge: charge ?? null, warning };
 }
 
 // One label view per box of a several-box (or partly shipped) order: only that box's products and COD.
@@ -855,6 +934,14 @@ async function trackOrder(order) {
   const t = await CARRIERS[acc.carrier].track(acc, sh);
   if (t.status === "pending" && require("../couriers").handedOver(t.events))
     t.status = "in_transit";
+  // A docket number that came after booking (Shiprocket Cargo's async bookings).
+  if (t.awb && t.awb !== sh.awb) {
+    sh.awb = t.awb;
+    if (t.labelUrl) sh.labelUrl = t.labelUrl;
+    if (t.trackingUrl) sh.trackingUrl = t.trackingUrl;
+    if (t.refs) sh.refs = t.refs;
+    order.markModified("shipment");
+  }
   sh.trackStatus = t.status;
   sh.trackedAt = new Date();
   if (t.events?.length)

@@ -1476,6 +1476,7 @@ router.post(
           awb: Joi.string().allow(""),
           courierName: Joi.string().allow(""),
           courierId: Joi.string().allow(""),
+          ewayBill: Joi.string().trim().allow("").max(20),
         }).default({}),
         invoiceFirst: Joi.boolean().default(false),
         skipCheck: Joi.boolean().default(false),

@@ -253,6 +253,47 @@ const QUOTES = {
     return { serviceable: flag };
   },
 
+  // Shiprocket Cargo's rate calculator: every carrier on the route, ordered by the account's courier rules.
+  async shiprocket_cargo(acc, q) {
+    const c = CARRIERS.shiprocket_cargo;
+    if (!q.from) return { serviceable: null, note: "Add the pickup pincode to this courier to check rates" };
+    const { stateName } = require("./index");
+    const pk = c.packages(q);
+    const { status, data } = await c.call(acc, "/api/shipment/charges/", {
+      method: "POST",
+      timeout: 14000,
+      json: {
+        from_pincode: q.from,
+        from_city: q.fromCity || "-",
+        from_state: stateName(q.fromState) || "-",
+        to_pincode: q.to,
+        to_city: q.toCity || "-",
+        to_state: q.toState || "-",
+        quantity: pk.length,
+        invoice_value: Math.max(1, r2(q.value)),
+        is_cod: !!q.cod,
+        ...(q.cod ? { cod_amount: Math.max(1, r2(q.codAmount)) } : {}),
+        packaging_unit_details: pk,
+      },
+    });
+    if (status >= 400) throw new Error(typeof data === "object" ? Object.values(data).flat().join("; ").slice(0, 200) : `rate check failed (${status})`);
+    const options = Object.entries(data || {})
+      .filter(([k, v]) => k !== "success" && v && typeof v === "object" && v.id)
+      .map(([, v]) => ({
+        courierId: `${v.id}:${v.mode_id}`,
+        name: `${v.delivery_partner} (${v.mode_name})`,
+        charge: Number(v.rates) > 0 ? r2(v.rates) : null,
+        etd: "",
+        breakdown: v.working ? { freight: r2(v.working.freight || 0), fuel_surcharge: r2(v.working.fsc || 0), gst: r2(v.working.gst || 0) } : undefined,
+        zone: v.working?.recipient_zone || "",
+      }))
+      .filter((o) => o.charge != null);
+    if (!options.length) return { serviceable: false, note: `Shiprocket Cargo has no carrier for ${q.to}` };
+    const want = String(acc.options?.deliveryPartnerId || "");
+    const pick = (want && options.find((o) => o.courierId.split(":")[0] === want)) || options[0];
+    return { serviceable: true, charge: pick.charge, courierName: pick.name, courierId: pick.courierId, breakdown: pick.breakdown, zone: pick.zone, options: options.slice(0, 8) };
+  },
+
   async shadowfax(acc, q) {
     const c = CARRIERS.shadowfax;
     if (!acc.credentials?.token) return { serviceable: null, note: "Add the API token" };
@@ -276,7 +317,7 @@ const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeo
 // One courier: live check, then the rate card for the charge if the API had none.
 async function quoteAccount(acc, s) {
   const p = acc.pickup || {};
-  const q = { from: p.pincode || "", to: s.consignee.pincode, weight: s.weight, length: s.length, breadth: s.breadth, height: s.height, cod: s.cod, codAmount: s.codAmount, value: s.value };
+  const q = { from: p.pincode || "", to: s.consignee.pincode, weight: s.weight, length: s.length, breadth: s.breadth, height: s.height, cod: s.cod, codAmount: s.codAmount, value: s.value, fromCity: p.city || "", fromState: p.state || "", toCity: s.consignee.city || "", toState: s.consignee.stateName || "", packages: s.packages };
   // Chargeable weight with this courier's volumetric divisor, rounded up to a whole kg.
   const cwt = chargeableWeight(q, acc.rateCard || {});
   q.cw = cwt.weight;

@@ -28,9 +28,18 @@ const FIELD_LABEL = {
   vendorCode: "Vendor code (optional)",
   serviceType: "Service type",
   commodityId: "Commodity ID (optional)",
+  accessToken: "Access token",
+  refreshToken: "Refresh token",
+  warehouseName: "Pickup warehouse name in Cargo (optional)",
+  senderEmail: "Sender email",
+  cargoMode: "Mode",
+  deliveryPartnerId: "Delivery partner ID (optional)",
 };
 const OPTIONAL = [
   "courierId",
+  "warehouseName",
+  "cargoMode",
+  "deliveryPartnerId",
   "vendorCode",
   "commodityId",
   "trackingKey",
@@ -60,6 +69,10 @@ const SELECTS = {
   shippingMode: [
     ["Surface", "Surface"],
     ["Express", "Express"],
+  ],
+  cargoMode: [
+    ["surface", "Surface"],
+    ["air", "Air"],
   ],
 };
 const list = (s) =>

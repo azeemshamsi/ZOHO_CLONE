@@ -1288,6 +1288,24 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
                 time.
               </p>
             ))}
+          {acc?.carrier === "shiprocket_cargo" && (
+            <div className="row-2">
+              <Field
+                label="E-way bill no."
+                hint="Needed when the invoice is above ₹50,000 (Part-A is enough)"
+              >
+                <input
+                  value={manual.ewayBill || ""}
+                  onChange={(e) =>
+                    setManual({ ...manual, ewayBill: e.target.value })
+                  }
+                />
+              </Field>
+              <p className="muted small" style={{ alignSelf: "center" }}>
+                Every box goes on one Cargo docket.
+              </p>
+            </div>
+          )}
           {single && <BoxesEditor orderId={ids[0]} onChange={setBoxes} />}
           {single && boxes && acc?.carrier === "custom" && (
             <div className="row-4">
@@ -1947,7 +1965,8 @@ function ReverseModal({ order, couriers, onClose, onDone }) {
       .catch(() => {});
   }, []);
   const acc = active.find((c) => c._id === f.accountId);
-  const manualOnly = acc && ["custom", "shadowfax"].includes(acc.carrier);
+  const manualOnly =
+    acc && ["custom", "shadowfax", "shiprocket_cargo"].includes(acc.carrier);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const a = order.shippingAddress || {};
   const submit = async () => {
