@@ -294,6 +294,40 @@ const QUOTES = {
     return { serviceable: true, charge: pick.charge, courierName: pick.name, courierId: pick.courierId, breakdown: pick.breakdown, zone: pick.zone, options: options.slice(0, 8) };
   },
 
+  // Velocity's rate API: every courier on the route with its forward charge (weight in grams).
+  async velocity(acc, q) {
+    const c = CARRIERS.velocity;
+    if (!q.from) return { serviceable: null, note: "Add the pickup pincode to this courier to check rates" };
+    const { status, data } = await c.call(acc, "/rates", {
+      journey_type: "forward",
+      origin_pincode: q.from,
+      destination_pincode: q.to,
+      dead_weight: Math.max(1, Math.round((Number(q.weight) || 0.5) * 1000)),
+      length: Number(q.length) || 10,
+      width: Number(q.breadth) || 10,
+      height: Number(q.height) || 10,
+      payment_method: q.cod ? "cod" : "prepaid",
+      ...(q.cod ? { shipment_value: Math.max(1, r2(q.codAmount || q.value)) } : {}),
+    });
+    if (status >= 400) throw new Error(data?.message || `rate check failed (${status})`);
+    const options = (data.result?.serviceable_couriers || [])
+      .filter((x) => x.carrier_id && (!x.status || x.status === "active"))
+      .map((x) => ({
+        courierId: String(x.carrier_id),
+        name: x.carrier_name || x.carrier_code,
+        charge: r2(Number(x.charges?.total_forward_charges || 0) + Number(x.platform_fee || 0)),
+        etd: x.expected_delivery?.delivery || "",
+        breakdown: { freight: r2(x.charges?.forward_freight_charges || 0), cod_charge: r2(x.charges?.cod_charges || 0) },
+      }))
+      .filter((o) => o.charge > 0)
+      .sort((a, b) => a.charge - b.charge);
+    if (!options.length) return { serviceable: false, note: `Velocity has no courier for ${q.to}` };
+    const want = String(acc.options?.carrierId || "");
+    if (want && !options.some((o) => o.courierId === want)) return { serviceable: false, note: `Your chosen Velocity carrier (${want}) doesn't serve ${q.to}`, options };
+    const pick = options.find((o) => o.courierId === want) || options[0];
+    return { serviceable: true, charge: pick.charge, etd: pick.etd, courierName: pick.name, courierId: pick.courierId, breakdown: pick.breakdown, zone: String(data.result?.shipment_details?.zone || ""), options: options.slice(0, 8) };
+  },
+
   async shadowfax(acc, q) {
     const c = CARRIERS.shadowfax;
     if (!acc.credentials?.token) return { serviceable: null, note: "Add the API token" };

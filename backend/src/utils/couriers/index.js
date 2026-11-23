@@ -790,7 +790,86 @@ const shiprocket_cargo = {
   },
 };
 
-const CARRIERS = { shiprocket, shiprocket_cargo, delhivery, bluedart, dtdc, shadowfax, custom };
+/* ---------------- Velocity Shipping (shazam.velocity.in) ---------------- */
+// Two steps: forward-order (creates the order at the warehouse) then forward-order-shipment (assigns the courier:
+// the one chosen in the booking box, the account's, or Velocity's shipping rules) → AWB + label.
+const velErr = (d) => (d && typeof d === "object" ? d.message || d.error || d.errors || d.payload?.message || d : d);
+const velocity = {
+  title: "Velocity Shipping",
+  fields: { credentials: ["apiKey"], options: ["warehouseId", "pickupLocation", "carrierId"] },
+  help: "Velocity dashboard → Settings → API Keys → Generate API Key (up to 365 days; shown once). Warehouse ID and pickup location name are on your warehouse in Velocity. Carrier ID is optional (blank = your Velocity shipping rules).",
+  base: (acc) => (acc.baseUrl || "https://shazam.velocity.in").replace(/\/$/, ""),
+  async call(acc, path, json) {
+    need(acc, ["apiKey"]);
+    const key = String(acc.credentials.apiKey).replace(/^Bearer\s+/i, "");
+    const res = await request(`${this.base(acc)}/custom/api/v1${path}`, { method: "POST", headers: { authorization: `Bearer ${key}` }, json, timeout: 40000 });
+    if (res.status === 401) throw new Error("Velocity rejected the API key — generate a new one (Settings → API Keys) and save it here");
+    return res;
+  },
+  // A light call to check the key (Couriers → Save).
+  async token(acc) {
+    const { status, data } = await this.call(acc, "/serviceability", { from: acc.pickup?.pincode || "110001", to: "110001", payment_mode: "prepaid", shipment_type: "forward" });
+    if (status >= 400) throw new Error(`Velocity: ${short(velErr(data))}`);
+    return "ok";
+  },
+  async book(acc, s, manual = {}) {
+    need2(acc, ["warehouseId", "pickupLocation"]);
+    const c = s.consignee;
+    const at = new Date(s.orderDate.getTime() + 5.5 * 3600000).toISOString();
+    const o = await this.call(acc, "/forward-order", {
+      order_id: s.reference,
+      order_date: `${at.slice(0, 10)} ${at.slice(11, 16)}`,
+      billing_customer_name: c.name,
+      billing_last_name: "",
+      billing_address: [c.address1, c.address2].filter(Boolean).join(", "),
+      billing_city: c.city,
+      billing_pincode: c.pincode,
+      billing_state: c.stateName,
+      billing_country: "India",
+      billing_email: c.email || "",
+      billing_phone: c.phone,
+      shipping_is_billing: true,
+      print_label: true,
+      order_items: s.items.map((i) => ({ name: i.name, sku: i.sku || i.name.slice(0, 40), units: i.quantity, selling_price: r2(i.price), hsn: i.hsn || "" })),
+      payment_method: s.cod ? "COD" : "PREPAID",
+      sub_total: r2(s.value),
+      cod_collectible: s.cod ? r2(s.codAmount) : 0,
+      shipping_charges: 0,
+      length: s.length,
+      breadth: s.breadth,
+      height: s.height,
+      weight: s.weight,
+      pickup_location: acc.options.pickupLocation,
+      warehouse_id: acc.options.warehouseId,
+    });
+    const p1 = o.data?.payload || {};
+    if (o.status >= 400 || !p1.shipment_id) throw new Error(`Velocity didn't create the order (${o.status}): ${short(velErr(o.data))}`);
+    const refs = { orderId: p1.order_id, shipmentId: p1.shipment_id };
+    // Courier auto-assignment on the account may already have given the AWB.
+    if (p1.awb_code) return { awb: String(p1.awb_code), courierName: p1.courier_name || "Velocity", labelUrl: p1.label_url || "", refs };
+    const a = await this.call(acc, "/forward-order-shipment", { shipment_id: p1.shipment_id, carrier_id: String(manual.courierId || acc.options.carrierId || "") });
+    const p2 = a.data?.payload || {};
+    if (!p2.awb_code) throw new Error(`Velocity created order ${p1.order_id} but couldn't assign a courier: ${short(velErr(a.data))}`);
+    return { awb: String(p2.awb_code), courierName: p2.courier_name || "Velocity", labelUrl: p2.label_url || "", refs };
+  },
+  async track(acc, sh) {
+    const { status, data } = await this.call(acc, "/order-tracking", { awbs: [sh.awb] });
+    if (status >= 400) throw new Error(short(velErr(data)));
+    const td = data.result?.[sh.awb]?.tracking_data || Object.values(data.result || {})[0]?.tracking_data || {};
+    const cur = td.shipment_status || td.shipment_track?.[0]?.current_status || "";
+    const events = (td.shipment_track_activities || []).map((e) => ({ at: new Date(String(e.date).replace(" ", "T") + "+05:30"), status: e.activity, location: e.location || "" }));
+    return { status: normStatus(String(cur).replace(/_/g, " ")), text: cur, events, ...(td.track_url ? { trackingUrl: td.track_url } : {}) };
+  },
+  async label(acc, sh) {
+    return sh.labelUrl ? { url: sh.labelUrl } : null;
+  },
+  async cancel(acc, sh) {
+    const { status, data } = await this.call(acc, "/cancel-order", { awbs: [sh.awb] });
+    if (status >= 400) throw new Error(short(velErr(data)));
+  },
+};
+
+const CARRIERS = { shiprocket, shiprocket_cargo, velocity, delhivery, bluedart, dtdc, shadowfax, custom };
 
 // Amount to collect on delivery: all of a COD order, the unpaid part of a partly paid one.
 function codOf(order) {

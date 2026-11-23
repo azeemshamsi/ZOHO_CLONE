@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 const courierAccountSchema = new mongoose.Schema(
   {
     organization: { type: mongoose.Schema.Types.ObjectId, ref: "Organization", required: true, index: true },
-    carrier: { type: String, enum: ["shiprocket", "shiprocket_cargo", "delhivery", "bluedart", "dtdc", "shadowfax", "custom"], required: true },
+    carrier: { type: String, enum: ["shiprocket", "shiprocket_cargo", "velocity", "delhivery", "bluedart", "dtdc", "shadowfax", "custom"], required: true },
     name: { type: String, required: true, trim: true },
     active: { type: Boolean, default: true },
     isDefault: { type: Boolean, default: false },

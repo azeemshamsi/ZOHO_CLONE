@@ -34,12 +34,15 @@ const FIELD_LABEL = {
   senderEmail: "Sender email",
   cargoMode: "Mode",
   deliveryPartnerId: "Delivery partner ID (optional)",
+  warehouseId: "Warehouse ID",
+  carrierId: "Carrier ID (optional)",
 };
 const OPTIONAL = [
   "courierId",
   "warehouseName",
   "cargoMode",
   "deliveryPartnerId",
+  "carrierId",
   "vendorCode",
   "commodityId",
   "trackingKey",
