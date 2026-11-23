@@ -453,6 +453,30 @@ const MIGRATIONS = [
       console.log("#200962: box sizes set");
     },
   },
+  {
+    // Tally manufacturing journals carry labour as an additional cost that Tally adds to what's produced; the first
+    // import left it out, so made items were valued too low. Their rates (from the Day Book of 21 Nov 2026).
+    id: "2026-11-tally-mfg-additional-costs",
+    run: async () => {
+      const InventoryAdjustment = require("../models/InventoryAdjustment");
+      const fix = require("./data/tallyMfgRates.json");
+      let n = 0;
+      for (const f of fix) {
+        const key = `tally:stockAdjustment:${f.n.toLowerCase()}|${f.d}`;
+        for (const a of await InventoryAdjustment.find({ importRef: key })) {
+          const made = a.lines.filter((l) => l.quantityAdjusted > 0);
+          if (made.length !== f.r.length) continue;
+          made.forEach((l, i) => (l.costPrice = f.r[i]));
+          a.markModified("lines");
+          await a.save();
+          n++;
+        }
+      }
+      console.log(
+        `Tally manufacturing: ${n} journals now include their additional costs`,
+      );
+    },
+  },
 ];
 
 async function runMigrations() {
