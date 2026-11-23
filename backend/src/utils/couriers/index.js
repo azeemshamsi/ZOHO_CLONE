@@ -589,8 +589,14 @@ const custom = {
     }
     return { awb, courierName: manual.courierName || acc.name, trackingUrl: acc.trackingUrl ? acc.trackingUrl.replace("{awb}", encodeURIComponent(awb)) : "", refs: {} };
   },
-  async track() {
-    throw new Error("Custom couriers aren't tracked automatically — update the status from the order");
+  // Tracked through another courier account of the same company (its API), when one is chosen.
+  async track(acc, sh) {
+    const via = acc.options?.trackWith;
+    if (!via) throw new Error("Custom couriers aren't tracked automatically — choose an API account to track with, or update the status from the order");
+    const CourierAccount = require("../../models/CourierAccount");
+    const other = await CourierAccount.findOne({ _id: via, organization: acc.organization });
+    if (!other || other.carrier === "custom") throw new Error("The courier account chosen for tracking no longer exists");
+    return CARRIERS[other.carrier].track(other, { awb: sh.awb, refs: {} });
   },
   async label() {
     return null;

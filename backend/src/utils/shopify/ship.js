@@ -1244,9 +1244,12 @@ async function trackAll() {
     "shipment.account": { $exists: true },
     "shipment.bookedAt": { $gte: since },
   }).limit(3000);
-  // Every courier but custom ones (no API to ask); errors on one order never stop the rest.
+  // Every courier, custom ones too when they're set to track through an API account; errors on one order never stop the rest.
+  const customs = new Map(
+    (await CourierAccount.find({ carrier: "custom" }, { options: 1 }).lean()).map((a) => [String(a._id), !!a.options?.trackWith]),
+  );
   for (const o of orders) {
-    if (o.shipment?.carrier === "custom") continue;
+    if (o.shipment?.carrier === "custom" && !customs.get(String(o.shipment.account))) continue;
     await trackOrder(o).catch((e) =>
       console.error(`[tracking] ${o.name} (${o.shipment?.awb}): ${e.message}`),
     );

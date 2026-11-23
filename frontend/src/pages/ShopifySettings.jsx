@@ -790,7 +790,7 @@ function Rules({ store, onSaved }) {
   );
 }
 
-function CourierModal({ acc, carriers, onClose, onSaved }) {
+function CourierModal({ acc, carriers, others = [], onClose, onSaved }) {
   const isNew = !acc._id;
   const [f, setF] = useState({
     carrier: acc.carrier || "shiprocket",
@@ -1010,6 +1010,26 @@ function CourierModal({ acc, carriers, onClose, onSaved }) {
                 ),
               )}
           </div>
+        )}
+        {f.carrier === "custom" && (
+          <Field
+            label="Track its AWBs with"
+            hint="Shipments of this courier are tracked hourly through the chosen API account of the same courier (e.g. a DTDC custom courier through your DTDC account), and their status goes to Shopify. Leave blank if you have no API account for it."
+          >
+            <select
+              value={f.options.trackWith || ""}
+              onChange={(e) => setO("trackWith", e.target.value)}
+            >
+              <option value="">Not tracked (update the status by hand)</option>
+              {others
+                .filter((o) => o.carrier !== "custom" && o._id !== acc._id)
+                .map((o) => (
+                  <option key={o._id} value={o._id}>
+                    {o.name} ({carriers[o.carrier]?.label || o.carrier})
+                  </option>
+                ))}
+            </select>
+          </Field>
         )}
         {f.carrier === "custom" && (
           <div className="row-2">
@@ -2222,6 +2242,7 @@ function Couriers({ carriers }) {
         <CourierModal
           acc={edit}
           carriers={carriers}
+          others={rows || []}
           onClose={() => setEdit(null)}
           onSaved={() => {
             setEdit(null);
