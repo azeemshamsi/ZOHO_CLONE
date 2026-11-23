@@ -36,6 +36,10 @@ const FIELD_LABEL = {
   deliveryPartnerId: "Delivery partner ID (optional)",
   warehouseId: "Warehouse ID",
   carrierId: "Carrier ID (optional)",
+  username: "Login username / email",
+  accessKey: "API access key",
+  returnWarehouseId: "Return warehouse ID (optional)",
+  categoryId: "Product category ID (optional)",
 };
 const OPTIONAL = [
   "courierId",
@@ -43,6 +47,8 @@ const OPTIONAL = [
   "cargoMode",
   "deliveryPartnerId",
   "carrierId",
+  "returnWarehouseId",
+  "categoryId",
   "vendorCode",
   "commodityId",
   "trackingKey",

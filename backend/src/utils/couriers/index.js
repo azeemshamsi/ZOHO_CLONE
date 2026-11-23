@@ -875,7 +875,133 @@ const velocity = {
   },
 };
 
-const CARRIERS = { shiprocket, shiprocket_cargo, velocity, delhivery, bluedart, dtdc, shadowfax, custom };
+/* ---------------- BigShip (Unified Outbound API, api.bigship.direct) ---------------- */
+// login (username + password + access key → token, ~1 hour) → create-order (B2C) → courier-wise-shipment-cost →
+// place-order (courier) → AWB. Labels come as a file from download-shipment-documents.
+const bsMsg = (d) => (d && typeof d === "object" ? d.message || (d.errors ? JSON.stringify(d.errors) : "") || JSON.stringify(d) : String(d || "")).slice(0, 300);
+const bigship = {
+  title: "BigShip",
+  fields: { credentials: ["username", "password", "accessKey"], options: ["warehouseId", "returnWarehouseId", "courierId", "categoryId"] },
+  help: "BigShip → Settings → API: your login email/username, password and the API access key. Warehouse ID = the pickup address's ID in BigShip (Settings → Warehouses). Courier ID is optional (blank = choose per order, cheapest first).",
+  base: (acc) => (acc.baseUrl || "https://api.bigship.direct").replace(/\/$/, ""),
+  async token(acc) {
+    if (acc.token && acc.tokenExpires > new Date()) return acc.token;
+    need(acc, ["username", "password", "accessKey"]);
+    const { status, data } = await request(`${this.base(acc)}/api/outbound/login`, {
+      method: "POST",
+      json: { username: acc.credentials.username, password: acc.credentials.password, access_key: acc.credentials.accessKey },
+      timeout: 20000,
+    });
+    const tok = data?.data?.token;
+    if (!tok) throw new Error(`BigShip login failed (${status}): ${bsMsg(data)}`);
+    acc.token = tok;
+    acc.tokenExpires = new Date(Date.now() + 50 * 60000);
+    await acc.save();
+    return tok;
+  },
+  async call(acc, path, { method = "POST", json, query } = {}) {
+    const tok = await this.token(acc);
+    const qs = query ? `?${new URLSearchParams(query)}` : "";
+    const res = await request(`${this.base(acc)}/api/outbound/${path}${qs}`, { method, json, headers: { authorization: `Bearer ${tok}` }, timeout: 40000 });
+    if (res.status === 401 || res.status === 403) {
+      acc.tokenExpires = new Date(0);
+      await acc.save().catch(() => {});
+      throw new Error("BigShip session expired; try again");
+    }
+    return res;
+  },
+  async book(acc, s, manual = {}) {
+    need2(acc, ["warehouseId"]);
+    const c = s.consignee;
+    const wh = parseInt(acc.options.warehouseId, 10);
+    const cod = s.cod ? r2(s.codAmount) : 0;
+    const tot = s.items.reduce((t, i) => t + i.price * i.quantity, 0) || 1;
+    let left = cod;
+    const products = s.items.map((i, n) => {
+      const amt = r2(i.price * i.quantity);
+      const col = n === s.items.length - 1 ? r2(left) : r2((cod * amt) / tot);
+      left -= col;
+      return { productName: i.name.slice(0, 100), hsn: i.hsn || "", qty: String(i.quantity), amount: String(r2(i.price)), totalAmount: amt, collectableAmount: s.cod ? col : 0, categoryId: String(acc.options.categoryId || "1") };
+    });
+    const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+    const o = await this.call(acc, "create-order", {
+      json: {
+        segment_type: "domestic_b2c",
+        MasterOrderPickUpLocation: wh,
+        MasterOrderReturnLocation: parseInt(acc.options.returnWarehouseId, 10) || wh,
+        MasterOrderDate: now,
+        MasterOrderPaymentMode: s.cod ? 2 : 1,
+        OrderInvoiceNo: String(s.invoiceNumber || s.reference).slice(0, 30),
+        MasterOrderInvoiceAmount: Math.max(1, r2(s.value)),
+        MasterOrderShippingName: c.name,
+        ...(c.email ? { MasterOrderShippingEmail: c.email } : {}),
+        MasterOrderShippingMobileNo: c.phone,
+        MasterOrderShippingAddress: c.address1,
+        MasterOrderShippingAddress2: c.address2 || "",
+        MasterOrderShippingLandmark: "",
+        MasterOrderShippingZipCode: c.pincode,
+        MasterOrderShippingCountry: "India",
+        MasterOrderShippingState: c.stateName,
+        MasterOrderShippingCity: c.city,
+        totalNumOfBoxes: 1,
+        boxes: [{ weight_unit: "kg", dimension_unit: "cm", noOfBoxes: 1, dimensions: [{ length: s.length, breadth: s.breadth, height: s.height, weight: s.weight }], products }],
+      },
+    });
+    const orderId = o.data?.data?.CustomGlobalOrderId;
+    if (!o.data?.status || !orderId) throw new Error(`BigShip didn't create the order (${o.status}): ${bsMsg(o.data)}`);
+    const refs = { orderId: String(orderId) };
+    const r = await this.call(acc, "courier-wise-shipment-cost", { json: { MasterCustomOrderId: String(orderId) } });
+    const rates = (r.data?.data?.calculatedRates || []).map((x) => ({ id: parseInt(x.courierId, 10), name: x.courierName, total: Number(String(x.total ?? x.total_freight ?? "").replace(/[^0-9.]/g, "")) || 0 }));
+    if (!rates.length) throw new Error(`BigShip created order ${orderId} but no courier serves ${c.pincode}: ${bsMsg(r.data)}`);
+    const want = parseInt(manual.courierId || acc.options.courierId, 10);
+    const pick = (want && rates.find((x) => x.id === want)) || [...rates].sort((a, b) => (a.total || 1e12) - (b.total || 1e12))[0];
+    if (want && pick.id !== want) throw new Error(`BigShip order ${orderId}: courier ${want} isn't offered for ${c.pincode}`);
+    const p = await this.call(acc, "place-order", { json: { MasterCustomOrderId: String(orderId), courierId: pick.id, riskTypeId: "2" } });
+    if (!p.data?.status) throw new Error(`BigShip created order ${orderId} but couldn't book ${pick.name}: ${bsMsg(p.data)}`);
+    refs.courierId = pick.id;
+    let awb = p.data?.data?.awb_assigned ? String(p.data.data.awb_assigned) : "";
+    for (const wait of [3000, 6000]) {
+      if (awb) break;
+      await new Promise((res) => setTimeout(res, wait));
+      const d = await this.call(acc, "order-shipment-details", { method: "GET", query: { MasterCustomOrderId: String(orderId) } }).catch(() => null);
+      awb = d?.data?.data?.getOrderDetails?.AwbNumber || "";
+    }
+    const courierName = `BigShip · ${pick.name}`;
+    if (!awb) return { awb: `BIGSHIP-${orderId}`, courierName, refs: { ...refs, awbPending: true } };
+    return { awb, courierName, refs };
+  },
+  async track(acc, sh) {
+    const id = sh.refs?.orderId || String(sh.awb).replace(/^BIGSHIP-/, "");
+    let extra = {};
+    if (sh.refs?.awbPending) {
+      const d = await this.call(acc, "order-shipment-details", { method: "GET", query: { MasterCustomOrderId: id } });
+      const awb = d.data?.data?.getOrderDetails?.AwbNumber;
+      if (!awb) return { status: "pending", text: "Booked — waiting for the AWB", events: [] };
+      extra = { awb: String(awb), refs: { ...sh.refs, awbPending: false } };
+    }
+    const { data } = await this.call(acc, "track-order", { method: "GET", query: { CustomGlobalOrderId: id } });
+    if (!data?.status) throw new Error(bsMsg(data));
+    const d = data.data || {};
+    const cur = d.order_status || d.tag || "";
+    const events = (d.tracking_histories || []).map((e) => ({ at: new Date(String(e.checkpoint_time).replace(" ", "T") + (/[zZ+]/.test(e.checkpoint_time) ? "" : "+05:30")), status: [e.order_status, e.message].filter(Boolean).join(" — "), location: "" }));
+    return { status: normStatus(cur), text: cur, events, ...extra };
+  },
+  async label(acc, sh) {
+    const id = sh.refs?.orderId;
+    if (!id) return null;
+    const { data } = await this.call(acc, "download-shipment-documents", { method: "GET", query: { CustomGlobalOrderId: id, document_type: "label" } });
+    const b64 = data?.data?.AttachmentData;
+    return b64 ? { pdf: Buffer.from(String(b64).replace(/^data:[^,]+,/, ""), "base64") } : null;
+  },
+  async cancel(acc, sh) {
+    const id = sh.refs?.orderId;
+    if (!id) throw new Error("No BigShip order ID on this shipment");
+    const { status, data } = await this.call(acc, "cancel-order", { json: { CustomGlobalOrderId: id } });
+    if (status >= 400 || data?.status === false) throw new Error(bsMsg(data));
+  },
+};
+
+const CARRIERS = { shiprocket, shiprocket_cargo, velocity, bigship, delhivery, bluedart, dtdc, shadowfax, custom };
 
 // Amount to collect on delivery: all of a COD order, the unpaid part of a partly paid one.
 function codOf(order) {

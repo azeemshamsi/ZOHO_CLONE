@@ -351,6 +351,34 @@ const QUOTES = {
     return { serviceable: true, charge: pick.charge ?? undefined, etd: pick.etd, courierName: pick.name, courierId: pick.courierId, breakdown: pick.breakdown, zone: String(res.shipment_details?.zone || ""), options: options.slice(0, 8) };
   },
 
+  // BigShip's rate calculator (B2C, owner's risk): every courier with its total, cheapest first.
+  async bigship(acc, q) {
+    const c = CARRIERS.bigship;
+    if (!q.from) return { serviceable: null, note: "Add the pickup pincode to this courier to check rates" };
+    const { data } = await c.call(acc, "user-rate-calculator", {
+      json: {
+        segment_type: "domestic_b2c",
+        sourcePincode: String(q.from),
+        destPincode: String(q.to),
+        invoiceValue: Math.max(1, r2(q.value)),
+        paymentModeId: q.cod ? 2 : 1,
+        ...(q.cod ? { codAmount: String(r2(q.codAmount)) } : {}),
+        riskTypeId: 2,
+        boxes: [{ box_length: Math.max(1, Math.round(q.length || 10)), box_width: Math.max(1, Math.round(q.breadth || 10)), box_height: Math.max(1, Math.round(q.height || 10)), box_dead_weight: Math.max(0.1, Number(q.weight) || 0.5), no_of_box: 1 }],
+      },
+    });
+    if (data?.status === false) throw new Error(String(data.message || "rate check failed").slice(0, 200));
+    const options = (Array.isArray(data?.data) ? data.data : [])
+      .filter((x) => x && x.courier_partner_id && !x.restricted_pincode_message)
+      .map((x) => ({ courierId: String(x.courier_partner_id), name: String(x.courierName || x.courier_partner_id), charge: Number(x.totalCharge) > 0 ? r2(x.totalCharge) : null, etd: x.tat ? `${x.tat} days` : "" }))
+      .filter((o) => o.charge != null)
+      .sort((a, b) => a.charge - b.charge);
+    if (!options.length) return { serviceable: false, note: `BigShip has no courier for ${q.to}` };
+    const want = String(acc.options?.courierId || "");
+    const pick = options.find((o) => o.courierId === want) || options[0];
+    return { serviceable: true, charge: pick.charge, etd: pick.etd, courierName: pick.name, courierId: pick.courierId, options: options.slice(0, 8) };
+  },
+
   async shadowfax(acc, q) {
     const c = CARRIERS.shadowfax;
     if (!acc.credentials?.token) return { serviceable: null, note: "Add the API token" };

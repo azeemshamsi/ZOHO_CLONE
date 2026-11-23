@@ -1977,7 +1977,7 @@ function ReverseModal({ order, couriers, onClose, onDone }) {
   }, []);
   const acc = active.find((c) => c._id === f.accountId);
   const manualOnly =
-    acc && ["custom", "shadowfax", "shiprocket_cargo", "velocity"].includes(acc.carrier);
+    acc && ["custom", "shadowfax", "shiprocket_cargo", "velocity", "bigship"].includes(acc.carrier);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const a = order.shippingAddress || {};
   const submit = async () => {
