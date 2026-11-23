@@ -298,6 +298,11 @@ function normalise(xml, known = {}) {
         type: parent,
         group: grp,
         ledgerKind: ledgerKindOf(parent),
+        tallyGroup: under(parent, "purchase accounts")
+          ? "Purchase Accounts"
+          : under(parent, "direct expenses")
+            ? "Direct Expenses"
+            : "",
         description: text(l.DESCRIPTION) || text(l.NARRATION),
         parent: "",
         opening: stock ? 0 : -ob,

@@ -24,6 +24,9 @@ const ledgersOf = (accounts, mv, test) =>
 const TAX_RX = /\b(gst|cgst|sgst|igst|utgst|cess|tds|tcs|duties|duty|tax)\b/i;
 const isTax = (a) => /^(input|output)_/.test(a.code) || (["Other Current Liability", "Other Current Asset"].includes(a.group) && TAX_RX.test(a.name));
 
+// Ledgers that are Direct Expenses in Tally even though bills post to them (Tally lets any ledger be a purchase voucher's).
+const DIRECT_RX = /\b(commission|shipping|freight|cartage|carriage|labou?r|wages|courier|transport|packing|loading|octroi|power|fuel)\b/i;
+
 async function profitAndLoss(org, q) {
   const { from, to } = parseRange(q);
   const [accounts, entries] = await Promise.all([chartOfAccounts(org), buildEntries(org, { to })]);
@@ -32,7 +35,13 @@ async function profitAndLoss(org, q) {
   const opening = round2(TV.stockValue(entries, new Date(from.getTime() - 1)) + naturalBalance(TV.OPENING_STOCK, mv[TV.OPENING_STOCK.code]));
   const closing = TV.stockValue(entries, to);
   const isSales = (a) => a.group === "Income" && (a.ledgerKind === "sales" || a.code === "sales");
-  const isPurchase = (a) => a.group === "Cost Of Goods Sold" && (a.ledgerKind === "purchase" || a.code === "cogs");
+  // Tally's own group decides when the ledger came from Tally's masters (or a name says it's a direct expense);
+  // otherwise a purchase ledger (bills post to it) is a Purchase Account.
+  const isPurchase = (a) =>
+    a.group === "Cost Of Goods Sold" &&
+    (a.tallyGroup
+      ? a.tallyGroup === "Purchase Accounts"
+      : a.code === "cogs" || (a.ledgerKind === "purchase" && !DIRECT_RX.test(a.name || "")));
 
   const openingStock = group("Opening Stock", [{ name: "Opening Stock", amount: opening }]);
   const purchases = group("Purchase Accounts", ledgersOf(tAcc, mv, isPurchase));

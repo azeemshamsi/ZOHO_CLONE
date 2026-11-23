@@ -29,6 +29,9 @@ const accountSchema = new mongoose.Schema(
     ledgerKind: { type: String, enum: ["", "sales", "purchase"], default: "" },
     // Purchases posted here are non-GST supplies (petrol, diesel, liquor…): GSTR-3B Table 5 "Non GST supply".
     nonGst: { type: Boolean, default: false },
+    // Tally's primary group for a Cost of Goods Sold ledger: "Purchase Accounts" or "Direct Expenses". The Tally
+    // P&L puts it on that line (a ledger used as a bill's purchase ledger, like Shipping, stays a Direct Expense).
+    tallyGroup: { type: String, default: "" },
     // "opening_stock_diff": Tally's Opening Stock ledger minus its items' opening values (shown as Opening Stock in the Tally view)
     role: { type: String, default: "" },
   },

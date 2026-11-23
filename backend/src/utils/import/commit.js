@@ -222,16 +222,17 @@ async function commit(ctx, data, opts, progress) {
       const have = lookupAccount(a.name, { exact: true });
       if (have) {
         // Accounts from an earlier import learn whether they're a sales / purchase ledger.
-        if (a.ledgerKind && /^[0-9a-f]{24}$/i.test(have)) {
+        if ((a.ledgerKind || a.tallyGroup) && /^[0-9a-f]{24}$/i.test(have)) {
           const cur = await Account.findOne(
             { _id: have, organization: ctx.org },
-            { ledgerKind: 1 },
+            { ledgerKind: 1, tallyGroup: 1 },
           ).lean();
-          if (cur && !cur.ledgerKind)
-            await Account.updateOne(
-              { _id: have },
-              { $set: { ledgerKind: a.ledgerKind } },
-            );
+          const set = {};
+          if (cur && a.ledgerKind && !cur.ledgerKind) set.ledgerKind = a.ledgerKind;
+          if (cur && a.tallyGroup && cur.tallyGroup !== a.tallyGroup)
+            set.tallyGroup = a.tallyGroup;
+          if (Object.keys(set).length)
+            await Account.updateOne({ _id: have }, { $set: set });
         }
         R_("accounts").skipped++;
         continue;
@@ -255,6 +256,7 @@ async function commit(ctx, data, opts, progress) {
         accountCode: a.code || "",
         description: a.description || "",
         ledgerKind: a.ledgerKind || "",
+        tallyGroup: a.tallyGroup || "",
       });
       accByName.set(a.name.toLowerCase(), String(doc._id));
       R_("accounts").created++;

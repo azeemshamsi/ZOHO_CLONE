@@ -3,7 +3,9 @@ const test = require("node:test");
 const assert = require("node:assert");
 const ledger = require("../src/utils/ledger");
 const A = (code, name, group, type, extra = {}) => ({ code, name, group, type, ...extra });
+const extra = { accounts: [], entries: null };
 ledger.chartOfAccounts = async () => [
+  ...extra.accounts,
   A("cash", "Cash in Hand", "Cash", "asset"), A("bank", "HDFC Bank", "Bank", "asset"), A("ar", "Accounts Receivable", "Accounts Receivable", "asset"),
   A("inventory", "Inventory Asset", "Other Current Asset", "asset"), A("input_igst", "Input IGST", "Other Current Asset", "asset"),
   A("ap", "Accounts Payable", "Accounts Payable", "liability"), A("output_igst", "Output IGST", "Other Current Liability", "liability"),
@@ -11,7 +13,7 @@ ledger.chartOfAccounts = async () => [
   A("rent", "Rent", "Expense", "expense"),
 ];
 const d = (s) => new Date(`${s}T06:00:00Z`);
-ledger.buildEntries = async () => [
+ledger.buildEntries = async () => extra.entries || [
   { date: d("2026-04-01"), type: "Journal", lines: [{ account: "cash", debit: 10000, credit: 0 }, { account: "owners_equity", debit: 0, credit: 10000 }] },
   { date: d("2026-04-02"), type: "Bill", lines: [{ account: "cogs", debit: 5000, credit: 0 }, { account: "input_igst", debit: 900, credit: 0 }, { account: "ap", debit: 0, credit: 5900, partyId: "v1" }, { account: "inventory", debit: 5000, credit: 0, stock: true }, { account: "cogs", debit: 0, credit: 5000, stock: true }] },
   { date: d("2026-04-05"), type: "Invoice", lines: [{ account: "ar", debit: 2360, credit: 0, partyId: "c1" }, { account: "sales", debit: 0, credit: 2000 }, { account: "output_igst", debit: 0, credit: 360 }, { account: "cogs", debit: 3000, credit: 0, stock: true }, { account: "inventory", debit: 0, credit: 3000, stock: true }] },
@@ -52,4 +54,22 @@ test("Balance sheet: Tally groups, party-wise debtors / creditors, Duties & Taxe
   const ca = g(right, "Current Assets");
   assert.deepStrictEqual(ca.subgroups.map((s) => [s.name, s.amount]), [["Closing Stock", 2000], ["Sundry Debtors", 360], ["Cash-in-Hand", 9500], ["Bank Accounts", 2000]]);
   assert.strictEqual(ca.subgroups[1].ledgers[0].name, "Asha");
+});
+
+test("P&L: a bill's ledger that is a Direct Expense in Tally (Shipping, Commission) stays under Direct Expenses", async () => {
+  extra.accounts = [
+    A("pur5", "Purchase Local @ 5%", "Cost Of Goods Sold", "expense", { ledgerKind: "purchase" }),
+    A("ship", "Shipping Up @ 18%", "Cost Of Goods Sold", "expense", { ledgerKind: "purchase" }),
+    A("comm", "Comm. Ex Up", "Cost Of Goods Sold", "expense", { ledgerKind: "purchase", tallyGroup: "Direct Expenses" }),
+  ];
+  const bill = (acc, amt) => ({ date: d("2026-04-03"), type: "Bill", lines: [{ account: acc, debit: amt, credit: 0 }, { account: "ap", debit: 0, credit: amt, partyId: "v1" }] });
+  extra.entries = [bill("pur5", 100), bill("ship", 30), bill("comm", 20)];
+  try {
+    const [tr] = (await TS.profitAndLoss("o", { from: "2026-04-01", to: "2026-04-30" })).blocks;
+    assert.deepStrictEqual(g(tr.left, "Purchase Accounts").ledgers.map((l) => l.name), ["Purchase Local @ 5%"]);
+    assert.deepStrictEqual(g(tr.left, "Direct Expenses").ledgers.map((l) => [l.name, l.amount]), [["Comm. Ex Up", 20], ["Shipping Up @ 18%", 30]]);
+  } finally {
+    extra.accounts = [];
+    extra.entries = null;
+  }
 });
