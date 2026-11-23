@@ -106,7 +106,9 @@ function startScheduler() {
   setInterval(flipkartStock, 30 * 60 * 1000).unref();
   setInterval(() => require("./amazon/ship").trackAllEasyShip().catch((e) => console.error("Easy Ship tracking failed:", e.message)), 2 * 60 * 60 * 1000).unref();
   setInterval(() => require("./shopify/inventory").pushAll().catch((e) => console.error("Inventory sync failed:", e.message)), 30 * 60 * 1000).unref();
-  setInterval(() => require("./shopify/ship").trackAll().catch((e) => console.error("Courier tracking failed:", e.message)), 2 * 60 * 60 * 1000).unref();
+  // Every courier shipment (all couriers), hourly; status changes go on to Shopify.
+  setTimeout(() => require("./shopify/ship").trackAll().catch(() => {}), 5 * 60 * 1000).unref();
+  setInterval(() => require("./shopify/ship").trackAll().catch((e) => console.error("Courier tracking failed:", e.message)), 60 * 60 * 1000).unref();
   setInterval(() => require("./shopify/sync").refreshAllDeliveries().catch((e) => console.error("Shopify delivery check failed:", e.message)), 2 * 60 * 60 * 1000).unref();
   // Inbox & marketing: WhatsApp order updates, Gmail polling, campaigns, consent sync, retention.
   require("./marketing/scheduler").start();

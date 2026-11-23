@@ -145,6 +145,7 @@ const shopifyOrderSchema = new mongoose.Schema(
       chargeSource: String, // "api" or "rate card"
       bookedAt: Date,
       trackStatus: String,
+      shopifyEvent: String, // last tracking status sent to Shopify (IN_TRANSIT, DELIVERED…)
       trackedAt: Date,
       events: [eventSchema],
       pickup: { type: mongoose.Schema.Types.Mixed }, // where it was picked up from (a marketplace seller's address)

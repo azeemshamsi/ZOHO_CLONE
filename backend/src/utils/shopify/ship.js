@@ -1031,6 +1031,10 @@ async function trackOrder(order) {
   }
   order.markModified("shipment");
   await order.save();
+  // The customer sees it in Shopify too: In transit / Out for delivery / Delivered on each box's fulfilment.
+  await pushShopifyEvents(order).catch((e) =>
+    console.error(`[shopify] tracking events for ${order.name}: ${e.message}`),
+  );
   if (order.channel === "flipkart" && order.status === "delivered")
     await require("../flipkart/orders")
       .reportDelivered(order)
@@ -1038,6 +1042,61 @@ async function trackOrder(order) {
         console.error(`[flipkart] delivery of ${order.name}: ${e.message}`),
       );
   return t;
+}
+
+// Courier status → Shopify fulfilment event (shown to the customer on the order status page).
+const SHOPIFY_EVENT = {
+  in_transit: "IN_TRANSIT",
+  out_for_delivery: "OUT_FOR_DELIVERY",
+  delivered: "DELIVERED",
+  rto: "FAILURE",
+};
+async function pushShopifyEvents(order) {
+  if (order.channel && order.channel !== "shopify") return;
+  if (!String(order.shopifyId || "").startsWith("gid://shopify/Order/")) return;
+  const ships = [order.shipment, ...(order.extraShipments || [])].filter(
+    (x) => x?.awb && SHOPIFY_EVENT[x.trackStatus] && x.shopifyEvent !== SHOPIFY_EVENT[x.trackStatus],
+  );
+  if (!ships.length) return;
+  const store = await ShopifyStore.findOne({ organization: order.organization });
+  if (!store?.connected) return;
+  const d = await gql(
+    store,
+    `query($id: ID!) { order(id: $id) { fulfillments(first: 30) { id status displayStatus trackingInfo { number } } } }`,
+    { id: order.shopifyId },
+  );
+  const fls = d.order?.fulfillments || [];
+  let changed = false;
+  for (const x of ships) {
+    const f = fls.find(
+      (y) => y.status !== "CANCELLED" && (y.trackingInfo || []).some((t) => String(t.number) === String(x.awb)),
+    );
+    if (!f) continue;
+    const want = SHOPIFY_EVENT[x.trackStatus];
+    const last = [...(x.events || [])].sort((a, b) => new Date(b.at) - new Date(a.at))[0];
+    const r = await gql(
+      store,
+      `mutation($e: FulfillmentEventInput!) { fulfillmentEventCreate(fulfillmentEvent: $e) { fulfillmentEvent { id } userErrors { field message } } }`,
+      {
+        e: {
+          fulfillmentId: f.id,
+          status: want,
+          ...(last?.at && !isNaN(new Date(last.at)) ? { happenedAt: new Date(last.at).toISOString() } : {}),
+          ...(last?.status ? { message: String(last.status).slice(0, 250) } : {}),
+          ...(last?.location ? { city: String(last.location).slice(0, 100) } : {}),
+        },
+      },
+    );
+    const errs = r.fulfillmentEventCreate?.userErrors || [];
+    if (errs.length) throw new Error(errs.map((e) => e.message).join("; "));
+    x.shopifyEvent = want;
+    changed = true;
+  }
+  if (changed) {
+    const set = { "shipment.shopifyEvent": order.shipment?.shopifyEvent };
+    if ((order.extraShipments || []).length) set.extraShipments = order.extraShipments;
+    await ShopifyOrder.updateOne({ _id: order._id }, { $set: set });
+  }
 }
 
 // Cancel the order's Shopify fulfilment that carries this AWB. Returns a note for the remarks ("" when nothing to do).
@@ -1184,8 +1243,14 @@ async function trackAll() {
     "shipment.awb": { $ne: "" },
     "shipment.account": { $exists: true },
     "shipment.bookedAt": { $gte: since },
-  }).limit(2000);
-  for (const o of orders) await trackOrder(o).catch(() => {});
+  }).limit(3000);
+  // Every courier but custom ones (no API to ask); errors on one order never stop the rest.
+  for (const o of orders) {
+    if (o.shipment?.carrier === "custom") continue;
+    await trackOrder(o).catch((e) =>
+      console.error(`[tracking] ${o.name} (${o.shipment?.awb}): ${e.message}`),
+    );
+  }
   await require("./reverse")
     .trackAllReverse()
     .catch(() => {});
