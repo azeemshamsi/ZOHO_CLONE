@@ -899,10 +899,11 @@ const bigship = {
     await acc.save();
     return tok;
   },
-  async call(acc, path, { method = "POST", json, query } = {}) {
+  async call(acc, path, { method = "POST", json, query, form } = {}) {
     const tok = await this.token(acc);
     const qs = query ? `?${new URLSearchParams(query)}` : "";
-    const res = await request(`${this.base(acc)}/api/outbound/${path}${qs}`, { method, json, headers: { authorization: `Bearer ${tok}` }, timeout: 40000 });
+    // form: multipart (place-order); fetch sets the boundary itself.
+    const res = await request(`${this.base(acc)}/api/outbound/${path}${qs}`, { method, ...(form ? { raw: form } : { json }), headers: { authorization: `Bearer ${tok}` }, timeout: 40000 });
     if (res.status === 401 || res.status === 403) {
       acc.tokenExpires = new Date(0);
       await acc.save().catch(() => {});
@@ -915,14 +916,18 @@ const bigship = {
     const c = s.consignee;
     const wh = parseInt(acc.options.warehouseId, 10);
     const cod = s.cod ? r2(s.codAmount) : 0;
-    const tot = s.items.reduce((t, i) => t + i.price * i.quantity, 0) || 1;
+    // BigShip: the invoice amount must equal the products' total, so shipping charged to the customer is a line too.
+    const lines = s.items.map((i) => ({ name: i.name, hsn: i.hsn || "", qty: i.quantity, unit: r2(i.price), total: r2(i.price * i.quantity) }));
+    const extra = r2(r2(s.value) - lines.reduce((t, l) => t + l.total, 0));
+    if (extra >= 1) lines.push({ name: "Shipping & handling", hsn: "", qty: 1, unit: extra, total: extra });
+    const tot = r2(lines.reduce((t, l) => t + l.total, 0)) || 1;
     let left = cod;
-    const products = s.items.map((i, n) => {
-      const amt = r2(i.price * i.quantity);
-      const col = n === s.items.length - 1 ? r2(left) : r2((cod * amt) / tot);
-      left -= col;
-      return { productName: i.name.slice(0, 100), hsn: i.hsn || "", qty: String(i.quantity), amount: String(r2(i.price)), totalAmount: amt, collectableAmount: s.cod ? col : 0, categoryId: String(acc.options.categoryId || "1") };
+    const products = lines.map((l, n) => {
+      const col = n === lines.length - 1 ? r2(left) : r2(Math.min(l.total, (cod * l.total) / tot));
+      left = r2(left - col);
+      return { productName: l.name.slice(0, 100), hsn: l.hsn, qty: String(l.qty), amount: String(l.unit), totalAmount: l.total, collectableAmount: s.cod ? col : 0, categoryId: String(acc.options.categoryId || "1") };
     });
+    const intDim = (v) => Math.max(1, Math.round(Number(v) || 10));
     const now = new Date().toISOString().replace("T", " ").slice(0, 19);
     const o = await this.call(acc, "create-order", {
       json: {
@@ -932,7 +937,7 @@ const bigship = {
         MasterOrderDate: now,
         MasterOrderPaymentMode: s.cod ? 2 : 1,
         OrderInvoiceNo: String(s.invoiceNumber || s.reference).slice(0, 30),
-        MasterOrderInvoiceAmount: Math.max(1, r2(s.value)),
+        MasterOrderInvoiceAmount: tot,
         MasterOrderShippingName: c.name,
         ...(c.email ? { MasterOrderShippingEmail: c.email } : {}),
         MasterOrderShippingMobileNo: c.phone,
@@ -944,7 +949,7 @@ const bigship = {
         MasterOrderShippingState: c.stateName,
         MasterOrderShippingCity: c.city,
         totalNumOfBoxes: 1,
-        boxes: [{ weight_unit: "kg", dimension_unit: "cm", noOfBoxes: 1, dimensions: [{ length: s.length, breadth: s.breadth, height: s.height, weight: s.weight }], products }],
+        boxes: [{ weight_unit: "kg", dimension_unit: "cm", noOfBoxes: 1, dimensions: [{ length: intDim(s.length), breadth: intDim(s.breadth), height: intDim(s.height), weight: Math.max(1, Math.ceil(Number(s.weight) || 0.5)) }], products }],
       },
     });
     const orderId = o.data?.data?.CustomGlobalOrderId;
@@ -956,7 +961,11 @@ const bigship = {
     const want = parseInt(manual.courierId || acc.options.courierId, 10);
     const pick = (want && rates.find((x) => x.id === want)) || [...rates].sort((a, b) => (a.total || 1e12) - (b.total || 1e12))[0];
     if (want && pick.id !== want) throw new Error(`BigShip order ${orderId}: courier ${want} isn't offered for ${c.pincode}`);
-    const p = await this.call(acc, "place-order", { json: { MasterCustomOrderId: String(orderId), courierId: pick.id, riskTypeId: "2" } });
+    const fd = new FormData();
+    fd.append("MasterCustomOrderId", String(orderId));
+    fd.append("courierId", String(pick.id));
+    fd.append("riskTypeId", "2");
+    const p = await this.call(acc, "place-order", { form: fd });
     if (!p.data?.status) throw new Error(`BigShip created order ${orderId} but couldn't book ${pick.name}: ${bsMsg(p.data)}`);
     refs.courierId = pick.id;
     let awb = p.data?.data?.awb_assigned ? String(p.data.data.awb_assigned) : "";
@@ -979,19 +988,21 @@ const bigship = {
       if (!awb) return { status: "pending", text: "Booked — waiting for the AWB", events: [] };
       extra = { awb: String(awb), refs: { ...sh.refs, awbPending: false } };
     }
-    const { data } = await this.call(acc, "track-order", { method: "GET", query: { CustomGlobalOrderId: id } });
+    const real = extra.awb || (/^BIGSHIP-/.test(sh.awb) ? "" : sh.awb);
+    const { data } = await this.call(acc, "track-order", { method: "GET", query: sh.refs?.orderId || !real ? { CustomGlobalOrderId: id } : { TrackingNumber: real } });
     if (!data?.status) throw new Error(bsMsg(data));
     const d = data.data || {};
     const cur = d.order_status || d.tag || "";
-    const events = (d.tracking_histories || []).map((e) => ({ at: new Date(String(e.checkpoint_time).replace(" ", "T") + (/[zZ+]/.test(e.checkpoint_time) ? "" : "+05:30")), status: [e.order_status, e.message].filter(Boolean).join(" — "), location: "" }));
+    const events = (d.checkpoints || d.tracking_histories || []).map((e) => ({ at: new Date(String(e.checkpoint_time).replace(" ", "T") + (/[zZ+]/.test(e.checkpoint_time) ? "" : "+05:30")), status: [e.order_status, e.message].filter(Boolean).join(" — "), location: "" }));
     return { status: normStatus(cur), text: cur, events, ...extra };
   },
   async label(acc, sh) {
     const id = sh.refs?.orderId;
     if (!id) return null;
     const { data } = await this.call(acc, "download-shipment-documents", { method: "GET", query: { CustomGlobalOrderId: id, document_type: "label" } });
-    const b64 = data?.data?.AttachmentData;
-    return b64 ? { pdf: Buffer.from(String(b64).replace(/^data:[^,]+,/, ""), "base64") } : null;
+    const doc = data?.data?.AttachmentData;
+    if (!doc) return null;
+    return /^https?:\/\//.test(doc) ? { url: doc } : { pdf: Buffer.from(String(doc).replace(/^data:[^,]+,/, ""), "base64") };
   },
   async cancel(acc, sh) {
     const id = sh.refs?.orderId;

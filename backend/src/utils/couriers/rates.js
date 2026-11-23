@@ -364,7 +364,7 @@ const QUOTES = {
         paymentModeId: q.cod ? 2 : 1,
         ...(q.cod ? { codAmount: String(r2(q.codAmount)) } : {}),
         riskTypeId: 2,
-        boxes: [{ box_length: Math.max(1, Math.round(q.length || 10)), box_width: Math.max(1, Math.round(q.breadth || 10)), box_height: Math.max(1, Math.round(q.height || 10)), box_dead_weight: Math.max(0.1, Number(q.weight) || 0.5), no_of_box: 1 }],
+        boxes: [{ box_length: Math.max(1, Math.round(q.length || 10)), box_width: Math.max(1, Math.round(q.breadth || 10)), box_height: Math.max(1, Math.round(q.height || 10)), box_dead_weight: Math.max(1, Math.ceil(Number(q.weight) || 0.5)), no_of_box: 1 }],
       },
     });
     if (data?.status === false) throw new Error(String(data.message || "rate check failed").slice(0, 200));

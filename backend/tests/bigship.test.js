@@ -37,3 +37,16 @@ test("BigShip rates: restricted pincodes left out", async () => {
   const q = await quoteAccount(acc, s);
   assert.deepStrictEqual([q.serviceable, q.charge, q.options.length], [true, 150, 1]);
 });
+
+test("BigShip: shipping charged becomes a product line, invoice = products total; place-order is form-data", async () => {
+  calls.length = 0;
+  await B.book(acc, { ...s, value: 1100, codAmount: 1100, weight: 0.4 }, {});
+  const o = calls.find((c) => c.url.endsWith("/create-order")).opts.json;
+  const pr = o.boxes[0].products;
+  assert.deepStrictEqual(pr.map((p) => [p.productName, p.totalAmount, p.collectableAmount]), [["Table", 999, 999], ["Shipping & handling", 101, 101]]);
+  assert.strictEqual(o.MasterOrderInvoiceAmount, 1100);
+  assert.strictEqual(o.boxes[0].dimensions[0].weight, 1);
+  const p = calls.find((c) => c.url.endsWith("/place-order")).opts;
+  assert.ok(p.raw instanceof FormData);
+  assert.strictEqual(p.raw.get("courierId"), "7");
+});
