@@ -824,6 +824,15 @@ export function ReportPage() {
     ...periodRange(meta?.period || "this_fy"),
   }));
   const [asOf, setAsOf] = useState(isoDate());
+  const [stockEdit, setStockEdit] = useState(false);
+  const [reloadN, setReloadN] = useState(0);
+  const STOCK_REPORTS = [
+    "profit-and-loss",
+    "horizontal-pl",
+    "balance-sheet",
+    "horizontal-bs",
+    "trial-balance",
+  ];
   const [asOfFrom, setAsOfFrom] = useState(""); // Alt+F2 period on as-at reports (Balance Sheet, Trial Balance)
   const periodOk =
     ["balance-sheet", "trial-balance"].includes(key) &&
@@ -916,7 +925,12 @@ export function ReportPage() {
     if (key === "trial-balance" && detail) params.detail = "1";
     if (key === "party-ledger") {
       if (!party)
-        return setData({ kind: "party-ledger", party: null, rows: [], _key: key });
+        return setData({
+          kind: "party-ledger",
+          party: null,
+          rows: [],
+          _key: key,
+        });
       params.party = party;
     }
     api
@@ -935,6 +949,7 @@ export function ReportPage() {
     hasView,
     detail,
     party,
+    reloadN,
   ]);
 
   if (!meta) return <p>Report not found.</p>;
@@ -950,7 +965,22 @@ export function ReportPage() {
 
   return (
     <>
+      {stockEdit && (
+        <StockValues
+          onClose={() => setStockEdit(false)}
+          onSaved={() => (setStockEdit(false), setReloadN((n) => n + 1))}
+        />
+      )}
       <PageHeader title={meta.title} back="/reports">
+        {STOCK_REPORTS.includes(key) && (
+          <button
+            className="btn"
+            onClick={() => setStockEdit(true)}
+            title="Opening stock as per books, closing stock entered by hand (as in Tally)"
+          >
+            Stock values
+          </button>
+        )}
         {LAYOUT[key] && (
           <div
             className="seg"
@@ -2359,3 +2389,155 @@ const BODIES = {
   gstr1: Gstr1,
   gstr3b: Gstr3b,
 };
+
+// Like Tally: the opening stock the books show (Tally's Opening Stock ledger) and closing stock typed in for a date.
+// They change only P&L, Balance Sheet and Trial Balance — items' stock and the Stock Summary stay as they are.
+function StockValues({ onClose, onSaved }) {
+  const [d, setD] = useState(null);
+  const [opening, setOpening] = useState("");
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.get("/organization/stock-values").then((r) => {
+      setD(r.data);
+      setOpening(r.data.openingStock ?? "");
+      setRows(
+        (r.data.closingStock || []).map((c) => ({
+          date: String(c.date).slice(0, 10),
+          amount: c.amount,
+        })),
+      );
+    });
+  }, []);
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.put("/organization/stock-values", {
+        openingStock: opening === "" ? null : Number(opening),
+        closingStock: rows
+          .filter((r) => r.date && r.amount !== "")
+          .map((r) => ({ date: r.date, amount: Number(r.amount) })),
+      });
+      onSaved();
+    } catch (e) {
+      alert(errMsg(e));
+    }
+    setBusy(false);
+  };
+  const inr = (n) =>
+    `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  return (
+    <Modal
+      open
+      title="Stock values in P&L, Balance Sheet and Trial Balance"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={busy || !d}
+            onClick={save}
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </>
+      }
+    >
+      {!d ? (
+        <Spinner />
+      ) : (
+        <div className="form-grid">
+          <p className="small muted" style={{ margin: 0 }}>
+            As in Tally: these change only the P&L, Balance Sheet and Trial
+            Balance. Items' stock and the Stock Summary stay as they are.
+          </p>
+          <label className="field">
+            <span className="field-label">
+              Opening stock as per books (on {date(d.openingDate)})
+            </span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={opening}
+              onChange={(e) => setOpening(e.target.value)}
+              placeholder={`items' value ${inr(d.itemsOpening)}`}
+            />
+            <span className="field-hint">
+              Items' opening values add up to {inr(d.itemsOpening)}.
+              {opening !== "" &&
+                Math.abs(Number(opening) - d.itemsOpening) >= 0.01 &&
+                ` The difference of ${inr(Number(opening) - d.itemsOpening)} goes to "Opening Stock Difference (Tally)" against Opening Balance Equity, shown as part of Opening Stock.`}{" "}
+              Leave blank to use the items' values.
+            </span>
+          </label>
+          <div>
+            <div className="field-label">Closing stock entered by hand</div>
+            <p className="small muted" style={{ margin: "2px 0 6px" }}>
+              A report to a date uses the latest value on or before it; with
+              none, closing stock is worked out from the items.
+            </p>
+            <table className="table">
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i}>
+                    <td>
+                      <input
+                        type="date"
+                        value={r.date}
+                        onChange={(e) =>
+                          setRows(
+                            rows.map((x, j) =>
+                              j === i ? { ...x, date: e.target.value } : x,
+                            ),
+                          )
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={r.amount}
+                        onChange={(e) =>
+                          setRows(
+                            rows.map((x, j) =>
+                              j === i ? { ...x, amount: e.target.value } : x,
+                            ),
+                          )
+                        }
+                        placeholder="Closing stock ₹"
+                      />
+                    </td>
+                    <td>
+                      <button
+                        className="icon-btn"
+                        title="Remove"
+                        onClick={() => setRows(rows.filter((_, j) => j !== i))}
+                      >
+                        <Icon name="trash" size={16} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button
+              type="button"
+              className="link-btn"
+              onClick={() =>
+                setRows([...rows, { date: isoDate(), amount: "" }])
+              }
+            >
+              + Add closing stock for a date
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}

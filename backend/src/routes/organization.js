@@ -73,6 +73,59 @@ router.put(
   }),
 );
 
+// Stock values for P&L, Balance Sheet and Trial Balance (like Tally): opening stock as per books, closing stock by date.
+router.get(
+  "/stock-values",
+  ah(async (req, res) => {
+    const { openingStockInfo } = require("../utils/openingStock");
+    const i = await openingStockInfo(req.org);
+    res.send({
+      itemsOpening: i.itemsTotal,
+      openingDate: i.date,
+      openingStock: i.target,
+      closingStock: i.closingStock,
+    });
+  }),
+);
+router.put(
+  "/stock-values",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        openingStock: Joi.number().min(0).allow(null),
+        closingStock: Joi.array()
+          .items(
+            Joi.object({
+              date: Joi.date().required(),
+              amount: Joi.number().min(0).required(),
+            }),
+          )
+          .max(60),
+      }),
+      req.body,
+    );
+    let opening = null;
+    if (d.openingStock !== undefined)
+      opening = await require("../utils/openingStock").setOpeningStock(
+        req.org,
+        d.openingStock,
+      );
+    if (d.closingStock) {
+      const list = d.closingStock.map((c) => ({
+        date: new Date(new Date(c.date).setUTCHours(18, 29, 59, 999)),
+        amount: c.amount,
+      }));
+      await Organization.updateOne(
+        { _id: req.org },
+        list.length
+          ? { $set: { closingStock: list } }
+          : { $unset: { closingStock: 1 } },
+      );
+    }
+    res.send({ ok: true, opening });
+  }),
+);
+
 // Outgoing email account: a mailbox over SMTP, or Brevo / Resend over HTTPS (works where SMTP ports are blocked).
 router.put(
   "/email",

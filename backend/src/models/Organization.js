@@ -31,7 +31,9 @@ const organizationSchema = new mongoose.Schema(
     journalPrefix: { type: String, default: "MJ-" },
     // Stock valuation: "fifo", or "average" like Tally's Average Cost (one rate per item per financial year).
     inventoryCosting: { type: String, enum: ["fifo", "average"], default: "fifo" },
-    tallyOpeningStock: { type: Number }, // Tally's Opening Stock ledger balance (from a masters import): item opening values are matched to it
+    tallyOpeningStock: { type: Number },
+    // Closing stock entered by hand (like Tally): [{ date, amount }] — reports to that date (and later, until the next) use it.
+    closingStock: { type: [{ _id: false, date: Date, amount: Number }], default: undefined }, // Tally's Opening Stock ledger balance (from a masters import): item opening values are matched to it
     purchaseOrderPrefix: { type: String, default: "PO-" },
     vendorCreditPrefix: { type: String, default: "DN-" },
     defaultPaymentTerms: { type: Number, default: 15 },

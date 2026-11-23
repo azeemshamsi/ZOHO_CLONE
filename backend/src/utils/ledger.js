@@ -70,6 +70,12 @@ const SYSTEM_ACCOUNTS = [
   },
   { code: "cogs", name: "Cost of Goods Sold", group: "Cost Of Goods Sold" },
   // Cartage on a bill or an invoice (a line of its own): GST added on top of the amount, or included in it.
+  // The other side when closing stock is entered by hand (see buildEntries).
+  {
+    code: "closing_stock_adj",
+    name: "Closing Stock Adjustment",
+    group: "Cost Of Goods Sold",
+  },
   {
     code: "cartage_excl",
     name: "Cartage (Exclusive of GST)",
@@ -631,9 +637,59 @@ async function buildEntries(org, { to } = {}) {
   }
 
   const end = to ? new Date(to) : null;
-  return entries
+  const out = entries
     .filter((e) => !end || new Date(e.date) <= end)
     .sort((a, b) => new Date(a.date) - new Date(b.date));
+  // Closing stock entered by hand for a date (like Tally's closing stock): the books' stock value is brought to it
+  // on the report date — Inventory against "Closing Stock Adjustment" — so P&L, Balance Sheet and Trial Balance
+  // show it. Both lines are tagged as stock, so the Tally view shows it as Closing Stock only.
+  const manual = await manualClosing(
+    org,
+    end || require("./time").istEndOfToday(),
+  );
+  if (manual) {
+    const at = end || require("./time").istEndOfToday();
+    let v = 0;
+    for (const e of out)
+      for (const l of e.lines)
+        if (l.account === "inventory") v += l.debit - l.credit;
+    const diff = round2(manual.amount - v);
+    if (Math.abs(diff) >= 0.01)
+      out.push({
+        date: at,
+        type: "Closing Stock (entered)",
+        id: `closing-stock-${manual.date.toISOString().slice(0, 10)}`,
+        number: "",
+        party: `Closing stock as on ${manual.date.toISOString().slice(0, 10)}: ₹${manual.amount}`,
+        lines: [
+          {
+            account: "inventory",
+            debit: diff > 0 ? diff : 0,
+            credit: diff < 0 ? -diff : 0,
+            stock: true,
+          },
+          {
+            account: "closing_stock_adj",
+            debit: diff < 0 ? -diff : 0,
+            credit: diff > 0 ? diff : 0,
+            stock: true,
+          },
+        ],
+      });
+  }
+  return out;
+}
+
+// The closing stock entered by hand that applies on a date: the latest one on or before it.
+async function manualClosing(org, at) {
+  const Organization = require("../models/Organization");
+  const o = await Organization.findById(org, { closingStock: 1 }).lean();
+  const list = (o?.closingStock || [])
+    .filter((c) => new Date(c.date) <= new Date(at))
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  return list[0]
+    ? { date: new Date(list[0].date), amount: Number(list[0].amount) || 0 }
+    : null;
 }
 
 // Net movement per account (debit - credit) for entries within [from, to].

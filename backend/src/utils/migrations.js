@@ -522,6 +522,33 @@ const MIGRATIONS = [
       );
     },
   },
+  {
+    // Shiraz Handicrafts: opening stock as per Tally's books is ₹38,57,264 (its items add up to ₹30,52,239.94).
+    id: "2026-11-shiraz-opening-stock",
+    run: async () => {
+      const Organization = require("../models/Organization");
+      const Journal = require("../models/Journal");
+      for (const o of await Organization.find(
+        { name: /shiraz handicrafts/i },
+        { _id: 1, name: 1, tallyOpeningStock: 1 },
+      ).lean()) {
+        if (o.tallyOpeningStock) continue;
+        const fromTally = (
+          await Journal.find({ organization: o._id }, { importRef: 1 })
+            .limit(20000)
+            .lean()
+        ).some((j) => /^tally:/.test(j.importRef || ""));
+        if (!fromTally) continue;
+        const r = await require("./openingStock").setOpeningStock(
+          o._id,
+          3857264,
+        );
+        console.log(
+          `${o.name}: opening stock as per books ₹${r.target} (items ₹${r.itemsTotal}, difference ₹${r.diff})`,
+        );
+      }
+    },
+  },
 ];
 
 async function runMigrations() {
