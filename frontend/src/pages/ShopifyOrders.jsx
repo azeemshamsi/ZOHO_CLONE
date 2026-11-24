@@ -925,7 +925,8 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
   const needAwbs =
     acc?.carrier === "custom" &&
     single &&
-    (boxes ? boxes.some((_, i) => !boxAwbs[i]) : !manual.awb);
+    ((boxes ? boxes.some((_, i) => !boxAwbs[i]) : !manual.awb) ||
+      (!!acc.options?.manualAwb && !String(manual.courierName || "").trim()));
   const whyNot = busy
     ? ""
     : checking && !pick
@@ -939,9 +940,11 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
           : blocked
             ? "This courier doesn't deliver there — choose another or tick the override"
             : needAwbs
-              ? boxes
+              ? boxes && boxes.some((_, i) => !boxAwbs[i])
                 ? "Enter the AWB of every box"
-                : "Enter the AWB"
+                : !manual.awb && !boxes
+                  ? "Enter the AWB"
+                  : "Enter the courier's name"
               : "";
   const autoMissing =
     !single && quotes?.orders?.filter((o) => o.needsPackage).length;
@@ -1325,11 +1328,27 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
                     }
                   />
                 </Field>
-                <Field label="Courier name" hint={`Defaults to ${acc.name}`}>
+                <Field
+                  label="Courier name"
+                  required={!!acc.options?.manualAwb}
+                  hint={acc.options?.manualAwb ? "e.g. DTDC, India Post, Trackon" : `Defaults to ${acc.name}`}
+                >
                   <input
                     value={manual.courierName}
                     onChange={(e) =>
                       setManual({ ...manual, courierName: e.target.value })
+                    }
+                  />
+                </Field>
+                <Field
+                  label="Tracking link (optional)"
+                  hint="The courier's tracking page; {awb} is replaced by the AWB"
+                >
+                  <input
+                    value={manual.trackingUrl || ""}
+                    placeholder="https://…/track?awb={awb}"
+                    onChange={(e) =>
+                      setManual({ ...manual, trackingUrl: e.target.value })
                     }
                   />
                 </Field>

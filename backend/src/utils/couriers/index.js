@@ -578,6 +578,7 @@ const custom = {
     const pins = String(acc.options.pincodes || "").split(/[\s,;]+/).filter(Boolean);
     if (pins.length && !pins.includes(s.consignee.pincode)) throw new Error(`${acc.name} doesn't deliver to ${s.consignee.pincode}`);
     let awb = (manual.awb || "").trim();
+    if (!awb && acc.options?.manualAwb) throw new Error("Enter the AWB / tracking number and the courier's name");
     if (!awb) {
       // Next unused AWB from the uploaded stock.
       const pool = String(acc.options.awbPool || "").split(/[\s,;]+/).filter(Boolean);
@@ -587,7 +588,9 @@ const custom = {
       acc.markModified("options");
       await acc.save();
     }
-    return { awb, courierName: manual.courierName || acc.name, trackingUrl: acc.trackingUrl ? acc.trackingUrl.replace("{awb}", encodeURIComponent(awb)) : "", refs: {} };
+    // A tracking link typed when booking wins ({awb} is filled in), else the courier's own.
+    const link = String(manual.trackingUrl || "").trim() || acc.trackingUrl || "";
+    return { awb, courierName: String(manual.courierName || "").trim() || acc.name, trackingUrl: link ? link.replace("{awb}", encodeURIComponent(awb)) : "", refs: {} };
   },
   // Tracked through another courier account of the same company (its API), when one is chosen.
   async track(acc, sh) {

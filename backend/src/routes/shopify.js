@@ -1485,6 +1485,7 @@ router.post(
           courierName: Joi.string().allow(""),
           courierId: Joi.string().allow(""),
           ewayBill: Joi.string().trim().allow("").max(20),
+          trackingUrl: Joi.string().trim().allow("").max(500),
         }).default({}),
         invoiceFirst: Joi.boolean().default(false),
         skipCheck: Joi.boolean().default(false),
@@ -2453,6 +2454,15 @@ router.post(
 router.get(
   "/couriers",
   ah(async (req, res) => {
+    // Every store has a "Manual AWB" courier: book with any courier by typing its name and the AWB.
+    const all = await CourierAccount.find({ organization: req.storeOrg }, { options: 1 }).lean();
+    if (!all.some((a) => a.options?.manualAwb))
+      await CourierAccount.create({
+        organization: req.storeOrg,
+        carrier: "custom",
+        name: "Manual AWB (any courier)",
+        options: { manualAwb: true },
+      });
     res.send(
       await CourierAccount.find({ organization: req.storeOrg }).sort({
         isDefault: -1,
