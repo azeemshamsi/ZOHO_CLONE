@@ -2098,6 +2098,31 @@ function HorizontalReport({ d, range }) {
 function TallyStatement({ d, range }) {
   const [open, setOpen] = useState({});
   const [all, setAll] = useState(false);
+  // Percentages, as in Tally: P&L against Sales Accounts, Balance Sheet against its total.
+  const [pct, setPctState] = useState(() => {
+    try {
+      return localStorage.getItem("tallyPct") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setPct = (v) => {
+    setPctState(v);
+    try {
+      localStorage.setItem("tallyPct", v ? "1" : "0");
+    } catch {}
+  };
+  const isBS = (d.headings || [])[0] === "Liabilities";
+  const salesTotal = (d.blocks?.[0]?.right || []).find(
+    (g) => g.name === "Sales Accounts",
+  )?.amount;
+  const basis = isBS ? d.blocks?.[0]?.total : salesTotal || d.blocks?.[0]?.total;
+  const pctOf = (v) =>
+    v || v === 0
+      ? basis
+        ? `${((v / basis) * 100).toFixed(2)}%`
+        : ""
+      : "";
   useEffect(() => {
     const t = () => setAll((x) => !x);
     window.addEventListener("tally:detail", t);
@@ -2172,6 +2197,7 @@ function TallyStatement({ d, range }) {
         <td key="a" className={`th-p${sep}`} />,
         <td key="b" className="num" />,
         <td key="c" className="num th-amt" />,
+        ...(pct ? [<td key="d" className="num th-pct" />] : []),
       ];
     const label = r.to ? <Link to={r.to}>{r.label}</Link> : r.label;
     const toggle = r.can
@@ -2195,6 +2221,13 @@ function TallyStatement({ d, range }) {
       >
         {r.amount !== undefined ? amt(r.amount) : ""}
       </td>,
+      ...(pct
+        ? [
+            <td key="d" className="num th-pct">
+              {pctOf(r.amount !== undefined ? r.amount : r.inner)}
+            </td>,
+          ]
+        : []),
     ];
   };
   const [lh, rh] = d.headings || ["Particulars", "Particulars"];
@@ -2208,25 +2241,40 @@ function TallyStatement({ d, range }) {
           onClick={() => (setOpen({}), setAll((x) => !x))}
         >
           {all ? "Condensed" : "Detailed"} (Alt+F5)
+        </button>{" "}
+        ·{" "}
+        <button type="button" className="link-btn" onClick={() => setPct(!pct)}>
+          {pct ? "Hide percentages" : "Show percentages"}
         </button>
+        {pct && (
+          <span>
+            {" "}
+            (of {isBS ? "the total" : salesTotal ? "Sales Accounts" : "the total"}
+            , as in Tally)
+          </span>
+        )}
       </div>
       <table className="tally-h">
         <colgroup>
           <col />
           <col className="c-inner" />
           <col className="c-amt" />
+          {pct && <col className="c-pct" />}
           <col />
           <col className="c-inner" />
           <col className="c-amt" />
+          {pct && <col className="c-pct" />}
         </colgroup>
         <thead>
           <tr>
             <th>{lh}</th>
             <th />
             <th className="num">{d.from ? "" : `as at ${date(d.to)}`}</th>
+            {pct && <th className="num">%</th>}
             <th className="th-sep">{rh}</th>
             <th />
             <th className="num">{d.from ? "" : `as at ${date(d.to)}`}</th>
+            {pct && <th className="num">%</th>}
           </tr>
         </thead>
         {d.blocks.map((b, bi) => {
@@ -2245,9 +2293,11 @@ function TallyStatement({ d, range }) {
                 <td className="th-p">Total</td>
                 <td />
                 <td className="num th-amt">{amt(b.total)}</td>
+                {pct && <td className="num th-pct">{pctOf(b.total)}</td>}
                 <td className="th-p th-sep">Total</td>
                 <td />
                 <td className="num th-amt">{amt(b.total)}</td>
+                {pct && <td className="num th-pct">{pctOf(b.total)}</td>}
               </tr>
             </tbody>
           );

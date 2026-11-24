@@ -199,6 +199,8 @@ async function commit(ctx, data, opts, progress) {
       accByName.get(n) ||
       taxCode(n) ||
       (exact ? null : accByName.get(n.replace(/\s*\(.*\)$/, ""))) ||
+      // Round Off / Roundoff / Rounded Off A/c… are OrdexaGo's Rounding & Adjustments.
+      (require("../roundOff").isRoundOffName(n) ? "adjustments" : null) ||
       null
     );
   };

@@ -10,12 +10,13 @@ async function moveEntries(org, from, into, intoName = "") {
     for (const [m, label] of Object.entries(docModels)) {
       const M = require(`../models/${m}`);
       const seen = new Set();
-      for (const q of [{ ledger: from }, { "lineItems.account": from }]) {
-        for (const d of await M.find({ organization: org, ...q }, { ledger: 1, lineItems: 1 }).lean()) {
+      for (const q of [{ ledger: from }, { "lineItems.account": from }, { adjustmentAccount: from }]) {
+        for (const d of await M.find({ organization: org, ...q }, { ledger: 1, lineItems: 1, adjustmentAccount: 1 }).lean()) {
           if (seen.has(String(d._id))) continue;
           seen.add(String(d._id));
           const set = {};
           if (d.ledger === from) set.ledger = into;
+          if (d.adjustmentAccount === from) set.adjustmentAccount = into === "adjustments" ? "" : into;
           if ((d.lineItems || []).some((l) => l.account === from)) set.lineItems = d.lineItems.map((l) => (l.account === from ? { ...l, account: into } : l));
           await M.updateOne({ _id: d._id, organization: org }, { $set: set });
         }

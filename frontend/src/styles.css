@@ -976,6 +976,8 @@ tr.clickable:hover td { background: var(--brand-50); }
 .tally-h { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; table-layout: fixed; border: 1px solid var(--line); }
 .tally-h col.c-inner { width: 13%; }
 .tally-h col.c-amt { width: 14%; }
+.tally-h col.c-pct { width: 8%; }
+.tally-h .th-pct { color: var(--muted, #6b7280); font-size: 12px; }
 .tally-h th { text-align: left; font-size: 12px; font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--bg-2, #f6f7f9); }
 .tally-h th.num, .tally-h td.num { text-align: right; }
 .tally-h td { padding: 4px 10px; vertical-align: top; }

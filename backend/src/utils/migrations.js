@@ -586,6 +586,26 @@ const MIGRATIONS = [
     },
   },
   {
+    // Round Off / Roundoff ledgers (from Tally) are the same as the built-in Rounding & Adjustments: merge them.
+    id: "2026-11-merge-round-off-ledgers",
+    run: async () => {
+      const Account = require("../models/Account");
+      const { moveEntries } = require("./mergeLedger");
+      const { isRoundOffName } = require("./roundOff");
+      const list = (await Account.find({}, { organization: 1, name: 1, active: 1, aliases: 1, description: 1 }).lean()).filter(
+        (a) => a.active !== false && isRoundOffName(a.name),
+      );
+      for (const a of list) {
+        const moved = await moveEntries(a.organization, String(a._id), "adjustments", "Rounding & Adjustments");
+        await Account.updateOne(
+          { _id: a._id },
+          { $set: { active: false, description: `${a.description ? `${a.description} · ` : ""}Merged into Rounding & Adjustments` } },
+        );
+        console.log(`Round off: "${a.name}" merged into Rounding & Adjustments — moved ${JSON.stringify(moved)}`);
+      }
+    },
+  },
+  {
     // Shiraz Handicrafts asked: its Online Sale ledgers (as in Tally) all under the Online Sale head.
     id: "2026-11-shiraz-online-sale-members",
     run: async () => {
