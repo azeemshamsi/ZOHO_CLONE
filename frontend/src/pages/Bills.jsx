@@ -1,4 +1,5 @@
 import BillFromPdf from "../components/BillFromPdf";
+import { leaveTo } from "../lib/backNav";
 import Attachments from "../components/Attachments";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -299,7 +300,7 @@ export function BillView() {
           try {
             await api.delete(`/bills/${id}`);
             toast("Bill deleted");
-            navigate("/bills");
+            leaveTo(navigate, "/bills");
           } catch (e) {
             setConfirm(null);
             toast(errMsg(e), "error");

@@ -8,7 +8,7 @@ import { PERIODS, periodRange } from "../lib/period";
 import { PageHeader, Spinner, Empty, Field, Modal, Confirm, toast } from "../components/ui";
 import Icon from "../components/Icon";
 import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
-import { useBack } from "../lib/backNav";
+import { useBack, leaveTo } from "../lib/backNav";
 
 const METHODS = [
   ["project_hours", "Based on Project Hours", "One hourly rate for the whole project"],
@@ -372,7 +372,7 @@ export function ProjectView() {
     try {
       await api.delete(`/projects/${id}`);
       toast("Project deleted");
-      navigate("/projects");
+      leaveTo(navigate, "/projects");
     } catch (e) {
       setConfirm(false);
       toast(errMsg(e), "error");

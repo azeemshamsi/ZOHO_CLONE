@@ -8,7 +8,7 @@ import Icon from "../components/Icon";
 import { useLocations } from "../lib/locations";
 import NameCustomer from "../components/NameCustomer";
 import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
-import { useBack } from "../lib/backNav";
+import { useBack, leaveTo } from "../lib/backNav";
 
 export function JournalList() {
   const [rows, setRows] = useState(null);
@@ -378,7 +378,7 @@ export function JournalView() {
           try {
             await api.delete(`/journals/${id}`);
             toast("Journal deleted");
-            navigate("/journals");
+            leaveTo(navigate, "/journals");
           } catch (e) {
             setConfirm(false);
             toast(errMsg(e), "error");

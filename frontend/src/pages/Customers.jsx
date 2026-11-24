@@ -6,7 +6,7 @@ import { STATES, GST_TREATMENTS, PAYMENT_TERMS, stateName, modeName } from "../l
 import { money, date } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Status, invoiceStatus, Confirm } from "../components/ui";
 import Icon from "../components/Icon";
-import { useBack } from "../lib/backNav";
+import { useBack, leaveTo } from "../lib/backNav";
 
 export function CustomerList() {
   const [rows, setRows] = useState(null);
@@ -355,7 +355,7 @@ export function CustomerDetail() {
     try {
       await api.delete(`/customers/${id}`);
       toast("Customer deleted");
-      navigate("/customers");
+      leaveTo(navigate, "/customers");
     } catch (e) {
       setConfirm(false);
       toast(errMsg(e), "error");

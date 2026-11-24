@@ -4,7 +4,7 @@ import api, { errMsg } from "../lib/api";
 import { money, date, isoDate } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, Modal, Confirm, toast } from "../components/ui";
 import Icon from "../components/Icon";
-import { useBack } from "../lib/backNav";
+import { useBack, leaveTo } from "../lib/backNav";
 
 const methodLabel = (a) => (a.method === "slm" ? `Straight Line · ${a.usefulLifeYears} yrs` : a.method === "wdv" ? `Written Down Value · ${a.rate}% p.a.` : "No depreciation");
 
@@ -371,7 +371,7 @@ export function AssetView() {
         confirmLabel={confirm === "delete" ? "Delete" : "Undo"}
         onConfirm={() =>
           confirm === "delete"
-            ? act(() => api.delete(`/fixed-assets/${id}`), "Asset deleted", () => navigate("/fixed-assets"))
+            ? act(() => api.delete(`/fixed-assets/${id}`), "Asset deleted", () => leaveTo(navigate, "/fixed-assets"))
             : act(() => api.delete(`/fixed-assets/${id}/dispose`), "Disposal undone")
         }
         onCancel={() => setConfirm(null)}

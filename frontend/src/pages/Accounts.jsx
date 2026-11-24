@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { leaveTo } from "../lib/backNav";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { money, date } from "../lib/format";
@@ -537,7 +538,7 @@ export function AccountDetail() {
           try {
             await api.delete(`/accounts/${code}`);
             toast("Account deleted");
-            navigate("/chart-of-accounts");
+            leaveTo(navigate, "/chart-of-accounts");
           } catch (e) {
             setConfirm(false);
             toast(errMsg(e), "error");

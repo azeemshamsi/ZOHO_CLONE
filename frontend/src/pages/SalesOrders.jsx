@@ -1,4 +1,5 @@
 import Attachments from "../components/Attachments";
+import { leaveTo } from "../lib/backNav";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
@@ -159,7 +160,7 @@ export function SalesOrderView() {
           try {
             await api.delete(`/sales-orders/${id}`);
             toast("Sales order deleted");
-            navigate("/sales-orders");
+            leaveTo(navigate, "/sales-orders");
           } catch (e) {
             setConfirm(null);
             toast(errMsg(e), "error");

@@ -4,7 +4,7 @@ import api, { errMsg } from "../lib/api";
 import { money, amount } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, Confirm, toast } from "../components/ui";
 import Icon from "../components/Icon";
-import { useBack } from "../lib/backNav";
+import { useBack, leaveTo } from "../lib/backNav";
 
 const COUNT = { monthly: 12, quarterly: 4, yearly: 1 };
 const MONTHS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
@@ -237,7 +237,7 @@ export function BudgetView() {
   const remove = async () => {
     await api.delete(`/budgets/${id}`);
     toast("Budget deleted");
-    navigate("/budgets");
+    leaveTo(navigate, "/budgets");
   };
   const Row = ({ r }) => (
     <tr>

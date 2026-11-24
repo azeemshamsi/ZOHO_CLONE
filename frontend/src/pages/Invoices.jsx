@@ -1,4 +1,5 @@
 import Attachments from "../components/Attachments";
+import { leaveTo } from "../lib/backNav";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
@@ -338,7 +339,7 @@ export function InvoiceView() {
           try {
             await api.delete(`/invoices/${id}`);
             toast("Invoice deleted");
-            navigate("/invoices");
+            leaveTo(navigate, "/invoices");
           } catch (e) {
             setConfirm(null);
             toast(errMsg(e), "error");

@@ -6,7 +6,7 @@ import { money, date } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Status, Confirm } from "../components/ui";
 import { AddressFields, fmtAddress } from "./Customers";
 import Icon from "../components/Icon";
-import { useBack } from "../lib/backNav";
+import { useBack, leaveTo } from "../lib/backNav";
 
 const emptyAddress = { street: "", city: "", state: "", pincode: "", country: "India" };
 
@@ -294,7 +294,7 @@ export function VendorDetail() {
     try {
       await api.delete(`/vendors/${id}`);
       toast("Vendor deleted");
-      navigate("/vendors");
+      leaveTo(navigate, "/vendors");
     } catch (e) {
       setConfirm(false);
       toast(errMsg(e), "error");

@@ -1,4 +1,5 @@
 import Attachments from "../components/Attachments";
+import { leaveTo } from "../lib/backNav";
 import BillFromPdf from "../components/BillFromPdf";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -229,7 +230,7 @@ export function ExpenseForm({ recurring = false }) {
     try {
       await api.delete(`/expenses/${id}`);
       toast("Expense deleted");
-      navigate("/expenses");
+      leaveTo(navigate, "/expenses");
     } catch (e) {
       setConfirm(false);
       toast(errMsg(e), "error");

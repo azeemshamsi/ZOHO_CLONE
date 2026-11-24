@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import CompanySwitcher from "./CompanySwitcher";
 import Logo from "./Logo";
@@ -245,6 +245,13 @@ export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useClickAway(profileOpen, () => setProfileOpen(false));
+  // A page whose document is gone (deleted): shown as such instead of a spinner.
+  const [gone, setGone] = useState("");
+  useEffect(() => {
+    const on = (e) => setGone(e.detail?.path || "");
+    window.addEventListener("ordexago:not-found", on);
+    return () => window.removeEventListener("ordexago:not-found", on);
+  }, []);
   // Sidebar links are jumps (Back from the page they open goes up its own hierarchy).
   const close = () => {
     markJump();
@@ -390,7 +397,17 @@ export default function Layout() {
                 <div className="alert readonly-banner">Your OrdexaGo subscription ends in {subscription.daysLeft} day{subscription.daysLeft > 1 ? "s" : ""}. Contact OrdexaGo at help@ordexago.com to renew.</div>
               )}
               {level === "view" && <div className="alert readonly-banner">View only — your role can see this but not change it.</div>}
-              <Outlet />
+              {gone === location.pathname ? (
+                <div className="card" style={{ maxWidth: 560, margin: "40px auto", textAlign: "center" }}>
+                  <h3 style={{ marginTop: 0 }}>This entry no longer exists</h3>
+                  <p className="muted">It may have been deleted.</p>
+                  <button className="btn btn-primary" onClick={() => window.history.length > 1 ? navigate(-1) : navigate("/")}>
+                    Go back
+                  </button>
+                </div>
+              ) : (
+                <Outlet />
+              )}
             </>
           )}
         </main>

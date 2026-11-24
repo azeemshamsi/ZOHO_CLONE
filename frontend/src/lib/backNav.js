@@ -102,3 +102,15 @@ export function BackMemory() {
   }, [loc.pathname, loc.search]);
   return null;
 }
+
+// After deleting the document on this page: back to the page it was opened from (e.g. the Cash in Hand ledger),
+// else `fallback` (its list). Replaces the deleted page in the history, so the browser's Back doesn't return to it.
+export function leaveTo(navigate, fallback) {
+  const path = window.location.pathname;
+  const d = read(KEY_DRILL);
+  const t = d[path] || d[path.replace(/\/edit$/, "")] || fallback;
+  delete d[path];
+  write(KEY_DRILL, d);
+  window.__oxBack = true;
+  navigate(t, { replace: true });
+}

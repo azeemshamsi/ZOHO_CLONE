@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { leaveTo } from "../lib/backNav";
 import {
   Link,
   useNavigate,
@@ -506,7 +507,7 @@ export function AdjustmentView() {
   const remove = async () => {
     await api.delete(`/inventory-adjustments/${id}`);
     toast("Adjustment deleted");
-    navigate("/inventory-adjustments");
+    leaveTo(navigate, "/inventory-adjustments");
   };
   return (
     <>

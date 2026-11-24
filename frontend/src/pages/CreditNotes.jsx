@@ -1,4 +1,5 @@
 import Attachments from "../components/Attachments";
+import { leaveTo } from "../lib/backNav";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
@@ -367,7 +368,7 @@ export function CreditNoteView() {
           try {
             await api.delete(`/credit-notes/${id}`);
             toast("Credit note deleted");
-            navigate("/credit-notes");
+            leaveTo(navigate, "/credit-notes");
           } catch (e) {
             setModal(null);
             toast(errMsg(e), "error");

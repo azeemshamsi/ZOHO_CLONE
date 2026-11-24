@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { leaveTo } from "../lib/backNav";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { GST_RATES, UNITS } from "../lib/constants";
@@ -163,7 +164,7 @@ export function ItemForm() {
     try {
       await api.delete(`/items/${id}`);
       toast("Item deleted");
-      navigate("/items");
+      leaveTo(navigate, "/items");
     } catch (e) {
       setConfirm(false);
       toast(errMsg(e), "error");

@@ -35,6 +35,12 @@ api.interceptors.response.use(
     return r;
   },
   async (err) => {
+    // The document this page shows doesn't exist (deleted, e.g. browser Back to it): the page says so instead of
+    // spinning forever (components/Layout.jsx).
+    if (err.response?.status === 404 && (err.config?.method || "get") === "get") {
+      const id = (String(err.config?.url || "").match(/\/([0-9a-f]{24})(?:[/?]|$)/i) || [])[1];
+      if (id && window.location.pathname.includes(id)) window.dispatchEvent(new CustomEvent("ordexago:not-found", { detail: { path: window.location.pathname } }));
+    }
     // Amazon order data from an unapproved device: offer "Request approval" (components/DeviceGate.jsx).
     if (err.response?.status === 403) {
       let d = err.response.data;

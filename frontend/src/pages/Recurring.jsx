@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { leaveTo } from "../lib/backNav";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { money, date } from "../lib/format";
@@ -112,7 +113,7 @@ export function RecurringView({ kind }) {
   const remove = async () => {
     await api.delete(`/recurring/${id}`);
     toast("Recurring profile deleted");
-    navigate(r.route);
+    leaveTo(navigate, r.route);
   };
   const info = (label, value) => (
     <div className="stat">

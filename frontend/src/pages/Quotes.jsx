@@ -1,4 +1,5 @@
 import Attachments from "../components/Attachments";
+import { leaveTo } from "../lib/backNav";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
@@ -164,7 +165,7 @@ export function QuoteView() {
           try {
             await api.delete(`/quotes/${id}`);
             toast("Quote deleted");
-            navigate("/quotes");
+            leaveTo(navigate, "/quotes");
           } catch (e) {
             setConfirm(false);
             toast(errMsg(e), "error");

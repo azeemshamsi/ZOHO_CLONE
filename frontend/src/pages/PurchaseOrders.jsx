@@ -1,4 +1,5 @@
 import Attachments from "../components/Attachments";
+import { leaveTo } from "../lib/backNav";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
@@ -145,7 +146,7 @@ export function PurchaseOrderView() {
           try {
             await api.delete(`/purchase-orders/${id}`);
             toast("Purchase order deleted");
-            navigate("/purchase-orders");
+            leaveTo(navigate, "/purchase-orders");
           } catch (e) {
             setConfirm(null);
             toast(errMsg(e), "error");

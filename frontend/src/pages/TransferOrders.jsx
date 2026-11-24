@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { leaveTo } from "../lib/backNav";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { date, isoDate } from "../lib/format";
@@ -235,7 +236,7 @@ export function TransferView() {
         onConfirm={async () => {
           await api.delete(`/transfer-orders/${id}`);
           toast("Transfer order deleted");
-          navigate("/transfer-orders");
+          leaveTo(navigate, "/transfer-orders");
         }}
         onCancel={() => setConfirm(false)}
       />

@@ -10,7 +10,7 @@ import Icon from "../components/Icon";
 import { DocEmail } from "../components/EmailDoc";
 import BankAccountSelect from "../components/BankAccountSelect";
 import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
-import { useBack } from "../lib/backNav";
+import { useBack, leaveTo } from "../lib/backNav";
 
 
 export function PaymentList() {
@@ -326,7 +326,7 @@ export function PaymentView() {
     try {
       await api.delete(`/payments/${id}`);
       toast("Payment deleted");
-      navigate("/payments");
+      leaveTo(navigate, "/payments");
     } catch (e) {
       setConfirm(false);
       toast(errMsg(e), "error");
