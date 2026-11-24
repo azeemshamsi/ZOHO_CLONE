@@ -62,9 +62,11 @@ const cellOut = (c) => {
   return /%$/.test(c) ? { v: n, t: "n", z: "0.00%" } : { v: n, t: "n", z: "#,##0.00;-#,##0.00" };
 };
 
-export async function downloadExcel(el, { title, subtitle, org }) {
+const headLines = (org, orgLines) => (orgLines && orgLines.length ? orgLines : [org || ""]);
+
+export async function downloadExcel(el, { title, subtitle, org, orgLines }) {
   const XLSX = await import("xlsx");
-  const aoa = [[org || ""], [title], [subtitle || ""], []];
+  const aoa = [...headLines(org, orgLines).map((l) => [l]), [title], [subtitle || ""], []];
   const bold = new Set();
   for (const t of readTables(el)) {
     if (t.title) aoa.push([t.title]);
@@ -86,7 +88,7 @@ export async function downloadExcel(el, { title, subtitle, org }) {
   XLSX.writeFile(wb, `${safeName(`${title} ${subtitle || ""}`)}.xlsx`);
 }
 
-export async function downloadPdf(el, { title, subtitle, org }) {
+export async function downloadPdf(el, { title, subtitle, org, orgLines }) {
   const { jsPDF } = await import("jspdf");
   const at = await import("jspdf-autotable");
   const autoTable = [at.autoTable, at.default, at.default?.default].find((f) => typeof f === "function");
@@ -96,13 +98,19 @@ export async function downloadPdf(el, { title, subtitle, org }) {
   const W = doc.internal.pageSize.getWidth();
   // jsPDF's built-in fonts have no ₹: amounts are shown without it (as Tally prints them).
   const clean = (r) => r.map((c) => String(c).replace(/₹\s?/g, ""));
-  doc.setFontSize(10);
-  doc.text(org || "", W / 2, 34, { align: "center" });
+  const [first, ...rest] = headLines(org, orgLines);
+  let y = 34;
+  doc.setFont(undefined, "bold");
+  doc.setFontSize(12);
+  doc.text(first || "", W / 2, y, { align: "center" });
+  doc.setFont(undefined, "normal");
+  doc.setFontSize(8.5);
+  for (const l of rest) doc.text(clean([l])[0], W / 2, (y += 12), { align: "center" });
   doc.setFontSize(14);
-  doc.text(clean([title])[0], W / 2, 52, { align: "center" });
+  doc.text(clean([title])[0], W / 2, (y += 20), { align: "center" });
   doc.setFontSize(9);
-  doc.text(subtitle || "", W / 2, 66, { align: "center" });
-  let y = 80;
+  doc.text(subtitle || "", W / 2, (y += 14), { align: "center" });
+  y += 14;
   for (const t of tables) {
     if (t.title) {
       doc.setFontSize(11);
@@ -137,8 +145,8 @@ export async function downloadPdf(el, { title, subtitle, org }) {
   doc.save(`${safeName(`${title} ${subtitle || ""}`)}.pdf`);
 }
 
-export function downloadCsv(el, { title, subtitle }) {
-  const rows = [];
+export function downloadCsv(el, { title, subtitle, org, orgLines }) {
+  const rows = [...headLines(org, orgLines).map((l) => [l]), [title], [subtitle || ""], []];
   for (const t of readTables(el)) {
     if (t.title) rows.push([t.title]);
     for (const r of [...t.head, ...t.body, ...t.foot]) rows.push(r.map((c) => c.replace(/₹/g, "").replace(/,/g, "")));

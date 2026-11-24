@@ -834,6 +834,30 @@ export function ReportPage() {
     if (h !== horizontal) nav(`/reports/${LAYOUT[key]}`, { replace: true });
   };
   const { organization } = useAuth();
+  // The company's letterhead on reports and their downloads: name, address, GSTIN, contact.
+  const orgLines = (() => {
+    const o = organization || {};
+    const a = o.address || {};
+    const st = a.state || o.state;
+    const place = [
+      a.street,
+      a.city,
+      st ? stateName(st) || st : "",
+      a.pincode,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    const tax = [
+      o.gstin ? `GSTIN: ${o.gstin}` : "",
+      st ? `State: ${stateName(st) || st}${/^\d+$/.test(st) ? ` (${st})` : ""}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const contact = [o.phone ? `Ph: ${o.phone}` : "", o.email ? `Email: ${o.email}` : ""]
+      .filter(Boolean)
+      .join(" · ");
+    return [o.name || "", place, tax, contact].filter(Boolean);
+  })();
   // A link can carry its period (?from=…&to=…), e.g. Closing Stock in the P&L opening the Stock Summary.
   const urlRange = () => {
     const q = new URLSearchParams(window.location.search);
@@ -1132,6 +1156,7 @@ export function ReportPage() {
                   : meta.title,
               subtitle,
               org: organization?.name,
+              orgLines,
             });
             const run = (f) => async () => {
               if (!paper.current || !data) return;
@@ -1174,6 +1199,11 @@ export function ReportPage() {
         <div className="report-paper" ref={paper}>
           <div className="report-head">
             <div className="muted">{organization?.name}</div>
+            {orgLines.slice(1).map((l) => (
+              <div key={l} className="muted small">
+                {l}
+              </div>
+            ))}
             <h2>
               {key === "party-ledger" && data.party
                 ? `${data.party.name} — Ledger Account`
