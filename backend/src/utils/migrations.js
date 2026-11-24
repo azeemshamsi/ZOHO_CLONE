@@ -585,6 +585,37 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    // Shiraz Handicrafts asked: its Online Sale ledgers (as in Tally) all under the Online Sale head.
+    id: "2026-11-shiraz-online-sale-members",
+    run: async () => {
+      const Organization = require("../models/Organization");
+      const Account = require("../models/Account");
+      const LedgerGroup = require("../models/LedgerGroup");
+      const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9%@]/g, "");
+      const WANT = ["Local B2B @ 5%", "Local Sales @ 18%", "Local Sales 5%", "Outstate B2B @ 18%", "OutState Sales 18%", "OutState Sales 5%", "B2B Sale @ 5%"].map(norm);
+      for (const o of (await Organization.find({}, { _id: 1, name: 1 }).lean()).filter((x) => /shiraz handicrafts/i.test(x.name || ""))) {
+        const groups = await LedgerGroup.find({ organization: o._id, kind: "sales" });
+        const online = groups.find((g) => norm(g.name) === "onlinesale");
+        if (!online) {
+          console.log(`${o.name}: no Online Sale head — skipped`);
+          continue;
+        }
+        const ids = (await Account.find({ organization: o._id }).lean())
+          .filter((a) => a.active !== false && WANT.includes(norm(a.name)))
+          .map((a) => String(a._id));
+        // A ledger sits in one head: out of any other sales head, into Online Sale.
+        for (const g of groups)
+          if (String(g._id) !== String(online._id) && (g.members || []).some((m) => ids.includes(m))) {
+            g.members = g.members.filter((m) => !ids.includes(m));
+            await g.save();
+          }
+        online.members = [...new Set([...(online.members || []), ...ids])];
+        await online.save();
+        console.log(`${o.name}: ${ids.length} ledgers under Online Sale`);
+      }
+    },
+  },
 ];
 
 async function runMigrations() {
