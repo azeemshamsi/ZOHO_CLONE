@@ -204,6 +204,8 @@ router.put(
       if (s.authType === "client") s.accessToken = "";
       s.tokenExpires = null;
     }
+    const syncWasOn = !!s.inventorySync;
+    const stockFromBefore = s.stockFrom ? new Date(s.stockFrom).toISOString().slice(0, 10) : "";
     for (const k of [
       "autoSync",
       "fulfillInShopify",
@@ -217,7 +219,10 @@ router.put(
     ])
       if (d[k] !== undefined) s[k] = d[k];
     if (d.stockFrom !== undefined) s.stockFrom = d.stockFrom || null;
-    if (d.inventorySync && !s.stockFrom) s.stockFrom = new Date(); // orders from now on reserve stock
+    // Turning inventory sync on: orders from now on reserve stock, unless a different date was chosen just now.
+    const chosen = d.stockFrom ? new Date(d.stockFrom).toISOString().slice(0, 10) : "";
+    if (d.inventorySync && !syncWasOn && (!chosen || chosen === stockFromBefore)) s.stockFrom = new Date();
+    if (d.inventorySync && !s.stockFrom) s.stockFrom = new Date();
     if (d.syncFrom !== undefined) s.syncFrom = d.syncFrom || null;
     if (d.invoice)
       s.invoice = {

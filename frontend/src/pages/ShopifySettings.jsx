@@ -539,7 +539,7 @@ function InventorySync({ store, onSaved }) {
           </Field>
           <Field
             label="Orders reserve stock from"
-            hint="Shopify orders from this date hold stock until invoiced"
+            hint="Only while inventory sync is on. Turning sync on sets this to that day, so older orders don't hold stock"
           >
             <input
               type="date"

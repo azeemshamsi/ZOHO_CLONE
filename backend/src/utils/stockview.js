@@ -22,6 +22,8 @@ const r2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const BLOCKING = ["new", "packed", "ready_to_ship", "shipped", "delivered"];
 
 async function blockedQty(org, store) {
+  // Orders hold stock only once inventory sync to Shopify is on (before that, Shopify keeps its own count).
+  if (!store?.inventorySync) return {};
   const match = { organization: new mongoose.Types.ObjectId(String(org)), status: { $in: BLOCKING }, $or: [{ invoice: null }, { invoice: { $exists: false } }] };
   if (store?.stockFrom) match.orderDate = { $gte: store.stockFrom };
   const orders = await ShopifyOrder.find(match, { "lines.item": 1, "lines.quantity": 1 }).lean();
