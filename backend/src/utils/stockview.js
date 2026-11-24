@@ -119,6 +119,9 @@ async function stockView(org, { itemIds } = {}) {
       racks: rackRows,
       unassigned,
       shopifyVariantId: it.shopifyVariantId || "",
+      shopifyStatus: it.shopifyStatus || "",
+      source: it.source || "",
+      seller: it.seller ? String(it.seller) : "",
       links: it.shopifyLinks || [],
       pushed: it.shopifyPushed || {},
     });

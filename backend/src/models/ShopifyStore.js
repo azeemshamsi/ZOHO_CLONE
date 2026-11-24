@@ -25,6 +25,7 @@ const shopifyStoreSchema = new mongoose.Schema(
     accessToken: { type: String, default: "" }, // legacy shpat_ token, or the cached client-credentials token
     tokenExpires: { type: Date },
     connected: { type: Boolean, default: false },
+    productStatusAt: Date, // when items' Shopify product status was last refreshed
     // Sync
     syncFrom: { type: Date },
     autoSync: { type: Boolean, default: true },

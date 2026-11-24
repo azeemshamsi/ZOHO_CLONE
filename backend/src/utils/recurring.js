@@ -105,6 +105,8 @@ function startScheduler() {
   setTimeout(flipkartStock, 120000).unref();
   setInterval(flipkartStock, 30 * 60 * 1000).unref();
   setInterval(() => require("./amazon/ship").trackAllEasyShip().catch((e) => console.error("Easy Ship tracking failed:", e.message)), 2 * 60 * 60 * 1000).unref();
+  setTimeout(() => require("./shopify/productStatus").refreshAll().catch(() => {}), 3 * 60 * 1000).unref();
+  setInterval(() => require("./shopify/productStatus").refreshAll().catch((e) => console.error("Shopify product status failed:", e.message)), 6 * 60 * 60 * 1000).unref();
   setInterval(() => require("./shopify/inventory").pushAll().catch((e) => console.error("Inventory sync failed:", e.message)), 30 * 60 * 1000).unref();
   // Every courier shipment (all couriers), hourly; status changes go on to Shopify.
   setTimeout(() => require("./shopify/ship").trackAll().catch(() => {}), 5 * 60 * 1000).unref();

@@ -43,6 +43,8 @@ const itemSchema = new mongoose.Schema(
     // Where the item came from: shopify (created from a Shopify order), tally / zoho / sheet (an import),
     // ordexago (made here). Blank on old items whose origin isn't known.
     source: { type: String, default: "" },
+    // Its Shopify product's status: ACTIVE / DRAFT / ARCHIVED, GONE (deleted); blank if not on Shopify or not checked yet.
+    shopifyStatus: { type: String, default: "" },
     needsReview: { type: Boolean, default: false },
     reviewNote: { type: String, default: "" },
   },

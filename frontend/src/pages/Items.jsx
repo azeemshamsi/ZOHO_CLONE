@@ -100,6 +100,9 @@ export function ItemList() {
                 <th>GST</th>
                 <th className="num">Rate</th>
                 <th className="num">Stock on Hand</th>
+                <th className="num" title="Made to order / supplier stock shown on Shopify. Not in inventory or the books.">
+                  Virtual stock
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -127,6 +130,9 @@ export function ItemList() {
                       <span className="muted">—</span>
                     )}
                   </td>
+                  <td className="num" onClick={(e) => e.stopPropagation()}>
+                    {i.type === "goods" && !i.seller ? <VirtualStock item={i} /> : <span className="muted">—</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -134,6 +140,46 @@ export function ItemList() {
         </div>
       )}
     </>
+  );
+}
+
+// Virtual stock, set right in the list: shown on Shopify (made to order / supplier stock), no effect on
+// inventory or accounts.
+function VirtualStock({ item }) {
+  const [v, setV] = useState(item.virtualStock || 0);
+  const [edit, setEdit] = useState(null);
+  const save = async () => {
+    const n = Math.max(0, Math.floor(Number(edit) || 0));
+    setEdit(null);
+    if (n === v) return;
+    try {
+      await api.put(`/items/${item._id}/virtual-stock`, { virtualStock: n });
+      setV(n);
+      toast(`Virtual stock ${n} for ${item.sku || item.name}`, "success");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+  };
+  if (edit !== null)
+    return (
+      <input
+        type="number"
+        min="0"
+        autoFocus
+        value={edit}
+        style={{ width: 80, textAlign: "right" }}
+        onChange={(e) => setEdit(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.target.blur();
+          if (e.key === "Escape") setEdit(null);
+        }}
+      />
+    );
+  return (
+    <button type="button" className="link-btn" title="Set virtual stock" onClick={() => setEdit(String(v))}>
+      {v || "Add"}
+    </button>
   );
 }
 

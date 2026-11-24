@@ -375,7 +375,7 @@ export function Inventory() {
   const tab = params.get("tab") || "all";
   const [q, setQ] = useState("");
   const dq = useDebounced(q, 300);
-  const [filters, setFilters] = useState({ category: "", rack: "", sync: "" });
+  const [filters, setFilters] = useState({ category: "", rack: "", sync: "", source: "", hidden: "" });
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [view, setView] = useState(null);
@@ -396,6 +396,18 @@ export function Inventory() {
       toast(errMsg(e), "error");
     }
     setPushing(false);
+  };
+  const [statusBusy, setStatusBusy] = useState(false);
+  const refreshStatus = async () => {
+    setStatusBusy(true);
+    try {
+      const { data: r } = await api.post("/stock/shopify-status");
+      toast(`Shopify status checked for ${num(r.variants || 0)} listings · ${r.updated} item(s) changed`, "success");
+      load();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setStatusBusy(false);
   };
   const quickSync = async (r, on) => {
     await api.put(`/stock/${r._id}`, { shopifySync: on });
@@ -480,6 +492,23 @@ export function Inventory() {
             <option value="on">Syncing to Shopify</option>
             <option value="off">Not syncing</option>
           </select>
+          <select value={filters.source} onChange={(e) => setFilters({ ...filters, source: e.target.value })} title="Store items or where items came from">
+            <option value="">All sources</option>
+            <option value="store">Shopify store items</option>
+            <option value="not_store">Not on the store</option>
+            <option value="from_shopify">Created from Shopify orders</option>
+            <option value="tally">Imported from Tally</option>
+            <option value="ordexago">Created in OrdexaGo</option>
+            <option value="imported">Imported (Zoho / spreadsheet)</option>
+          </select>
+          {data && (data.hiddenCount > 0 || filters.hidden) && (
+            <label className="small" title="Sellers' products, and Shopify products that are draft, archived or deleted with no stock left">
+              <input type="checkbox" checked={!!filters.hidden} onChange={(e) => setFilters({ ...filters, hidden: e.target.checked ? "1" : "" })} /> Show {num(data.hiddenCount)} hidden
+            </label>
+          )}
+          <button className="link-btn small" disabled={statusBusy} onClick={refreshStatus} title={data?.statusAt ? `Last checked ${new Date(data.statusAt).toLocaleString("en-IN")}` : "Not checked yet"}>
+            {statusBusy ? "Checking Shopify…" : "Refresh Shopify status"}
+          </button>
           {data && (
             <span className="muted small" style={{ marginLeft: "auto" }}>
               {num(data.totals.onHand)} units · {money(data.totals.value)}

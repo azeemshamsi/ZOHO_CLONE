@@ -22,7 +22,12 @@ router.get(
   ah(async (req, res) => {
     const { rows, store, racks, warehouses } = await stockView(req.org);
     const q = req.query;
+    const { SOURCE_FILTERS, inInventory } = require("../utils/itemSource");
     let list = rows.filter((r) => r.active || q.inactive === "1");
+    // Marketplace sellers' products never; Shopify products that are draft / archived / deleted only while stock is left.
+    const hiddenCount = list.filter((r) => !inInventory(r, r.onHand)).length;
+    if (q.hidden !== "1") list = list.filter((r) => inInventory(r, r.onHand));
+    if (SOURCE_FILTERS[q.source]) list = list.filter(SOURCE_FILTERS[q.source]);
     if (q.q) {
       const rx = new RegExp(esc(q.q.trim()), "i");
       list = list.filter((r) => rx.test(r.name) || rx.test(r.sku) || rx.test(r.hsnSac) || r.links.some((l) => rx.test(l.sku) || rx.test(l.title)) || r.racks.some((x) => rx.test(x.code)));
@@ -52,6 +57,8 @@ router.get(
       page,
       limit,
       counts,
+      hiddenCount,
+      statusAt: store?.productStatusAt || null,
       totals,
       categories: [...new Set(rows.map((r) => r.category).filter(Boolean))].sort(),
       racks,
@@ -71,6 +78,14 @@ router.get(
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", 'attachment; filename="inventory.csv"');
     res.send("﻿" + out.join("\r\n"));
+  })
+);
+
+// Re-read each item's Shopify product status (active / draft / archived) now.
+router.post(
+  "/shopify-status",
+  ah(async (req, res) => {
+    res.send(await require("../utils/shopify/productStatus").refreshOrg(req.org));
   })
 );
 
