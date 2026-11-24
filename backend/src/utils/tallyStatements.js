@@ -22,7 +22,12 @@ const ledgersOf = (accounts, mv, test) =>
 
 // Ledgers Tally keeps under Duties & Taxes (GST, TDS, TCS…), whichever side their balance falls.
 const TAX_RX = /\b(gst|cgst|sgst|igst|utgst|cess|tds|tcs|duties|duty|tax)\b/i;
-const isTax = (a) => /^(input|output)_/.test(a.code) || (["Other Current Liability", "Other Current Asset"].includes(a.group) && TAX_RX.test(a.name));
+// GST paid in cash (the electronic cash ledger balance) and DRC-03 deposits are amounts the company has with the
+// government — Tally keeps them under Current Assets, not Duties & Taxes.
+const GOVT_DEPOSIT_RX = /\b(cash\s*(balance|ledger)|electronic\s*cash|drc[\s-]*0?3)\b/i;
+const isTax = (a) =>
+  /^(input|output)_/.test(a.code) ||
+  (["Other Current Liability", "Other Current Asset"].includes(a.group) && TAX_RX.test(a.name) && !(a.group === "Other Current Asset" && GOVT_DEPOSIT_RX.test(a.name)));
 
 // Ledgers that are Direct Expenses in Tally even though bills post to them (Tally lets any ledger be a purchase voucher's).
 const DIRECT_RX = /\b(commission|shipping|freight|cartage|carriage|labou?r|wages|courier|transport|packing|loading|octroi|power|fuel)\b/i;
