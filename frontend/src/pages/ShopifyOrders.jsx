@@ -1359,7 +1359,7 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
                 time.
               </p>
             ))}
-          {acc?.carrier === "shiprocket_cargo" && (
+          {["shiprocket_cargo", "shadowfax"].includes(acc?.carrier) && (
             <div className="row-2">
               <Field
                 label="E-way bill no."
@@ -1373,7 +1373,7 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
                 />
               </Field>
               <p className="muted small" style={{ alignSelf: "center" }}>
-                Every box goes on one Cargo docket.
+                {acc?.carrier === "shiprocket_cargo" ? "Every box goes on one Cargo docket." : ""}
               </p>
             </div>
           )}
@@ -2045,7 +2045,7 @@ function ReverseModal({ order, couriers, onClose, onDone }) {
   }, []);
   const acc = active.find((c) => c._id === f.accountId);
   const manualOnly =
-    acc && ["custom", "shadowfax", "shiprocket_cargo", "velocity", "bigship"].includes(acc.carrier);
+    acc && ["custom", "shiprocket_cargo", "velocity", "bigship"].includes(acc.carrier);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const a = order.shippingAddress || {};
   const submit = async () => {

@@ -40,6 +40,7 @@ const FIELD_LABEL = {
   accessKey: "API access key",
   returnWarehouseId: "Return warehouse ID (optional)",
   categoryId: "Product category ID (optional)",
+  returnType: "Failed deliveries go back to",
 };
 const OPTIONAL = [
   "courierId",
@@ -49,6 +50,7 @@ const OPTIONAL = [
   "carrierId",
   "returnWarehouseId",
   "categoryId",
+  "returnType",
   "vendorCode",
   "commodityId",
   "trackingKey",
@@ -78,6 +80,10 @@ const SELECTS = {
   shippingMode: [
     ["Surface", "Surface"],
     ["Express", "Express"],
+  ],
+  returnType: [
+    ["seller", "The pickup address (seller)"],
+    ["origin", "Your warehouse (origin)"],
   ],
   cargoMode: [
     ["surface", "Surface"],

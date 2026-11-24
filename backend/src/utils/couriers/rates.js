@@ -379,15 +379,23 @@ const QUOTES = {
     return { serviceable: true, charge: pick.charge, etd: pick.etd, courierName: pick.name, courierId: pick.courierId, options: options.slice(0, 8) };
   },
 
+  // Shadowfax's rate calculator (pre-GST rate + GST); no rate = not serviceable for that pair.
   async shadowfax(acc, q) {
     const c = CARRIERS.shadowfax;
     if (!acc.credentials?.token) return { serviceable: null, note: "Add the API token" };
-    const { status, data } = await request(`${c.base(acc)}/api/v1/serviceability/?${qs({ service: "customer_delivery", pincodes: q.to, page: 1, count: 10 })}`, { headers: c.h(acc), timeout: 12000 });
-    if (status >= 400) throw new Error(data.message || `Shadowfax pincode check failed (${status})`);
-    const list = data.Serviceability || data.serviceability || data.data || data.results;
-    if (!Array.isArray(list)) throw new Error("Shadowfax pincode check gave an unexpected answer");
-    const hit = list.find((x) => String(x.code || x.pincode) === String(q.to));
-    return hit ? { serviceable: true } : { serviceable: false, note: `Shadowfax doesn't deliver to ${q.to}` };
+    if (!q.from) return { serviceable: null, note: "Add the pickup pincode to this courier to check rates" };
+    const { status, data } = await request(`${c.base(acc)}/api/v1/clients/rate_calculator/`, {
+      method: "POST",
+      headers: c.h(acc),
+      timeout: 12000,
+      json: { origin_pincode: Number(q.from), destination_pincode: Number(q.to), service: "forward", weight: Math.max(0.1, Number(q.weight) || 0.5) },
+    });
+    if (status === 401) throw new Error("Shadowfax rejected the API token");
+    if (status >= 400) throw new Error(data?.message || `Shadowfax rate check failed (${status})`);
+    const rate = Number(data?.shipping_rate);
+    if (!(rate > 0)) return { serviceable: false, note: `Shadowfax has no rate for ${q.from} → ${q.to}` };
+    const gst = Number(data.gst) || 0;
+    return { serviceable: true, charge: r2(rate + gst), zone: data.zone || "", breakdown: { freight: r2(rate), gst: r2(gst) }, note: q.cod ? "COD charge not included" : "" };
   },
 
   async custom(acc, q) {

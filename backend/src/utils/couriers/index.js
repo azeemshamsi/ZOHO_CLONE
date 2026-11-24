@@ -529,43 +529,125 @@ const dtdc = {
 };
 
 /* ---------------- Shadowfax ---------------- */
+// Shadowfax status_id → OrdexaGo status (developer.shadowfax.in → Order Lifecycle).
+const SFX_STATUS = {
+  new: "pending",
+  pickup_scheduled: "pending",
+  picked: "in_transit",
+  recd_at_fwd_hub: "in_transit",
+  recd_at_fwd_dc: "in_transit",
+  ofd: "out_for_delivery",
+  delivered: "delivered",
+  cid: "in_transit",
+  nc: "in_transit",
+  na: "in_transit",
+  on_hold: "in_transit",
+  reopen_ndr: "in_transit",
+  rts: "rto",
+  rts_d: "rto",
+  rto: "rto",
+  rto_d: "rto",
+  lost: "cancelled",
+  cancelled: "cancelled",
+  cancelled_by_client: "cancelled",
+};
+const sfxStatus = (code, label) => SFX_STATUS[String(code || "").toLowerCase()] || normStatus(String(label || code || "").replace(/_/g, " "));
+const sfxErr = (d) => {
+  if (!d || typeof d !== "object") return String(d || "");
+  const e = d.errors;
+  const es = !e ? "" : typeof e === "string" ? e : Array.isArray(e) ? e.join("; ") : Object.entries(e).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : typeof v === "object" ? JSON.stringify(v) : v}`).join("; ");
+  return [d.message && d.message !== "Failure" ? d.message : "", es, d.responseMsg || ""].filter(Boolean).join(" — ") || short(d);
+};
 const shadowfax = {
   title: "Shadowfax",
-  fields: { credentials: ["token"], options: [] },
-  help: "API token from your Shadowfax account manager (D2C / marketplace API). If Shadowfax gave you a different API address, put it in API address.",
+  fields: { credentials: ["token"], options: ["returnType"] },
+  help: "API token from Shadowfax (developer.shadowfax.in → your account; staging and live tokens differ — tick Test for staging). Failed deliveries go back to the pickup address (return type 'seller'), or to your warehouse with 'origin'.",
   base: (acc) => (acc.baseUrl || (acc.test ? "https://dale.staging.shadowfax.in" : "https://dale.shadowfax.in")).replace(/\/$/, ""),
   h: (acc) => ({ authorization: `Token ${acc.credentials.token}` }),
-  async book(acc, s) {
+  async book(acc, s, manual = {}) {
     need(acc, ["token"]);
     pickupOk(acc);
     const p = acc.pickup;
-    const pick = { name: p.name || s.seller.name, contact: phone10(p.phone), address_line_1: p.address, address_line_2: "", city: p.city, state: stateName(p.state), pincode: p.pincode };
+    const addr = { name: p.name || s.seller.name, contact: phone10(p.phone), address_line_1: p.address, city: p.city, state: stateName(p.state), pincode: Number(p.pincode) };
+    const value = r2(s.value);
+    const eway = String(manual.ewayBill || "").replace(/\s/g, "");
+    if (value >= 50000 && !eway) throw new Error(`Shadowfax needs an e-way bill number for orders of ₹50,000 or more (this one is ₹${value}) — enter it in the booking box`);
     const body = {
       order_type: "marketplace",
-      order_details: { client_order_id: s.reference, actual_weight: Math.round(s.weight * 1000), volumetric_weight: Math.round(((s.length * s.breadth * s.height) / 5000) * 1000), product_value: s.value, payment_mode: s.cod ? "COD" : "Prepaid", cod_amount: s.cod ? s.codAmount : 0, total_amount: s.value, order_date: ymd(s.orderDate) },
-      customer_details: { name: s.consignee.name, contact: s.consignee.phone, address_line_1: s.consignee.address1, address_line_2: s.consignee.address2 || "", city: s.consignee.city, state: s.consignee.stateName, pincode: s.consignee.pincode, alternate_contact: "" },
-      pickup_details: pick,
-      rts_details: pick,
-      product_details: s.items.map((i) => ({ hsn_code: i.hsn, invoice_no: s.invoiceNumber || s.reference, sku_name: i.name, sku_id: i.sku || i.name.slice(0, 30), category: i.category || "", price: r2(i.price * i.quantity), seller_details: { seller_name: s.seller.name, seller_address: s.seller.address, seller_state: s.seller.stateName, gstin_number: s.seller.gstin || "" } })),
+      order_details: {
+        client_order_id: s.reference,
+        product_value: value,
+        total_amount: value,
+        payment_mode: s.cod ? "cod" : "prepaid",
+        cod_amount: s.cod ? r2(s.codAmount) : 0,
+        order_service: "Regular",
+        actual_weight: Math.round(s.weight * 1000),
+        volumetric_weight: Math.round(((s.length * s.breadth * s.height) / 5000) * 1000),
+        ...(eway ? { eway_bill: eway } : {}),
+        ...(s.shopifyId ? { shopify_order_id: String(s.shopifyId).replace(/\D/g, "") } : {}),
+      },
+      customer_details: { name: s.consignee.name, contact: s.consignee.phone, address_line_1: [s.consignee.address1, s.consignee.address2].filter(Boolean).join(", "), city: s.consignee.city, state: s.consignee.stateName, pincode: Number(s.consignee.pincode), ...(s.consignee.email ? {} : {}) },
+      pickup_details: { pickup_type: "seller", ...addr },
+      return_details: { return_type: acc.options?.returnType === "origin" ? "origin" : "seller", ...addr },
+      product_details: s.items.map((i) => ({
+        sku_name: i.name,
+        sku_id: i.sku || i.name.slice(0, 30),
+        price: r2(i.price * i.quantity),
+        category: i.category || "Home Decor",
+        hsn_code: i.hsn || "",
+        invoice_no: s.invoiceNumber || s.reference,
+        seller_details: { seller_name: s.seller.name, seller_address: s.seller.address, seller_state: s.seller.stateName, gstin_number: s.seller.gstin || "" },
+      })),
     };
     const { status, data } = await request(`${this.base(acc)}/api/v3/clients/orders/`, { method: "POST", headers: this.h(acc), json: body });
-    const awb = data.data?.awb_number || data.awb_number;
-    if (!awb) throw new Error(`Shadowfax didn't book the shipment (${status}): ${data.message || data.errors || short(data)}`);
-    return { awb: String(awb), courierName: "Shadowfax", trackingUrl: `https://tracker.shadowfax.in/#/track/${awb}`, refs: {} };
+    // Shadowfax answers 200 with message "Failure" for rejections: check the message, not the status.
+    const awb = data?.data?.awb_number || data?.awb_number;
+    if (!awb || (data?.message && data.message !== "Success")) throw new Error(`Shadowfax didn't book the shipment (${status}): ${sfxErr(data)}`);
+    return { awb: String(awb), courierName: "Shadowfax", trackingUrl: `https://tracker.shadowfax.in/#/track/${awb}`, refs: { id: data.data?.id, sortCode: data.data?.sort_code || "" } };
+  },
+  // Return pickup from the customer back to the pickup address.
+  async reverse(acc, s) {
+    need(acc, ["token"]);
+    const c = s.from;
+    const to = acc.pickup || {};
+    const { status, data } = await request(`${this.base(acc)}/api/v1/clients/pickup/orders/`, {
+      method: "POST",
+      headers: this.h(acc),
+      json: {
+        customer_details: { name: c.name, contact: c.phone, address: [c.address1, c.address2].filter(Boolean).join(", "), city: c.city, state: c.stateName, pincode: Number(c.pincode) },
+        return_details: { return_type: "seller", name: to.name || s.seller.name, contact: phone10(to.phone), address: to.address, city: to.city || "", state: stateName(to.state), pincode: Number(to.pincode) },
+        order_details: { client_order_id: s.reference },
+        sku_details: s.items.map((i) => ({ sku_name: i.name, sku_id: i.sku || i.name.slice(0, 30), price: r2(i.price * i.quantity), return_reason: s.reason || "Customer return", hsn_code: i.hsn || "" })),
+      },
+    });
+    const awb = data?.data?.awb_number || data?.awb_number;
+    if (!awb) throw new Error(`Shadowfax didn't book the pickup (${status}): ${sfxErr(data)}`);
+    return { awb: String(awb), courierName: "Shadowfax", trackingUrl: `https://tracker.shadowfax.in/#/track/${awb}`, refs: { reverse: true } };
   },
   async track(acc, sh) {
-    const { data } = await request(`${this.base(acc)}/api/v4/clients/orders/${encodeURIComponent(sh.awb)}/track/?format=json`, { headers: this.h(acc) });
-    const st = data.order_details?.status || data.status || "";
-    if (!st) throw new Error(data.message || short(data));
-    const events = (data.tracking_details || []).map((d) => ({ at: new Date(d.created), status: d.remarks || d.status, location: d.location }));
-    return { status: normStatus(st), text: st, events };
+    const url = sh.refs?.reverse
+      ? `${this.base(acc)}/api/v4/clients/requests/${encodeURIComponent(sh.awb)}`
+      : `${this.base(acc)}/api/v4/clients/orders/${encodeURIComponent(sh.awb)}/track/?format=json`;
+    const { data } = await request(url, { headers: this.h(acc) });
+    const od = data?.order_details || data?.request_details || data?.data || {};
+    const code = od.status || data?.status;
+    if (!code) throw new Error(sfxErr(data));
+    const events = (data.tracking_details || data.request_tracking_details || []).map((d) => ({ at: new Date(d.created), status: [d.status || d.status_id, d.remarks].filter(Boolean).join(" — "), location: d.location || "" }));
+    return { status: sfxStatus(code, od.status_display), text: od.status_display || code, events };
   },
-  async label() {
-    return null;
+  // Label: a link (valid 2 days), only before pickup.
+  async label(acc, sh) {
+    const { status, data } = await request(`${this.base(acc)}/api/client/generate_label/`, { method: "POST", headers: this.h(acc), json: { awb_number: sh.awb, file_type: "pdf" } });
+    const url = data?.data?.label_url || data?.label_url;
+    if (!url) {
+      if (status === 400) throw new Error(`Shadowfax gives labels only before pickup: ${sfxErr(data)}`);
+      return null;
+    }
+    return { url };
   },
   async cancel(acc, sh) {
     const { status, data } = await request(`${this.base(acc)}/api/v3/clients/orders/cancel/`, { method: "POST", headers: this.h(acc), json: { request_id: sh.awb, cancel_remarks: "Cancelled by seller" } });
-    if (status >= 400) throw new Error(data.message || short(data));
+    if (status >= 400 || (data?.responseCode && data.responseCode >= 400)) throw new Error(sfxErr(data));
   },
 };
 
