@@ -91,6 +91,13 @@ async function ledgerBook(org, group) {
   for (const a of coa) if (a.active !== false && !byName.has(norm(a.name)) && (a.ledgerKind === "sales" || a.type === "income")) byName.set(norm(a.name), a.code);
   return byName;
 }
+// Tally's usual names for the same ledgers (e.g. "B2B @ 18%" for interstate B2B, "Local Sales 5%"): used first when
+// the company has them, so imported marketplace sales land on the ledgers its books already use.
+const aliasNames = (local, b2b, rate) => {
+  const r = Number(rate) || 0;
+  if (b2b) return local ? [`B2B @ ${r}% Local`, `Local B2B @ ${r}%`, `Local B2B ${r}%`] : [`B2B @ ${r}%`, `Outstate B2B ${r}%`, `OutState B2B @ ${r}%`, `Interstate B2B @ ${r}%`];
+  return local ? [`Local Sales ${r}%`, `Local Sales @ ${r}%`, `Local Sales @${r}%`] : [`OutState Sales ${r}%`, `OutState Sales @ ${r}%`, `Outstation Sales ${r}%`, `Interstate Sales ${r}%`];
+};
 const keyFor = (local, b2b, rate) => norm(ledgerName(local, b2b, rate));
 const docLines = (d, orgState) => d.lines.map((l) => ({ local: (d.pos || orgState) === orgState, b2b: !!d.b2b, rate: Number(l.rate) || 0 }));
 
@@ -100,13 +107,19 @@ async function postingInfo(org, o, docs, S = SRC.amazon) {
   const book = await ledgerBook(org, group);
   const need = new Map();
   for (const d of docs) for (const x of docLines(d, o.state)) need.set(keyFor(x.local, x.b2b, x.rate), ledgerName(x.local, x.b2b, x.rate));
-  const ledgers = [...need.entries()].map(([k, name]) => ({ name, exists: book.has(k) })).sort((a, b) => a.name.localeCompare(b.name));
+  for (const d of docs)
+    for (const x of docLines(d, o.state)) {
+      const al = aliasNames(x.local, x.b2b, x.rate).find((n) => book.has(norm(n)));
+      if (al) need.set(keyFor(x.local, x.b2b, x.rate), al);
+    }
+  const ledgers = [...need.entries()].map(([k, name]) => ({ name, exists: book.has(k) || book.has(norm(name)) })).sort((a, b) => a.name.localeCompare(b.name));
   const party = (await Customer.find({ organization: org }, { displayName: 1, gstin: 1 }).lean()).find(isParty(S)) || null;
   return { group: group ? group.name : "", ledgers, party: party ? { _id: String(party._id), name: party.displayName } : null };
 }
 
 async function resolveLedger(org, group, book, local, b2b, rate, S = SRC.amazon) {
   const k = keyFor(local, b2b, rate);
+  for (const n of aliasNames(local, b2b, rate)) if (book.has(norm(n))) return book.get(norm(n));
   if (book.has(k)) return book.get(k);
   const a = await Account.create({ organization: org, name: ledgerName(local, b2b, rate), group: "Income", ledgerKind: "sales", description: `${S.label} sales (created by the ${S.label} import)` });
   const code = String(a._id);

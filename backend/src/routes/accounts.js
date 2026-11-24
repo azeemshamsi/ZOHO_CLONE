@@ -218,6 +218,62 @@ router.put(
   })
 );
 
+// Merge a ledger into another: every document and journal line that posts to it moves to the other ledger, it
+// leaves its ledger groups (the other takes its place), and it's marked inactive. Balances move with the entries.
+router.post(
+  "/:code/merge",
+  ah(async (req, res) => {
+    const from = req.params.code;
+    const into = String(req.body?.into || "");
+    if (!into || into === from) throw new HttpError(400, "Choose the ledger to merge into");
+    const src = await Account.findOne({ _id: from, organization: req.org }).catch(() => null);
+    if (!src) throw new HttpError(400, "Built-in accounts can't be merged away");
+    const { chartOfAccounts } = require("../utils/ledger");
+    const coa = await chartOfAccounts(req.org);
+    const dst = coa.find((a) => a.code === into);
+    if (!dst) throw new HttpError(400, "That ledger doesn't exist");
+    const a = coa.find((x) => x.code === from);
+    if (a && a.type !== dst.type) throw new HttpError(400, `${src.name} is ${a.type} and ${dst.name} is ${dst.type}: merge ledgers of the same kind`);
+    const moved = {};
+    const docModels = { Invoice: "invoices", CreditNote: "credit notes", Bill: "bills", VendorCredit: "vendor credits", Quote: "quotes", SalesOrder: "sales orders", PurchaseOrder: "purchase orders" };
+    for (const [m, label] of Object.entries(docModels)) {
+      const M = require(`../models/${m}`);
+      const seen = new Set();
+      for (const q of [{ ledger: from }, { "lineItems.account": from }]) {
+        for (const d of await M.find({ organization: req.org, ...q }, { ledger: 1, lineItems: 1 }).lean()) {
+          if (seen.has(String(d._id))) continue;
+          seen.add(String(d._id));
+          const set = {};
+          if (d.ledger === from) set.ledger = into;
+          if ((d.lineItems || []).some((l) => l.account === from)) set.lineItems = d.lineItems.map((l) => (l.account === from ? { ...l, account: into } : l));
+          await M.updateOne({ _id: d._id, organization: req.org }, { $set: set });
+        }
+      }
+      if (seen.size) moved[label] = seen.size;
+    }
+    const Journal = require("../models/Journal");
+    let nj = 0;
+    for (const j of await Journal.find({ organization: req.org, "lines.account": from }, { lines: 1 }).lean()) {
+      await Journal.updateOne({ _id: j._id, organization: req.org }, { $set: { lines: j.lines.map((l) => (l.account === from ? { ...l, account: into } : l)) } });
+      nj++;
+    }
+    if (nj) moved.journals = nj;
+    const Expense = require("../models/Expense");
+    const ne = await Expense.updateMany({ organization: req.org, account: from }, { $set: { account: into, category: dst.name } });
+    if (ne.modifiedCount) moved.expenses = ne.modifiedCount;
+    for (const g of await LedgerGroup.find({ organization: req.org })) {
+      if (!(g.members || []).includes(from)) continue;
+      g.members = [...new Set(g.members.map((m) => (m === from ? into : m)))];
+      await g.save();
+    }
+    src.active = false;
+    src.description = `${src.description ? `${src.description} · ` : ""}Merged into ${dst.name} on ${new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}`;
+    await src.save();
+    require("../utils/audit").log(req, "ledger_merged", { target: src.name, meta: { into: dst.name, moved } });
+    res.send({ message: `${src.name} merged into ${dst.name}`, moved });
+  })
+);
+
 router.delete(
   "/:code",
   ah(async (req, res) => {

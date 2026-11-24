@@ -306,6 +306,7 @@ export function AccountDetail() {
   const [data, setData] = useState(null);
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [merge, setMerge] = useState(false);
   const [view, setView] = useState("tally"); // tally: as Tally / the reports show it; live: with stock movements
 
   const load = () => api.get(`/accounts/${encodeURIComponent(code)}/transactions`, { params: { from: range.from, to: range.to, view, party: party || undefined, by: by || undefined } }).then((r) => setData(r.data));
@@ -345,6 +346,9 @@ export function AccountDetail() {
           <>
             <button className="btn" onClick={() => setModal(true)}>
               <Icon name="edit" size={16} /> Edit
+            </button>
+            <button className="btn" title="Move all its entries to another ledger and retire this one" onClick={() => setMerge(true)}>
+              Merge into…
             </button>
             <button className="icon-btn" title="Delete" onClick={() => setConfirm(true)}>
               <Icon name="trash" />
@@ -464,6 +468,7 @@ export function AccountDetail() {
         </table>
       </div>
       )}
+      {merge && <MergeModal account={a} onClose={() => setMerge(false)} onDone={(to) => navigate(`/chart-of-accounts/${encodeURIComponent(to)}`)} />}
       <AccountModal open={modal} account={a} onClose={() => setModal(false)} onSaved={() => (setModal(false), load())} />
       <Confirm
         open={confirm}
@@ -482,5 +487,58 @@ export function AccountDetail() {
         onCancel={() => setConfirm(false)}
       />
     </>
+  );
+}
+
+// Merge this ledger into another: every entry moves there (invoices, credit notes, bills, journals, expenses).
+function MergeModal({ account, onClose, onDone }) {
+  const [list, setList] = useState([]);
+  const [into, setInto] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.get("/accounts").then((r) => setList((r.data || []).filter((x) => x.code !== account.code && x.type === account.type && x.active !== false)));
+  }, [account.code]);
+  const target = list.find((x) => x.code === into);
+  const go = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/accounts/${encodeURIComponent(account.code)}/merge`, { into });
+      const n = Object.entries(data.moved || {}).map(([k, v]) => `${v} ${k}`).join(", ");
+      toast(`${data.message}${n ? ` (${n} moved)` : ""}`);
+      onDone(into);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <Modal
+      open
+      title={`Merge ${account.name} into…`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn btn-danger" disabled={!into || busy} onClick={go}>
+            {busy ? "Merging…" : "Merge"}
+          </button>
+        </>
+      }
+    >
+      <Field label="Ledger to keep">
+        <select value={into} onChange={(e) => setInto(e.target.value)}>
+          <option value="">Choose…</option>
+          {list.map((x) => (
+            <option key={x.code} value={x.code}>{x.name} ({x.group})</option>
+          ))}
+        </select>
+      </Field>
+      <p className="small">
+        Every invoice, credit note, bill, journal and expense line that posts to <b>{account.name}</b> will post to{" "}
+        <b>{target ? target.name : "the chosen ledger"}</b> instead, so its balance moves there. It also takes {account.name}&apos;s place in
+        ledger groups, and {account.name} is marked inactive. Totals in the P&amp;L and trial balance don&apos;t change. This changes posted
+        entries and can&apos;t be undone with one click.
+      </p>
+    </Modal>
   );
 }
