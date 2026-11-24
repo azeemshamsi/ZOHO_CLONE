@@ -79,6 +79,7 @@ async function splitMergedItems({ dryRun = false, log = console.log } = {}) {
       if (!target && !dryRun) {
         target = await Item.create({
           organization: org,
+          source: "shopify",
           type: "goods",
           name: itemName(r0.line),
           sku,

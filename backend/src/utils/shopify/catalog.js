@@ -123,6 +123,7 @@ async function itemFor(orgId, line, store, cache = new Map()) {
     const incl = line.unitPrice || 0;
     item = await Item.create({
       organization: orgId,
+      source: "shopify",
       type: "goods",
       name: itemName(line),
       sku: line.sku || "",

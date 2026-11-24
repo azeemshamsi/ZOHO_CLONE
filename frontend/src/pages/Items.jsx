@@ -18,12 +18,26 @@ export function ItemList() {
   const [rows, setRows] = useState(null);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("active");
+  // Store (Shopify) items vs the rest, or by where they came from (remembered on this device).
+  const [source, setSourceState] = useState(() => {
+    try {
+      return localStorage.getItem("itemSource") || "";
+    } catch {
+      return "";
+    }
+  });
+  const setSource = (v) => {
+    setSourceState(v);
+    try {
+      localStorage.setItem("itemSource", v);
+    } catch {}
+  };
   const dq = useDebounced(q);
   const navigate = useNavigate();
 
   useEffect(() => {
-    api.get("/items", { params: { q: dq, status } }).then((r) => setRows(r.data));
-  }, [dq, status]);
+    api.get("/items", { params: { q: dq, status, source } }).then((r) => setRows(r.data));
+  }, [dq, status, source]);
 
   return (
     <>
@@ -32,6 +46,21 @@ export function ItemList() {
           <option value="active">Active Items</option>
           <option value="inactive">Inactive Items</option>
           <option value="">All Items</option>
+        </select>
+        <select
+          className="select-inline"
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          title="Store items or where items came from"
+        >
+          <option value="">All sources</option>
+          <option value="store">Shopify store items</option>
+          <option value="not_store">Not on the store</option>
+          <option value="from_shopify">Created from Shopify orders</option>
+          <option value="tally">Imported from Tally</option>
+          <option value="ordexago">Created in OrdexaGo</option>
+          <option value="imported">Imported (Zoho / spreadsheet)</option>
+          <option value="seller">Marketplace sellers' items</option>
         </select>
         <SearchBox value={q} onChange={setQ} placeholder="Search items" />
         <Link to="/items/new" className="btn btn-primary">
@@ -45,7 +74,7 @@ export function ItemList() {
         {q && (
           <div className="card">
             <strong>No items match “{q}”.</strong>
-            <ShopifyLookup q={dq} onCreated={() => api.get("/items", { params: { q: dq, status } }).then((r) => setRows(r.data))} />
+            <ShopifyLookup q={dq} onCreated={() => api.get("/items", { params: { q: dq, status, source } }).then((r) => setRows(r.data))} />
           </div>
         )}
         {!q && <Empty
@@ -78,6 +107,7 @@ export function ItemList() {
                 <tr key={i._id} onClick={() => navigate(`/items/${i._id}`)}>
                   <td className="strong link">
                     {i.name}
+                    <SourceTag i={i} />
                     {i.description && <div className="muted small clamp">{i.description}</div>}
                   </td>
                   <td>{i.type === "goods" ? "Goods" : "Service"}</td>
@@ -102,6 +132,26 @@ export function ItemList() {
             </tbody>
           </table>
         </div>
+      )}
+    </>
+  );
+}
+
+const SOURCE_LABEL = { shopify: "Shopify", tally: "Tally", zoho: "Zoho", sheet: "Sheet", ordexago: "OrdexaGo" };
+function SourceTag({ i }) {
+  const src = i.source || (i.shopifyVariantId ? "shopify" : "");
+  const linked = !i.shopifyVariantId && (i.shopifyLinks || []).length > 0;
+  return (
+    <>
+      {SOURCE_LABEL[src] && (
+        <span className="badge" style={{ marginLeft: 6, padding: "1px 7px", fontSize: 11 }} title="Where this item came from">
+          {SOURCE_LABEL[src]}
+        </span>
+      )}
+      {linked && (
+        <span className="badge" style={{ marginLeft: 4, padding: "1px 7px", fontSize: 11 }} title="Linked to a Shopify listing">
+          On store
+        </span>
       )}
     </>
   );

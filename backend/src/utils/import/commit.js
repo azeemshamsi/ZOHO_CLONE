@@ -612,6 +612,7 @@ async function commit(ctx, data, opts, progress) {
             description: m.description || "",
             trackInventory: true,
             taxRate: 0,
+            source: data.source || "",
             ...set,
           });
           R_("items").created++;
@@ -840,6 +841,7 @@ async function commit(ctx, data, opts, progress) {
             : { purchaseRate: l.rate || 0 }),
           taxRate: factOf(k).rate || l.taxRate || 0,
           trackInventory: true,
+          source: data.source || "",
         })
       ).toObject();
       items.set(k, it);
@@ -1548,6 +1550,7 @@ async function commit(ctx, data, opts, progress) {
               unit: o.unit || "pcs",
               purchaseRate: o.rate || 0,
               taxRate: 0,
+              source: data.source || "",
               ...fields,
             })
           ).toObject();

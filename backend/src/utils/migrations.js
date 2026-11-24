@@ -586,6 +586,39 @@ const MIGRATIONS = [
     },
   },
   {
+    // Items learn where they came from: Shopify (made from an order), or the import (Tally / Zoho / sheet) whose
+    // vouchers first used them. The rest are taken as made in OrdexaGo.
+    id: "2026-11-item-source",
+    run: async () => {
+      const Item = require("../models/Item");
+      const items = (await Item.find({}, { organization: 1, source: 1, shopifyVariantId: 1, createdAt: 1 }).lean()).filter((i) => !i.source);
+      if (!items.length) return;
+      // When each company's imports ran (creation times of imported vouchers), by source.
+      const runs = new Map(); // org → [{ at, src }]
+      for (const m of ["Invoice", "Bill", "CreditNote", "VendorCredit", "InventoryAdjustment", "Journal", "Payment"]) {
+        const M = require(`../models/${m}`);
+        for (const d of await M.find({}, { organization: 1, importRef: 1, createdAt: 1 }).lean()) {
+          const src = typeof d.importRef === "string" ? d.importRef.split(":")[0] : "";
+          if (!["tally", "zoho", "sheet"].includes(src) || !d.createdAt) continue;
+          const k = String(d.organization);
+          if (!runs.has(k)) runs.set(k, []);
+          runs.get(k).push({ at: new Date(d.createdAt).getTime(), src });
+        }
+      }
+      const HOUR = 3600000;
+      let n = 0;
+      for (const i of items) {
+        const at = new Date(i.createdAt || 0).getTime();
+        // Made by an import: created while that company's import was running (within an hour of its vouchers).
+        const near = (runs.get(String(i.organization)) || []).find((r) => Math.abs(r.at - at) < HOUR);
+        const src = i.shopifyVariantId ? "shopify" : near ? near.src : "ordexago";
+        await Item.updateOne({ _id: i._id }, { $set: { source: src } });
+        n++;
+      }
+      console.log(`Item source: ${n} item(s) set`);
+    },
+  },
+  {
     // Round Off / Roundoff ledgers (from Tally) are the same as the built-in Rounding & Adjustments: merge them.
     id: "2026-11-merge-round-off-ledgers",
     run: async () => {

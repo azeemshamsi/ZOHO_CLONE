@@ -59,6 +59,19 @@ router.get(
     if (req.query.status === "inactive") filter.active = false;
     if (req.query.inventory === "tracked") filter.trackInventory = true;
     let items = await Item.find(filter).sort({ name: 1 }).lean();
+    // Store items: on the Shopify store (created from its orders, or linked to a listing) vs the rest.
+    const onStore = (i) => !!i.shopifyVariantId || (i.shopifyLinks || []).length > 0;
+    const src = (i) => i.source || (i.shopifyVariantId ? "shopify" : "");
+    const SRC = {
+      store: onStore,
+      not_store: (i) => !onStore(i),
+      from_shopify: (i) => src(i) === "shopify",
+      tally: (i) => src(i) === "tally",
+      imported: (i) => ["zoho", "sheet"].includes(src(i)),
+      ordexago: (i) => src(i) === "ordexago" || src(i) === "",
+      seller: (i) => !!i.seller,
+    };
+    if (SRC[req.query.source]) items = items.filter(SRC[req.query.source]);
     if (req.query.q) items = items.filter((i) => textMatch(req.query.q, [i.name, i.sku, i.hsnSac, (i.shopifyLinks || []).map((l) => [l.sku, l.title])]));
     res.send(await withStock(req.org, items));
   })
@@ -68,7 +81,7 @@ router.post(
   "/",
   ah(async (req, res) => {
     const data = clean(validate(schema, req.body));
-    res.status(201).send(await Item.create({ ...data, organization: req.org }));
+    res.status(201).send(await Item.create({ ...data, source: "ordexago", organization: req.org }));
   })
 );
 

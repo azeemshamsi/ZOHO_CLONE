@@ -40,6 +40,9 @@ const itemSchema = new mongoose.Schema(
       default: [],
     },
     shopifyPushed: { type: mongoose.Schema.Types.Mixed, default: {} }, // variantId → last quantity sent
+    // Where the item came from: shopify (created from a Shopify order), tally / zoho / sheet (an import),
+    // ordexago (made here). Blank on old items whose origin isn't known.
+    source: { type: String, default: "" },
     needsReview: { type: Boolean, default: false },
     reviewNote: { type: String, default: "" },
   },
