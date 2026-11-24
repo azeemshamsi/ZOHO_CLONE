@@ -159,6 +159,7 @@ const shopifyOrderSchema = new mongoose.Schema(
       codAmount: Number,
     },
     bookingAt: Date, // a courier booking started (the sync leaves the status alone for a while)
+    partBooked: Boolean, // booked in parts: some products still to book (maybe with another courier)
     deliveredAt: Date, // when it was delivered (for sellers' monthly purchase orders)
     deliveredChecked: Boolean, // deliveredAt confirmed from Shopify's fulfilment
     // Marketplace sellers whose products are on this order (from each line's Shopify Vendor) and what was settled.

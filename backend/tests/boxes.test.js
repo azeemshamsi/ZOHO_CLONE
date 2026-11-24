@@ -102,3 +102,24 @@ test("cancel takes every box", async () => {
   assert.strictEqual(o.extraShipments, undefined);
   assert.strictEqual(o.status, "packed");
 });
+
+test("booked in parts: Shelf now with one courier, Lamp later with another; COD by value; shipments add up", async () => {
+  const o = order();
+  booked.length = 0;
+  const r1 = await SH.bookOrder({ org: "o" }, o, { accountId: "a1", boxes: [{ lines: [{ lineId: "LA", quantity: 3 }] }], leaveRest: true });
+  assert.strictEqual(r1.restLeft, true);
+  assert.strictEqual(o.partBooked, true);
+  assert.strictEqual(booked[0].codAmount, 600); // the Shelf's share of the ₹1000 COD
+  assert.deepStrictEqual(o.shipment.lines.map((l) => [l.lineId, l.quantity]), [["LA", 3]]);
+  // the rest: only the Lamp is left, with another courier
+  assert.deepStrictEqual([...SH.availOf(o, null)].map(([k, v]) => [k, v]), [["LA", 0], ["LB", 2]]);
+  o.status = "ready_to_ship";
+  const r2 = await SH.bookOrder({ org: "o" }, o, { accountId: "a1" });
+  assert.ok(!r2.restLeft);
+  assert.ok(!o.partBooked);
+  assert.strictEqual(booked[1].codAmount, 400);
+  assert.deepStrictEqual(SH.allShipments(o).map((x) => [x.box, x.lines.map((l) => l.lineId).join()]), [[1, "LA"], [2, "LB"]]);
+  // nothing left now
+  o.partBooked = true;
+  await assert.rejects(SH.bookOrder({ org: "o" }, o, { accountId: "a1" }), /already booked/);
+});

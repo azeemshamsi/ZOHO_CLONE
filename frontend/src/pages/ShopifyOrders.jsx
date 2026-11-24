@@ -525,15 +525,19 @@ function BoxesEditor({ orderId, onChange }) {
           }));
         });
   const totalParts = units.length;
+  // Box 0 = "Later": left for another booking (another courier).
   const boxOf = (x, i) =>
     mode === "each"
       ? i + 1
       : mode === "custom"
-        ? Number(assign[x.key]) || (x.part > 1 ? Math.min(n, x.part) : 1)
+        ? assign[x.key] === 0
+          ? 0
+          : Number(assign[x.key]) || (x.part > 1 ? Math.min(n, x.part) : 1)
         : 1;
+  const later = mode === "custom" && units.some((x, i) => boxOf(x, i) === 0);
   const count = mode === "each" ? totalParts : mode === "custom" ? n : 1;
   useEffect(() => {
-    if (mode === "one" || totalParts < 2) return onChange(null);
+    if (mode === "one" || totalParts < 2) return onChange(null, false);
     const out = Array.from({ length: count }, (_, b) => {
       const m = new Map();
       const parts = [];
@@ -559,7 +563,9 @@ function BoxesEditor({ orderId, onChange }) {
           : {},
       };
     }).filter((b) => b.lines.length);
-    onChange(out.length > 1 ? out : null);
+    // Some products left for later: book just these boxes now (even one).
+    if (later) return onChange(out.length ? out : null, true);
+    onChange(out.length > 1 ? out : null, false);
   }, [
     mode,
     n,
@@ -568,7 +574,19 @@ function BoxesEditor({ orderId, onChange }) {
     JSON.stringify(pkgs),
     lines,
   ]);
-  const doneNote = (done.alreadyFulfilled || []).length > 0 && (
+  const bookedNote = done.partBooked && (done.booked || []).length > 0 && (
+    <div className="alert alert-info small" style={{ marginBottom: 8 }}>
+      Booked already:{" "}
+      {done.booked
+        .map(
+          (b) =>
+            `${b.courier} ${b.awb} (${b.lines.map((l) => `${l.quantity} × ${l.title}`).join(", ")})`,
+        )
+        .join(" · ")}
+      . Book the rest below — with the same courier or another.
+    </div>
+  );
+  const doneNote = !done.partBooked && (done.alreadyFulfilled || []).length > 0 && (
     <div className="alert alert-info small" style={{ marginBottom: 8 }}>
       Already fulfilled in Shopify — not booked again:{" "}
       {done.alreadyFulfilled
@@ -585,12 +603,13 @@ function BoxesEditor({ orderId, onChange }) {
         : "Nothing is left to ship on this order."}
     </div>
   );
-  if (!lines || !totalUnits) return doneNote || null;
+  if (!lines || !totalUnits) return bookedNote || doneNote || null;
   const setPk = (b, k) => (e) =>
     setPkgs({ ...pkgs, [b]: { ...(pkgs[b] || {}), [k]: e.target.value } });
-  const used = new Set(units.map((x, i) => boxOf(x, i)));
+  const used = new Set(units.map((x, i) => boxOf(x, i)).filter((b) => b > 0));
   return (
     <div className="card" style={{ background: "var(--bg-2, #f7f8fa)" }}>
+      {bookedNote}
       {doneNote}
       <div className="label-sm">Boxes</div>
       <div className="seg" role="group" style={{ margin: "4px 0 8px" }}>
@@ -675,7 +694,7 @@ function BoxesEditor({ orderId, onChange }) {
                   </td>
                   <td style={{ width: 120 }}>
                     <select
-                      value={assign[x.key] || 1}
+                      value={assign[x.key] ?? 1}
                       onChange={(e) =>
                         setAssign({
                           ...assign,
@@ -688,6 +707,9 @@ function BoxesEditor({ orderId, onChange }) {
                           Box {b + 1}
                         </option>
                       ))}
+                      {x.of === 1 || !x.of ? (
+                        <option value={0}>Later (another booking)</option>
+                      ) : null}
                     </select>
                   </td>
                 </tr>
@@ -697,6 +719,13 @@ function BoxesEditor({ orderId, onChange }) {
           {used.size < n && (
             <div className="small text-amber">
               Some boxes are empty — they're left out.
+            </div>
+          )}
+          {later && (
+            <div className="alert alert-warn small" style={{ marginTop: 6 }}>
+              Products set to <b>Later</b> aren't booked now. After this
+              booking, click <b>Book rest</b> on the order to book them — with
+              this courier or another.
             </div>
           )}
         </>
@@ -792,6 +821,7 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
   const [sellerList, setSellerList] = useState([]);
   // Several boxes (one order): null = one box with everything, else [{ lines: [{ lineId, quantity }], pkg }].
   const [boxes, setBoxes] = useState(null);
+  const [leaveRest, setLeaveRest] = useState(false);
   const [boxAwbs, setBoxAwbs] = useState([]);
   const manualOk = ["weight", "length", "breadth", "height"].every(
     (k) => Number(manualPkg[k]) > 0,
@@ -935,6 +965,7 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
         ...(single && boxes
           ? {
               boxes,
+              leaveRest,
               manual: {
                 ...manual,
                 courierId: pick.courierId || "",
@@ -1327,7 +1358,15 @@ function ShipModal({ ids, couriers, onClose, onDone }) {
               </p>
             </div>
           )}
-          {single && <BoxesEditor orderId={ids[0]} onChange={setBoxes} />}
+          {single && (
+            <BoxesEditor
+              orderId={ids[0]}
+              onChange={(b, rest) => {
+                setBoxes(b);
+                setLeaveRest(!!rest);
+              }}
+            />
+          )}
           {single && boxes && acc?.carrier === "custom" && (
             <div className="row-4">
               {boxes.map((_, i) => (
@@ -2307,6 +2346,17 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
                   {fk ? "Book own courier (self-ship)" : "Book Shipment"}
                 </button>
               )}
+              {o.partBooked &&
+                !["new", "packed", "cancelled"].includes(o.status) && (
+                  <button
+                    className="btn btn-primary"
+                    disabled={busy}
+                    onClick={() => onShip([o._id])}
+                    title="Some products of this order are still to book"
+                  >
+                    Book rest of the order
+                  </button>
+                )}
               {["new", "packed"].includes(o.status) &&
                 isEasy &&
                 !isEasyShipped && (
@@ -4114,6 +4164,17 @@ export function ShopifyOrders() {
                             onClick={() => setShip([o._id])}
                           >
                             Ship
+                          </button>
+                        )}
+                      {canAct &&
+                        o.partBooked &&
+                        !["new", "packed", "cancelled"].includes(o.status) && (
+                          <button
+                            className="btn btn-sm btn-primary"
+                            title="Some products of this order are still to book — with this courier or another"
+                            onClick={() => setShip([o._id])}
+                          >
+                            Book rest
                           </button>
                         )}
                       {canAct &&

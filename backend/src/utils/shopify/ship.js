@@ -69,6 +69,23 @@ const storedUnfulfilled = (order) =>
     ? new Map(order.lines.map((l) => [l.lineId, l.unfulfilled ?? l.quantity]))
     : null;
 
+// Units still free to book per line: Shopify's unfulfilled count (when known) and, on an order booked in parts,
+// less what OrdexaGo's own shipments already carry. null = everything.
+function availOf(order, unf) {
+  if (!order.partBooked) return unf;
+  const booked = new Map();
+  for (const sh of [order.shipment, ...(order.extraShipments || [])].filter((x) => x?.awb))
+    for (const l of sh.lines || [])
+      booked.set(String(l.lineId), (booked.get(String(l.lineId)) || 0) + (Number(l.quantity) || 0) / (Number(l.of) || 1));
+  const out = new Map();
+  for (const l of order.lines || []) {
+    const id = String(l.lineId);
+    const fromShopify = unf && unf.has(l.lineId) ? unf.get(l.lineId) : l.quantity;
+    out.set(l.lineId, Math.max(0, Math.min(fromShopify, Math.round((l.quantity - (booked.get(id) || 0)) * 1e6) / 1e6)));
+  }
+  return out;
+}
+
 // The lines still to ship: [{ line, quantity }] and the units already fulfilled elsewhere.
 function remaining(order, unf) {
   const live = (order.lines || []).filter((l) => l.quantity > 0);
@@ -163,7 +180,7 @@ async function saveBooking(order, paths) {
 /* ---------------- several boxes ---------------- */
 
 // Validate a box split → [{ lines: [{ lineId, title, sku, quantity, unit }], pkg }] or null for one box of everything.
-function splitBoxes(order, boxes, avail = null) {
+function splitBoxes(order, boxes, avail = null, { leaveRest = false } = {}) {
   if (!Array.isArray(boxes) || !boxes.length) return null;
   const live = (order.lines || [])
     .filter((l) => l.quantity > 0)
@@ -235,11 +252,15 @@ function splitBoxes(order, boxes, avail = null) {
     .filter((b) => b.lines.length);
   for (const l of live) {
     const n = used.get(String(l.lineId)) || 0;
-    if (Math.abs(n - l.quantity) > 1e-6)
+    // Booking only some products now (the rest later, maybe with another courier): none may be over.
+    if (leaveRest ? n > l.quantity + 1e-6 : Math.abs(n - l.quantity) > 1e-6)
       throw new Error(
-        `${l.title}: ${Math.round(n * 100) / 100} of ${l.quantity} put in boxes — every unit (or every part of a unit packed in several boxes) must be in exactly one box`,
+        leaveRest
+          ? `${l.title}: ${Math.round(n * 100) / 100} put in boxes but only ${l.quantity} left to ship`
+          : `${l.title}: ${Math.round(n * 100) / 100} of ${l.quantity} put in boxes — every unit (or every part of a unit packed in several boxes) must be in exactly one box`,
       );
   }
+  if (leaveRest && !out.length) throw new Error("Put at least one product in a box to book now");
   // A box holding part of a split item: its package type would be the whole item's, so its size must be entered.
   out.forEach((b, i) => {
     const pk = b.pkg || {};
@@ -251,7 +272,7 @@ function splitBoxes(order, boxes, avail = null) {
         `Box ${i + 1} holds part of an item packed in several boxes — enter its weight and size`,
       );
   });
-  if (out.length === 1 && !partial) return null; // everything in one box: the usual booking
+  if (out.length === 1 && !partial && !leaveRest) return null; // everything in one box: the usual booking
   if (out.length > 20) throw new Error("Up to 20 boxes per order");
   return out;
 }
@@ -293,6 +314,8 @@ async function bookBoxes({
   manual,
   skipCheck,
   cod = null,
+  rest = false, // the order already has shipments (booked in parts): add to them
+  restLeft = false, // units stay unbooked after this booking
 }) {
   const n = boxes.length;
   // COD shared by value; the last box takes the paise left over.
@@ -310,7 +333,9 @@ async function bookBoxes({
   });
   const base = shipmentFrom(order, org, { weight: 1 }, items).reference;
   if (CARRIERS[acc.carrier]?.multiPackage)
-    return bookOneDocket({ ctx, order, acc, seller, store, org, items, boxes, manual, skipCheck, codTotal, base });
+    return bookOneDocket({ ctx, order, acc, seller, store, org, items, boxes, manual, skipCheck, codTotal, base, rest, restLeft });
+  const prior = rest ? allShipments(order) : [];
+  const offset = rest ? (order.boxes || []).length || prior.length : 0;
   const booked = [];
   const problems = [];
   for (let i = 0; i < n; i++) {
@@ -328,7 +353,7 @@ async function bookBoxes({
           "no package type for its products — enter its weight and size",
         );
       const s = shipmentFrom(view, org, p, items);
-      s.reference = i === 0 ? base : `${base}-B${i + 1}`;
+      s.reference = offset + i === 0 ? base : `${base}-B${offset + i + 1}`;
       if (acc.carrier !== "custom") checkShipment(s);
       if (s.cod && acc.options?.codEnabled === false)
         throw new Error(`${acc.name} isn't set up for COD`);
@@ -361,8 +386,8 @@ async function bookBoxes({
         bookedAt: new Date(),
         trackStatus: "pending",
         events: [],
-        box: i + 1,
-        of: n,
+        box: offset + i + 1,
+        of: offset + n,
         lines: b.lines.map(({ lineId, title, sku, quantity, part, of }) => ({
           lineId,
           title,
@@ -409,10 +434,12 @@ async function bookBoxes({
     }
   }
   if (!booked.length) throw new Error(problems.join(" · "));
-  order.shipment = booked[0];
-  order.extraShipments = booked.length > 1 ? booked.slice(1) : undefined;
-  order.boxes = boxes.map((b, i) => ({
-    box: i + 1,
+  const all = [...prior, ...booked];
+  order.shipment = all[0];
+  order.extraShipments = all.length > 1 ? all.slice(1) : undefined;
+  order.partBooked = restLeft || undefined;
+  order.boxes = [...(rest ? order.boxes || [] : []), ...boxes.map((b, i) => ({
+    box: offset + i + 1,
     lines: b.lines.map(({ lineId, title, sku, quantity, part, of }) => ({
       lineId,
       title,
@@ -420,8 +447,8 @@ async function bookBoxes({
       quantity,
       ...(of ? { part, of } : {}),
     })),
-    booked: booked.some((x) => x.box === i + 1),
-  }));
+    booked: booked.some((x) => x.box === offset + i + 1),
+  }))];
   order.status = "ready_to_ship";
   order.statusChangedAt = new Date();
   order.markModified("shipment");
@@ -433,6 +460,7 @@ async function bookBoxes({
     "boxes",
     "status",
     "statusChangedAt",
+    "partBooked",
   ]);
   return {
     awb: booked.map((x) => x.awb).join(", "),
@@ -440,12 +468,13 @@ async function bookBoxes({
     boxes: booked.length,
     of: n,
     charge: booked.reduce((t, x) => t + (x.charge || 0), 0) || null,
+    restLeft,
     warning: problems.join(" · "),
   };
 }
 
 // Carriers that take several packages on one docket (Shiprocket Cargo): every box in one booking.
-async function bookOneDocket({ ctx, order, acc, seller, store, org, items, boxes, manual, skipCheck, codTotal, base }) {
+async function bookOneDocket({ ctx, order, acc, seller, store, org, items, boxes, manual, skipCheck, codTotal, base, rest = false, restLeft = false }) {
   const merged = new Map();
   for (const b of boxes)
     for (const l of b.lines) {
@@ -505,20 +534,28 @@ async function bookOneDocket({ ctx, order, acc, seller, store, org, items, boxes
   }
   if (out.refs?.awbPending)
     warning = [warning, "Shiprocket Cargo booked it; the docket number comes in a minute or two (Refresh tracking)"].filter(Boolean).join(" · ");
-  order.shipment = sh;
-  order.extraShipments = undefined;
-  order.boxes = boxes.map((b, i) => ({
-    box: i + 1,
-    lines: b.lines.map(({ lineId, title, sku, quantity, part, of }) => ({ lineId, title, sku, quantity, ...(of ? { part, of } : {}) })),
-    booked: true,
-  }));
+  const prior = rest ? allShipments(order) : [];
+  const offset = rest ? (order.boxes || []).length || prior.length : 0;
+  if (offset) Object.assign(sh, { box: offset + 1, of: offset + 1 });
+  const all = [...prior, sh];
+  order.shipment = all[0];
+  order.extraShipments = all.length > 1 ? all.slice(1) : undefined;
+  order.partBooked = restLeft || undefined;
+  order.boxes = [
+    ...(rest ? order.boxes || [] : []),
+    ...boxes.map((b, i) => ({
+      box: offset + i + 1,
+      lines: b.lines.map(({ lineId, title, sku, quantity, part, of }) => ({ lineId, title, sku, quantity, ...(of ? { part, of } : {}) })),
+      booked: true,
+    })),
+  ];
   order.status = "ready_to_ship";
   order.statusChangedAt = new Date();
   order.markModified("shipment");
   order.markModified("extraShipments");
   order.markModified("boxes");
-  await saveBooking(order, ["shipment", "extraShipments", "boxes", "status", "statusChangedAt"]);
-  return { awb: out.awb, courierName: out.courierName, boxes: boxes.length, of: boxes.length, charge: charge ?? null, warning };
+  await saveBooking(order, ["shipment", "extraShipments", "boxes", "status", "statusChangedAt", "partBooked"]);
+  return { awb: out.awb, courierName: out.courierName, boxes: boxes.length, of: boxes.length, charge: charge ?? null, restLeft, warning };
 }
 
 // One label view per box of a several-box (or partly shipped) order: only that box's products and COD.
@@ -680,9 +717,12 @@ async function bookOrder(
     skipCheck = false,
     pickupFrom = "",
     boxes = null,
+    leaveRest = false, // book only the boxes given now; the rest later (maybe another courier)
   },
 ) {
   if (order.status === "cancelled") throw new Error("Order is cancelled");
+  // Part of the order is booked and the rest still to go: this booking adds to the shipments already made.
+  const rest = !!(order.partBooked && order.shipment?.awb);
   if (order.channel === "amazon" && order.amazon?.easyShip)
     throw new Error(
       "Amazon Easy Ship order: Amazon picks it up — use Schedule Easy Ship pickup",
@@ -692,6 +732,7 @@ async function bookOrder(
       "Flipkart's courier picks this one up: use Pack & label, then Ready to Dispatch",
     );
   if (
+    !rest &&
     order.shipment?.awb &&
     order.status !== "new" &&
     order.status !== "packed"
@@ -716,7 +757,7 @@ async function bookOrder(
     ).catch(() => {});
   // An earlier AWB still on the order (the courier cancelled it): clear it and its Shopify fulfilment first,
   // so Shopify gets the new AWB.
-  if (order.shipment?.awb) {
+  if (order.shipment?.awb && !rest) {
     for (const old of allShipments(order)) {
       const note =
         order.channel && order.channel !== "shopify"
@@ -745,11 +786,13 @@ async function bookOrder(
   const store = await ShopifyStore.findOne({
     organization: ctx.storeOrg || ctx.org,
   });
-  const unf = await unfulfilledMap(store, order);
+  const unf = availOf(order, await unfulfilledMap(store, order));
   const left = remaining(order, unf);
   if (unf && !left.rows.length)
     throw new Error(
-      "Everything on this order is already fulfilled in Shopify — nothing left to book",
+      rest
+        ? "Every product on this order is already booked — nothing left to book"
+        : "Everything on this order is already fulfilled in Shopify — nothing left to book",
     );
   const seller = await sellers.pickupFor(
     ctx.storeOrg || ctx.org,
@@ -796,7 +839,12 @@ async function bookOrder(
         pkg,
       },
     ];
-  const split = splitBoxes(order, boxes, unf);
+  const split = splitBoxes(order, boxes, unf, { leaveRest });
+  // Units still unbooked after this booking (booked in parts).
+  const placed = new Map();
+  for (const b of split || [])
+    for (const l of b.lines) placed.set(String(l.lineId), (placed.get(String(l.lineId)) || 0) + l.quantity / (l.of || 1));
+  const restLeft = !!split && left.rows.some((r) => (placed.get(String(r.line.lineId)) || 0) < r.quantity - 1e-6);
   if (split)
     return bookBoxes({
       ctx,
@@ -809,8 +857,19 @@ async function bookOrder(
       boxes: split,
       manual,
       skipCheck,
-      cod: left.done.length ? codShare(order, left.rows) : null,
+      // COD for just the products booked now when some are left for later.
+      cod: restLeft
+        ? codShare(
+            order,
+            left.rows.map((r) => ({ line: r.line, quantity: placed.get(String(r.line.lineId)) || 0 })),
+          )
+        : left.done.length
+          ? codShare(order, left.rows)
+          : null,
+      rest,
+      restLeft,
     });
+  if (rest) throw new Error("Choose the products to book (the rest of this order)");
   // Package: chosen / typed in, else from the products' package types.
   const p = await resolvePackage(order, pkg, ctx.storeOrg || ctx.org, items);
   if (!p)
@@ -991,7 +1050,9 @@ async function trackOrder(order) {
         ? overall
         : "in_transit";
   }
-  const next = STATUS_FROM_TRACK[overall];
+  let next = STATUS_FROM_TRACK[overall];
+  // Booked in parts with products still to book: the order isn't delivered (or returned) as a whole yet.
+  if (order.partBooked && ["delivered", "rto"].includes(next)) next = "shipped";
   if (
     t.status === "cancelled" &&
     ["ready_to_ship", "packed", "new"].includes(order.status)
@@ -1266,6 +1327,7 @@ module.exports = {
   unfulfilledMap,
   storedUnfulfilled,
   remaining,
+  availOf,
   shippableView,
   boxViews,
   allShipments,

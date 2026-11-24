@@ -338,6 +338,7 @@ router.post(
 
 /* ---------------- orders ---------------- */
 const LIST_FIELDS = {
+  partBooked: 1,
   awbScannedAt: 1,
   "flipkart.selfShip": 1,
   "flipkart.dispatchBy": 1,
@@ -1124,7 +1125,7 @@ router.get(
     const SH = require("../utils/shopify/ship");
     const store = await ShopifyStore.findOne({ organization: req.storeOrg });
     const live = await SH.unfulfilledMap(store, o);
-    const left = SH.remaining(o, live || SH.storedUnfulfilled(o));
+    const left = SH.remaining(o, SH.availOf(o, live || SH.storedUnfulfilled(o)));
     let fulfillments = [];
     if (left.done.length && live) {
       try {
@@ -1168,6 +1169,11 @@ router.get(
       alreadyFulfilled: left.done,
       fulfillments,
       live: !!live,
+      // Booked in parts: what OrdexaGo already booked (the rest is what's left above).
+      partBooked: !!o.partBooked,
+      booked: o.partBooked
+        ? SH.allShipments(o).map((x) => ({ courier: x.courierName || "", awb: x.awb, lines: (x.lines || []).map((l) => ({ title: l.title, quantity: l.quantity })) }))
+        : [],
     });
   }),
 );
@@ -1315,9 +1321,11 @@ router.post(
         : null;
     const one = async (full) => {
       // Only what's still to ship: units already fulfilled in Shopify (e.g. a seller's own shipment) are left out.
-      const unf =
+      const unf = SH.availOf(
+        full,
         (store && (await SH.unfulfilledMap(store, full))) ||
-        SH.storedUnfulfilled(full);
+          SH.storedUnfulfilled(full),
+      );
       const left = SH.remaining(full, unf);
       const o = SH.shippableView(full, unf);
       const lines = o.lines
@@ -1501,6 +1509,7 @@ router.post(
           )
           .max(20)
           .allow(null),
+        leaveRest: Joi.boolean().default(false),
       }),
       req.body,
     );
@@ -1525,6 +1534,7 @@ router.post(
           skipCheck: d.skipCheck,
           pickupFrom: d.ids.length === 1 ? d.pickupFrom : "",
           boxes: d.ids.length === 1 ? d.boxes : null,
+          leaveRest: d.ids.length === 1 && d.leaveRest,
         });
         results.push({ id: o._id, name: o.name, ok: true, ...r });
       } catch (e) {
