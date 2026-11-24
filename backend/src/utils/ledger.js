@@ -115,6 +115,7 @@ async function chartOfAccounts(org) {
       type: GROUP_TYPE(a.group),
       ledgerKind: a.ledgerKind || "",
       tallyGroup: a.tallyGroup || "",
+      aliases: a.aliases || [],
       nonGst: !!a.nonGst,
       role: a.role || "",
       accountCode: a.accountCode,

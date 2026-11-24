@@ -32,6 +32,8 @@ const accountSchema = new mongoose.Schema(
     // Tally's primary group for a Cost of Goods Sold ledger: "Purchase Accounts" or "Direct Expenses". The Tally
     // P&L puts it on that line (a ledger used as a bill's purchase ledger, like Shipping, stays a Direct Expense).
     tallyGroup: { type: String, default: "" },
+    // Other names it's known by (a renamed or merged ledger's old names): a Tally import finds it by these too.
+    aliases: { type: [String], default: undefined },
     // "opening_stock_diff": Tally's Opening Stock ledger minus its items' opening values (shown as Opening Stock in the Tally view)
     role: { type: String, default: "" },
   },

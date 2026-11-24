@@ -549,6 +549,42 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    // Shiraz Handicrafts asked: its two "B2B @ 5%" sales ledgers (Tally's, and the one the marketplace import made —
+    // renamed) become one ledger "B2B Sale @ 5%", in the Online Sale group; Tally's name stays as an alias.
+    id: "2026-11-shiraz-merge-b2b-5",
+    run: async () => {
+      const Organization = require("../models/Organization");
+      const Account = require("../models/Account");
+      const LedgerGroup = require("../models/LedgerGroup");
+      const { moveEntries } = require("./mergeLedger");
+      const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9%@.]/g, "");
+      for (const o of (await Organization.find({}, { _id: 1, name: 1 }).lean()).filter((x) => /shiraz handicrafts/i.test(x.name || ""))) {
+        const twins = (await Account.find({ organization: o._id }).lean()).filter(
+          (a) => a.active !== false && ["b2b@5%", "outstateb2b@5%"].includes(norm(a.name)),
+        );
+        if (twins.length !== 2) {
+          console.log(`${o.name}: B2B @ 5% merge skipped (${twins.length} ledgers found)`);
+          continue;
+        }
+        const grouped = new Set((await LedgerGroup.find({ organization: o._id }).lean()).flatMap((g) => g.members || []));
+        // Keep Tally's own ledger (not in a group, or the older one); the other's entries move to it.
+        const [keep, gone] = [...twins].sort(
+          (a, b) => grouped.has(String(a._id)) - grouped.has(String(b._id)) || new Date(a.createdAt) - new Date(b.createdAt),
+        );
+        const moved = await moveEntries(o._id, String(gone._id), String(keep._id), "B2B Sale @ 5%");
+        await Account.updateOne(
+          { _id: gone._id },
+          { $set: { active: false, description: `${gone.description ? `${gone.description} · ` : ""}Merged into B2B Sale @ 5%` } },
+        );
+        await Account.updateOne(
+          { _id: keep._id },
+          { $set: { name: "B2B Sale @ 5%", ledgerKind: "sales", aliases: [...new Set([...(keep.aliases || []), "B2B @ 5%", "Outstate B2B @ 5%"])] } },
+        );
+        console.log(`${o.name}: B2B @ 5% ledgers merged into "B2B Sale @ 5%" — moved ${JSON.stringify(moved)}`);
+      }
+    },
+  },
 ];
 
 async function runMigrations() {

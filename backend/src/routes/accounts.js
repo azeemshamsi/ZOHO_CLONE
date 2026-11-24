@@ -234,39 +234,14 @@ router.post(
     if (!dst) throw new HttpError(400, "That ledger doesn't exist");
     const a = coa.find((x) => x.code === from);
     if (a && a.type !== dst.type) throw new HttpError(400, `${src.name} is ${a.type} and ${dst.name} is ${dst.type}: merge ledgers of the same kind`);
-    const moved = {};
-    const docModels = { Invoice: "invoices", CreditNote: "credit notes", Bill: "bills", VendorCredit: "vendor credits", Quote: "quotes", SalesOrder: "sales orders", PurchaseOrder: "purchase orders" };
-    for (const [m, label] of Object.entries(docModels)) {
-      const M = require(`../models/${m}`);
-      const seen = new Set();
-      for (const q of [{ ledger: from }, { "lineItems.account": from }]) {
-        for (const d of await M.find({ organization: req.org, ...q }, { ledger: 1, lineItems: 1 }).lean()) {
-          if (seen.has(String(d._id))) continue;
-          seen.add(String(d._id));
-          const set = {};
-          if (d.ledger === from) set.ledger = into;
-          if ((d.lineItems || []).some((l) => l.account === from)) set.lineItems = d.lineItems.map((l) => (l.account === from ? { ...l, account: into } : l));
-          await M.updateOne({ _id: d._id, organization: req.org }, { $set: set });
-        }
-      }
-      if (seen.size) moved[label] = seen.size;
-    }
-    const Journal = require("../models/Journal");
-    let nj = 0;
-    for (const j of await Journal.find({ organization: req.org, "lines.account": from }, { lines: 1 }).lean()) {
-      await Journal.updateOne({ _id: j._id, organization: req.org }, { $set: { lines: j.lines.map((l) => (l.account === from ? { ...l, account: into } : l)) } });
-      nj++;
-    }
-    if (nj) moved.journals = nj;
-    const Expense = require("../models/Expense");
-    const ne = await Expense.updateMany({ organization: req.org, account: from }, { $set: { account: into, category: dst.name } });
-    if (ne.modifiedCount) moved.expenses = ne.modifiedCount;
-    for (const g of await LedgerGroup.find({ organization: req.org })) {
-      if (!(g.members || []).includes(from)) continue;
-      g.members = [...new Set(g.members.map((m) => (m === from ? into : m)))];
-      await g.save();
-    }
+    const moved = await require("../utils/mergeLedger").moveEntries(req.org, from, into, dst.name);
     src.active = false;
+    // The kept ledger answers to the merged one's name too (a later Tally import finds it).
+    const keep = await Account.findOne({ _id: dst.code, organization: req.org }).catch(() => null);
+    if (keep && keep.name.toLowerCase() !== src.name.toLowerCase()) {
+      keep.aliases = [...new Set([...(keep.aliases || []), src.name, ...(src.aliases || [])])];
+      await keep.save();
+    }
     src.description = `${src.description ? `${src.description} · ` : ""}Merged into ${dst.name} on ${new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}`;
     await src.save();
     require("../utils/audit").log(req, "ledger_merged", { target: src.name, meta: { into: dst.name, moved } });

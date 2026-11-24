@@ -178,6 +178,10 @@ async function commit(ctx, data, opts, progress) {
         ? systemSynonyms(a.code, a.name)
         : [a.name.toLowerCase()])
         if (!accByName.has(n)) accByName.set(n, a.code);
+      // Old names of a renamed or merged ledger (e.g. Tally's "B2B @ 5%" now "B2B Sale @ 5%").
+      for (const n of a.aliases || [])
+        if (n && !accByName.has(String(n).toLowerCase()))
+          accByName.set(String(n).toLowerCase(), a.code);
       if (a.accountCode)
         accByName.set(String(a.accountCode).toLowerCase(), a.code);
     }

@@ -89,6 +89,10 @@ async function ledgerBook(org, group) {
   // Members of the master first, then any sales ledger with the same name.
   for (const a of coa) if (members.has(a.code)) byName.set(norm(a.name), a.code);
   for (const a of coa) if (a.active !== false && !byName.has(norm(a.name)) && (a.ledgerKind === "sales" || a.type === "income")) byName.set(norm(a.name), a.code);
+  // Old names of renamed / merged ledgers (e.g. "B2B @ 5%" now "B2B Sale @ 5%").
+  for (const a of coa)
+    if (a.active !== false && (a.ledgerKind === "sales" || a.type === "income"))
+      for (const n of a.aliases || []) if (!byName.has(norm(n))) byName.set(norm(n), a.code);
   return byName;
 }
 // Tally's usual names for the same ledgers (e.g. "B2B @ 18%" for interstate B2B, "Local Sales 5%"): used first when
