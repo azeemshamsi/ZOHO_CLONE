@@ -202,7 +202,34 @@ router.get(
       run = round2(run + sign * (r.debit - r.credit));
       r.balance = run;
     }
-    res.send({ account: acc, from, to, opening, closing: run, rows, view: tally ? "tally" : "live", ...(isParty ? { by: "txn", party: party || null, partyName } : {}) });
+    // Which entries came from an import (Tally, Zoho, Amazon…) and which were entered in OrdexaGo: finding why a
+    // ledger differs from Tally starts with the ones entered here.
+    const ids = [...new Set(rows.map((r) => String(r.id || "")).filter((x) => /^[0-9a-f]{24}$/i.test(x)))];
+    if (ids.length) {
+      const refs = new Map();
+      for (const m of ["Invoice", "Payment", "VendorPayment", "Journal", "Expense", "Bill", "CreditNote", "VendorCredit", "InventoryAdjustment", "Customer", "Vendor"]) {
+        const M = require(`../models/${m}`);
+        for (let i = 0; i < ids.length; i += 500)
+          for (const d of await M.find({ organization: req.org, _id: { $in: ids.slice(i, i + 500) } }, { importRef: 1 }).lean().catch(() => []))
+            refs.set(String(d._id), d.importRef ? String(d.importRef).split(":")[0] : "ordexago");
+      }
+      for (const r of rows) r.source = refs.get(String(r.id)) || "";
+    }
+    // Month by month, like Tally's monthly summary: debit, credit and the balance at each month's end.
+    const months = [];
+    let bal = opening;
+    for (const r of rows) {
+      const d = new Date(new Date(r.date).getTime() + 5.5 * 3600000);
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      let m = months[months.length - 1];
+      if (!m || m.month !== key) months.push((m = { month: key, debit: 0, credit: 0, closing: bal, native: 0 }));
+      m.debit = round2(m.debit + r.debit);
+      m.credit = round2(m.credit + r.credit);
+      if (r.source === "ordexago") m.native = round2(m.native + sign * (r.debit - r.credit));
+      bal = r.balance;
+      m.closing = bal;
+    }
+    res.send({ account: acc, from, to, opening, closing: run, rows, months, view: tally ? "tally" : "live", ...(isParty ? { by: "txn", party: party || null, partyName } : {}) });
   })
 );
 

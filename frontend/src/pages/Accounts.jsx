@@ -307,6 +307,8 @@ export function AccountDetail() {
   const [modal, setModal] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [merge, setMerge] = useState(false);
+  const [monthly, setMonthly] = useState(false);
+  const [onlyNative, setOnlyNative] = useState(false);
   const [view, setView] = useState("tally"); // tally: as Tally / the reports show it; live: with stock movements
 
   const load = () => api.get(`/accounts/${encodeURIComponent(code)}/transactions`, { params: { from: range.from, to: range.to, view, party: party || undefined, by: by || undefined } }).then((r) => setData(r.data));
@@ -422,6 +424,54 @@ export function AccountDetail() {
           </table>
         </div>
       ) : (
+      <>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+        <div className="seg">
+          <button className={!monthly ? "on" : ""} onClick={() => setMonthly(false)}>Transactions</button>
+          <button className={monthly ? "on" : ""} onClick={() => setMonthly(true)}>Monthly (like Tally)</button>
+        </div>
+        {!monthly && (data.rows || []).some((r) => r.source === "ordexago") && (
+          <label className="check small">
+            <input type="checkbox" checked={onlyNative} onChange={(e) => setOnlyNative(e.target.checked)} /> Only entries made in OrdexaGo (not imported)
+          </label>
+        )}
+      </div>
+      {monthly ? (
+        <div className="card flush">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th className="num">Debit</th>
+                <th className="num">Credit</th>
+                <th className="num">Closing balance</th>
+                <th className="num" title="Net of the entries made in OrdexaGo (not imported) that month">Entered in OrdexaGo</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="row-muted">
+                <td colSpan={3}>Opening Balance</td>
+                <td className="num">{money(data.opening)}</td>
+                <td />
+              </tr>
+              {(data.months || []).map((m) => (
+                <tr key={m.month}>
+                  <td>{new Date(`${m.month}-01T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</td>
+                  <td className="num">{m.debit ? money(m.debit) : ""}</td>
+                  <td className="num">{m.credit ? money(m.credit) : ""}</td>
+                  <td className="num">{money(m.closing)}</td>
+                  <td className="num">{m.native ? money(m.native) : ""}</td>
+                </tr>
+              ))}
+              <tr className="row-total">
+                <td colSpan={3}>Closing Balance</td>
+                <td className="num">{money(data.closing)}</td>
+                <td />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : (
       <div className="card flush">
         <table className="table">
           <thead>
@@ -440,10 +490,17 @@ export function AccountDetail() {
               <td colSpan={6}>Opening Balance</td>
               <td className="num">{money(data.opening)}</td>
             </tr>
-            {data.rows.map((r, i) => (
+            {data.rows.filter((r) => !onlyNative || r.source === "ordexago").map((r, i) => (
               <tr key={i}>
                 <td>{date(r.date)}</td>
-                <td>{r.type}</td>
+                <td>
+                  {r.type}
+                  {r.source === "ordexago" && (
+                    <span className="pill pill-blue small" style={{ marginLeft: 6 }} title="Entered in OrdexaGo (not imported from Tally)">
+                      OrdexaGo
+                    </span>
+                  )}
+                </td>
                 <td>
                   <Link to={docLink(r.type, r.id)}>{r.number}</Link>
                 </td>
@@ -467,6 +524,8 @@ export function AccountDetail() {
           </tbody>
         </table>
       </div>
+      )}
+      </>
       )}
       {merge && <MergeModal account={a} onClose={() => setMerge(false)} onDone={(to) => navigate(`/chart-of-accounts/${encodeURIComponent(to)}`)} />}
       <AccountModal open={modal} account={a} onClose={() => setModal(false)} onSaved={() => (setModal(false), load())} />
