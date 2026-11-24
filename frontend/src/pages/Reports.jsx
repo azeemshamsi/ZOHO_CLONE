@@ -10,8 +10,16 @@ import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { money, date, isoDate } from "../lib/format";
 import { stateName } from "../lib/constants";
-import { PERIODS, periodRange, fmtRange, exportCsv } from "../lib/period";
-import { PageHeader, Spinner, Status, Modal } from "../components/ui";
+import { PERIODS, periodRange, fmtRange } from "../lib/period";
+import * as RX from "../lib/reportExport";
+import {
+  PageHeader,
+  Spinner,
+  Status,
+  Modal,
+  MoreMenu,
+  toast,
+} from "../components/ui";
 import { docLink } from "./Accounts";
 import { useLocations } from "../lib/locations";
 import Icon from "../components/Icon";
@@ -1114,20 +1122,49 @@ export function ReportPage() {
             ))}
           </select>
         )}
-        <button
-          className="btn"
-          onClick={() =>
-            paper.current &&
-            exportCsv(
-              paper.current,
-              `${key === "party-ledger" && data?.party ? `Ledger ${data.party.name}` : meta.title} ${subtitle}`,
-            )
-          }
-        >
-          {key === "party-ledger" ? "Download (Excel / CSV)" : "Export CSV"}
-        </button>
+        <MoreMenu
+          label="Download"
+          items={(() => {
+            const opts = () => ({
+              title:
+                key === "party-ledger" && data?.party
+                  ? `Ledger ${data.party.name}`
+                  : meta.title,
+              subtitle,
+              org: organization?.name,
+            });
+            const run = (f) => async () => {
+              if (!paper.current || !data) return;
+              try {
+                await f();
+              } catch (e) {
+                toast(e.message || "Couldn't make the file", "error");
+              }
+            };
+            return [
+              {
+                label: "Excel (.xlsx)",
+                onClick: run(() => RX.downloadExcel(paper.current, opts())),
+              },
+              {
+                label: "PDF",
+                onClick: run(() => RX.downloadPdf(paper.current, opts())),
+              },
+              {
+                label: "Tally XML",
+                onClick: run(() =>
+                  RX.downloadTallyXml(key, data, paper.current, opts()),
+                ),
+              },
+              {
+                label: "CSV",
+                onClick: run(() => RX.downloadCsv(paper.current, opts())),
+              },
+            ];
+          })()}
+        />
         <button className="btn" onClick={() => window.print()}>
-          <Icon name="print" size={16} /> Print / PDF
+          <Icon name="print" size={16} /> Print
         </button>
       </PageHeader>
       {error && <div className="alert alert-error">{error}</div>}

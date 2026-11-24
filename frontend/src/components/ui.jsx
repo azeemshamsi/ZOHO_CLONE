@@ -203,7 +203,7 @@ export function useClickAway(open, close) {
 }
 
 /* "More" button with a small dropdown of actions: items = [{ label, onClick, danger }] */
-export function MoreMenu({ items }) {
+export function MoreMenu({ items, label = "More" }) {
   const [open, setOpen] = useState(false);
   const ref = useClickAway(open, () => setOpen(false));
   const shown = items.filter(Boolean);
@@ -211,7 +211,7 @@ export function MoreMenu({ items }) {
   return (
     <div className="menu-wrap" ref={ref}>
       <button className="btn" onClick={() => setOpen(!open)}>
-        More <Icon name="down" size={14} />
+        {label} <Icon name="down" size={14} />
       </button>
       {open && (
         <div className="dropdown">
