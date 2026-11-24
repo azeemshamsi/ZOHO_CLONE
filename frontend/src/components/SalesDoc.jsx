@@ -678,6 +678,8 @@ export function DocForm({ kind, recurring = false }) {
     );
   }, [form, organization, branches]);
 
+  // Amount being typed per line (the rate follows it); cleared when the box is left.
+  const [amtEdit, setAmtEdit] = useState({});
   if (!form) return <Spinner />;
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const customer = customers.find((c) => c._id === form.customer);
@@ -1432,7 +1434,7 @@ export function DocForm({ kind, recurring = false }) {
                       <>
                         <input
                           type="number"
-                          step="0.01"
+                          step="any"
                           min="0"
                           value={l.grossRate}
                           onChange={(e) =>
@@ -1447,7 +1449,7 @@ export function DocForm({ kind, recurring = false }) {
                     ) : (
                       <input
                         type="number"
-                        step="0.01"
+                        step="any"
                         min="0"
                         value={l.rate}
                         onChange={(e) => setLine(i, { rate: e.target.value })}
@@ -1477,7 +1479,33 @@ export function DocForm({ kind, recurring = false }) {
                     </select>
                   </td>
                   <td className="num strong" data-label="Amount">
-                    {amount(lineAmount(l))}
+                    {/* Like Tally: type the line's taxable amount and the rate per unit is worked out from it. */}
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      className="num strong"
+                      title="Taxable amount — type it and the rate per unit is worked out (amount ÷ quantity)"
+                      value={amtEdit[i] ?? taxRound(lineAmount(l))}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setAmtEdit({ ...amtEdit, [i]: v });
+                        const qty = Number(l.quantity) || 0;
+                        const keep = 1 - (Number(l.discount) || 0) / 100;
+                        if (v === "" || !(qty > 0) || !(keep > 0)) return;
+                        const rate = Math.round((Number(v) / (qty * keep)) * 1e8) / 1e8;
+                        if (l.taxInclusive)
+                          setLine(i, {
+                            grossRate: String(Math.round(rate * (1 + (Number(l.taxRate) || 0) / 100) * 1e8) / 1e8),
+                          });
+                        else setLine(i, { rate: String(rate) });
+                      }}
+                      onBlur={() => {
+                        const { [i]: _, ...rest } = amtEdit;
+                        setAmtEdit(rest);
+                      }}
+                      style={{ maxWidth: 130 }}
+                    />
                   </td>
                   <td className="line-del">
                     {form.lineItems.length > 1 && (
