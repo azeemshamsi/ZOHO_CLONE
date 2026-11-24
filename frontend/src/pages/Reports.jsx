@@ -473,6 +473,13 @@ export const REPORTS = [
     "Opening, in, out, on hand, committed and available stock per item.",
   ),
   R(
+    "stock-summary",
+    "Stock Summary (Tally)",
+    "Inventory",
+    "range",
+    "Opening, inward, outward and closing stock per item, in quantity and value — what Opening / Closing Stock in the P&L opens to.",
+  ),
+  R(
     "inventory-valuation",
     "Inventory Valuation Summary",
     "Inventory",
@@ -819,10 +826,23 @@ export function ReportPage() {
     if (h !== horizontal) nav(`/reports/${LAYOUT[key]}`, { replace: true });
   };
   const { organization } = useAuth();
-  const [range, setRange] = useState(() => ({
-    key: meta?.period || "this_fy",
-    ...periodRange(meta?.period || "this_fy"),
-  }));
+  // A link can carry its period (?from=…&to=…), e.g. Closing Stock in the P&L opening the Stock Summary.
+  const urlRange = () => {
+    const q = new URLSearchParams(window.location.search);
+    const f = q.get("from");
+    const t = q.get("to");
+    return /^\d{4}-\d{2}-\d{2}$/.test(f || "") &&
+      /^\d{4}-\d{2}-\d{2}$/.test(t || "")
+      ? { key: "custom", from: f, to: t }
+      : null;
+  };
+  const [range, setRange] = useState(
+    () =>
+      urlRange() || {
+        key: meta?.period || "this_fy",
+        ...periodRange(meta?.period || "this_fy"),
+      },
+  );
   const [asOf, setAsOf] = useState(isoDate());
   const [stockEdit, setStockEdit] = useState(false);
   const [reloadN, setReloadN] = useState(0);
@@ -900,10 +920,12 @@ export function ReportPage() {
   }, [key]);
 
   useEffect(() => {
-    setRange({
-      key: meta?.period || "this_fy",
-      ...periodRange(meta?.period || "this_fy"),
-    });
+    setRange(
+      urlRange() || {
+        key: meta?.period || "this_fy",
+        ...periodRange(meta?.period || "this_fy"),
+      },
+    );
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -2083,15 +2105,28 @@ function TallyStatement({ d, range }) {
   }, []);
   const isOpen = (k) => (open[k] === undefined ? all : open[k]);
   const amt = (v) => (v || v === 0 ? money(v).replace("₹", "").trim() : "");
+  const stockTo = (name) => {
+    if (!/^(opening|closing) stock$/i.test(name || "")) return null;
+    const t = d.to ? String(d.to).slice(0, 10) : range.to;
+    // Balance Sheet (as at): the financial year up to that date, as Tally does.
+    const [y, m] = t.split("-").map(Number);
+    const f = d.from
+      ? String(d.from).slice(0, 10)
+      : `${m >= 4 ? y : y - 1}-04-01`;
+    return `/reports/stock-summary?from=${f}&to=${t}`;
+  };
   const ledgerTo = (l) =>
-    l.party
+    stockTo(l.name) ||
+    (l.party
       ? `/reports/party-ledger?party=${l.party}&from=${range.from}&to=${range.to}`
-      : acctLink(l.code, range);
+      : acctLink(l.code, range));
   const rowsOf = (groups, side) => {
     const out = [];
     for (const g of groups) {
       const k = `${side}:${g.name}`;
-      const can = (g.ledgers || []).length + (g.subgroups || []).length > 0;
+      const stk = stockTo(g.name);
+      const can =
+        !stk && (g.ledgers || []).length + (g.subgroups || []).length > 0;
       out.push({
         kind: "group",
         label: g.name,
@@ -2099,6 +2134,7 @@ function TallyStatement({ d, range }) {
         k,
         can,
         style: g.style,
+        to: stk || undefined,
       });
       if (!can || !isOpen(k)) continue;
       for (const sg of g.subgroups || []) {

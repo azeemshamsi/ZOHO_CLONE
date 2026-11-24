@@ -937,6 +937,82 @@ Object.assign(REPORTS, {
     };
   },
 
+  // Tally's Stock Summary: opening, inward, outward and closing per item, in quantity and value — what the
+  // Opening / Closing Stock lines of the P&L and Balance Sheet open to. Value in the books that isn't tied to an
+  // item (journals to Inventory Asset, Tally's opening stock difference) is shown on its own line so the totals
+  // equal the P&L.
+  "stock-summary": async (req, q) => {
+    const { from, to } = parseRange(q);
+    const TV = require("./tallyView");
+    const { loadStock } = require("./inventory");
+    const [stock, items, accounts, entries] = await Promise.all([
+      loadStock(req.org, { to }),
+      tracked(req.org),
+      chartOfAccounts(req.org),
+      buildEntries(req.org, { to }),
+    ]);
+    const mv = movements(TV.tallyEntries(entries, accounts), { from, to });
+    const bookOpening = round2(TV.stockValue(entries, new Date(from.getTime() - 1)) + naturalBalance(TV.OPENING_STOCK, mv[TV.OPENING_STOCK.code]));
+    const bookClosing = TV.stockValue(entries, to);
+    const rows = [];
+    for (const it of items) {
+      const st = stock.items[String(it._id)] || { moves: [], qty: 0, value: 0 };
+      const before = st.moves.filter((m) => new Date(m.date) < from);
+      const inRange = st.moves.filter((m) => new Date(m.date) >= from);
+      const last = before[before.length - 1];
+      const r = {
+        name: it.name,
+        href: itemHref(it._id),
+        sku: it.sku,
+        category: it.category || "",
+        oQty: last ? last.qty : 0,
+        oVal: last ? round2(last.stockValue) : 0,
+        iQty: sum(inRange, (m) => m.qtyIn),
+        iVal: sum(inRange.filter((m) => m.value > 0), (m) => m.value),
+        xQty: sum(inRange, (m) => m.qtyOut),
+        xVal: round2(-sum(inRange.filter((m) => m.value < 0), (m) => m.value)),
+        cQty: st.qty,
+        cVal: round2(st.value),
+      };
+      r.cRate = r.cQty > 0 ? round2(r.cVal / r.cQty) : 0;
+      if (r.oQty || r.oVal || r.iQty || r.xQty || r.cQty || r.cVal) rows.push(r);
+    }
+    rows.sort((a, b) => (a.category || "~").localeCompare(b.category || "~") || a.name.localeCompare(b.name));
+    const itemsOpening = sum(rows, (r) => r.oVal);
+    const itemsClosing = sum(rows, (r) => r.cVal);
+    const oDiff = round2(bookOpening - itemsOpening);
+    const cDiff = round2(bookClosing - itemsClosing);
+    if (Math.abs(oDiff) >= 0.01 || Math.abs(cDiff) >= 0.01)
+      rows.push({
+        name: "Value not tied to items (journals, Tally opening stock difference)",
+        sku: "",
+        category: "",
+        oVal: oDiff,
+        cVal: cDiff,
+        iVal: cDiff - oDiff > 0 ? round2(cDiff - oDiff) : 0,
+        xVal: cDiff - oDiff < 0 ? round2(oDiff - cDiff) : 0,
+      });
+    return {
+      kind: "table",
+      note: `As in Tally's Stock Summary (FIFO cost). Opening ${bookOpening.toLocaleString("en-IN", { style: "currency", currency: "INR" })} and closing ${bookClosing.toLocaleString("en-IN", { style: "currency", currency: "INR" })} equal the Opening and Closing Stock in the Profit & Loss A/c.`,
+      columns: [
+        col("name", "Particulars", "text", { link: "href" }),
+        col("sku", "SKU"),
+        col("category", "Group"),
+        col("oQty", "Opening Qty", "number", { sum: true }),
+        col("oVal", "Opening Value", "money", { sum: true }),
+        col("iQty", "Inward Qty", "number", { sum: true }),
+        col("iVal", "Inward Value", "money", { sum: true }),
+        col("xQty", "Outward Qty", "number", { sum: true }),
+        col("xVal", "Outward Value", "money", { sum: true }),
+        col("cQty", "Closing Qty", "number", { sum: true }),
+        col("cRate", "Closing Rate", "money"),
+        col("cVal", "Closing Value", "money", { sum: true }),
+      ],
+      rows,
+    };
+  },
+
   "inventory-valuation": async (req, q) => {
     const to = asOfDate(q);
     const { loadStock } = require("./inventory");
