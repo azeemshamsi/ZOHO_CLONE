@@ -38,7 +38,7 @@ async function bookReverse(ctx, order, { accountId, reason = "", note = "", pkg 
   const s = shipmentFrom(order, orgDoc, p, items);
   checkShipment(s); // the customer's address: where it's picked up
   const n = (order.reverse?.cancelled || []).length;
-  const rs = { ...s, from: s.consignee, reference: `${s.reference.replace(/-\d+$/, "")}-RT${n ? n + 1 : ""}`, cod: false, codAmount: 0, reverse: true };
+  const rs = { ...s, from: s.consignee, reference: `${s.reference.replace(/-\d+$/, "")}-RT${n ? n + 1 : ""}`, cod: false, codAmount: 0, reverse: true, reason };
 
   let out;
   if (manual.awb) out = { awb: String(manual.awb).trim(), courierName: manual.courierName || acc.name, trackingUrl: acc.trackingUrl ? acc.trackingUrl.replace("{awb}", String(manual.awb).trim()) : "", refs: {} };

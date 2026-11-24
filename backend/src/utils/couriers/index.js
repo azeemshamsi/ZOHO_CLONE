@@ -551,6 +551,30 @@ const SFX_STATUS = {
   cancelled: "cancelled",
   cancelled_by_client: "cancelled",
 };
+// Return pickups (developer.shadowfax.in → Reverse Logistics → Order Lifecycle): back at the seller / warehouse
+// (rts_d / rto_d) closes the return.
+const SFX_REV_STATUS = {
+  new: "pending",
+  assigned_for_pickup: "pending",
+  ofp: "pending",
+  cid: "pending",
+  nc: "pending",
+  na: "pending",
+  on_hold: "pending",
+  qc_failed: "pending",
+  reopen: "pending",
+  picked: "in_transit",
+  recd_at_rev_hub: "in_transit",
+  recd_at_dc: "in_transit",
+  rts_in_process: "in_transit",
+  rts_nd: "in_transit",
+  rto_nd: "in_transit",
+  rts_d: "delivered",
+  rto_d: "delivered",
+  cancelled_by_customer: "cancelled",
+  cancelled: "cancelled",
+  lost: "cancelled",
+};
 const sfxStatus = (code, label) => SFX_STATUS[String(code || "").toLowerCase()] || normStatus(String(label || code || "").replace(/_/g, " "));
 const sfxErr = (d) => {
   if (!d || typeof d !== "object") return String(d || "");
@@ -614,10 +638,19 @@ const shadowfax = {
       method: "POST",
       headers: this.h(acc),
       json: {
-        customer_details: { name: c.name, contact: c.phone, address: [c.address1, c.address2].filter(Boolean).join(", "), city: c.city, state: c.stateName, pincode: Number(c.pincode) },
-        return_details: { return_type: "seller", name: to.name || s.seller.name, contact: phone10(to.phone), address: to.address, city: to.city || "", state: stateName(to.state), pincode: Number(to.pincode) },
-        order_details: { client_order_id: s.reference },
-        sku_details: s.items.map((i) => ({ sku_name: i.name, sku_id: i.sku || i.name.slice(0, 30), price: r2(i.price * i.quantity), return_reason: s.reason || "Customer return", hsn_code: i.hsn || "" })),
+        customer_details: { name: c.name, contact: c.phone, address: [c.address1, c.address2].filter(Boolean).join(", "), city: c.city, pincode: Number(c.pincode) },
+        return_details: { return_type: acc.options?.returnType === "origin" ? "origin" : "seller", name: to.name || s.seller.name, contact: phone10(to.phone), address: to.address, city: to.city || "", pincode: Number(to.pincode) },
+        order_details: { client_order_id: s.reference, price: r2(s.value), total_amount: r2(s.value) },
+        sku_details: s.items.map((i) => ({
+          sku_name: i.name,
+          sku_id: i.sku || i.name.slice(0, 30),
+          price: r2(i.price * i.quantity),
+          return_reason: s.reason || "Customer return",
+          qc_required: false,
+          hsn_code: i.hsn || "",
+          additional_details: { quantity_value: i.quantity },
+          seller_details: { seller_name: s.seller.name, seller_address: s.seller.address, seller_state: s.seller.stateName, gstin_number: s.seller.gstin || null },
+        })),
       },
     });
     const awb = data?.data?.awb_number || data?.awb_number;
@@ -629,10 +662,17 @@ const shadowfax = {
       ? `${this.base(acc)}/api/v4/clients/requests/${encodeURIComponent(sh.awb)}`
       : `${this.base(acc)}/api/v4/clients/orders/${encodeURIComponent(sh.awb)}/track/?format=json`;
     const { data } = await request(url, { headers: this.h(acc) });
-    const od = data?.order_details || data?.request_details || data?.data || {};
+    if (sh.refs?.reverse) {
+      // Pickup request: top-level status and pickup_request_state_histories.
+      const code = data?.status;
+      if (!code) throw new Error(sfxErr(data));
+      const events = (data.pickup_request_state_histories || []).map((d) => ({ at: new Date(d.created_at), status: [d.state, d.comment].filter(Boolean).join(" — "), location: d.current_location || "" }));
+      return { status: SFX_REV_STATUS[String(code).toLowerCase()] || "in_transit", text: String(code).replace(/_/g, " "), events };
+    }
+    const od = data?.order_details || data?.data || {};
     const code = od.status || data?.status;
     if (!code) throw new Error(sfxErr(data));
-    const events = (data.tracking_details || data.request_tracking_details || []).map((d) => ({ at: new Date(d.created), status: [d.status || d.status_id, d.remarks].filter(Boolean).join(" — "), location: d.location || "" }));
+    const events = (data.tracking_details || []).map((d) => ({ at: new Date(d.created), status: [d.status || d.status_id, d.remarks].filter(Boolean).join(" — "), location: d.location || "" }));
     return { status: sfxStatus(code, od.status_display), text: od.status_display || code, events };
   },
   // Label: a link (valid 2 days), only before pickup.
@@ -646,7 +686,9 @@ const shadowfax = {
     return { url };
   },
   async cancel(acc, sh) {
-    const { status, data } = await request(`${this.base(acc)}/api/v3/clients/orders/cancel/`, { method: "POST", headers: this.h(acc), json: { request_id: sh.awb, cancel_remarks: "Cancelled by seller" } });
+    // Return pickups cancel on their own endpoint (only before the rider picks it up).
+    const path = sh.refs?.reverse ? "/api/v2/clients/requests/mark_cancel" : "/api/v3/clients/orders/cancel/";
+    const { status, data } = await request(`${this.base(acc)}${path}`, { method: "POST", headers: this.h(acc), json: { request_id: sh.awb, cancel_remarks: "Cancelled by seller" } });
     if (status >= 400 || (data?.responseCode && data.responseCode >= 400)) throw new Error(sfxErr(data));
   },
 };
