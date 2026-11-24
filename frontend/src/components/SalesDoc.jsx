@@ -511,7 +511,11 @@ export function DocForm({ kind, recurring = false }) {
           },
           lineItems: data.lineItems.map(cleanLine),
           shippingCharge: data.shippingCharge,
-          adjustment: data.adjustment,
+          // A purchase adjustment on its own ledger (TDS) keeps its round-off apart.
+          adjustment: data.adjustmentAccount
+            ? Math.round(((data.adjustment || 0) - (data.adjustmentRoundOff || 0)) * 100) / 100
+            : data.adjustment,
+          roundOff: data.adjustmentAccount ? data.adjustmentRoundOff || 0 : 0,
           adjustmentAccount: data.adjustmentAccount || "",
           // Imported Tally invoices carry their sales ledger on the lines: show it when every line uses the same one.
           ledger:
@@ -674,7 +678,7 @@ export function DocForm({ kind, recurring = false }) {
       home,
       form.placeOfSupply || home,
       form.shippingCharge,
-      form.adjustment,
+      (Number(form.adjustment) || 0) + (Number(form.roundOff) || 0),
     );
   }, [form, organization, branches]);
 
@@ -740,9 +744,14 @@ export function DocForm({ kind, recurring = false }) {
           ? { billingAddress: form.billingAddress, shipTo: form.shipTo }
           : {}),
         shippingCharge: Number(form.shippingCharge || 0),
-        adjustment: Number(form.adjustment || 0),
+        // Round off is part of the adjustment; with a TDS ledger it's kept apart and posts to Rounding.
+        adjustment:
+          Math.round((Number(form.adjustment || 0) + Number(form.roundOff || 0)) * 100) / 100,
         ...(isVendor && form.adjustmentAccount
-          ? { adjustmentAccount: form.adjustmentAccount }
+          ? {
+              adjustmentAccount: form.adjustmentAccount,
+              adjustmentRoundOff: Number(form.roundOff || 0),
+            }
           : {}),
         ...(ledgerKind ? { ledger: form.ledger || "" } : {}),
         customerNotes: form.customerNotes,
@@ -1648,7 +1657,19 @@ export function DocForm({ kind, recurring = false }) {
               tdsLedgers.some((a) => a.code === form.adjustmentAccount)
             ) && (
               <div className="tot-row">
-                <span>Adjustment</span>
+                <span>
+                  Adjustment / Round off{" "}
+                  <RoundBtn
+                    total={totals.total}
+                    onRound={(d) =>
+                      setForm((f) => ({
+                        ...f,
+                        adjustment:
+                          Math.round(((Number(f.adjustment) || 0) + d) * 100) / 100,
+                      }))
+                    }
+                  />
+                </span>
                 <input
                   type="number"
                   step="0.01"
@@ -1657,6 +1678,31 @@ export function DocForm({ kind, recurring = false }) {
                 />
               </div>
             )}
+            {kind.key === "bill" &&
+              tdsLedgers.some((a) => a.code === form.adjustmentAccount) && (
+                <div className="tot-row">
+                  <span>
+                    Round off{" "}
+                    <RoundBtn
+                      total={totals.total}
+                      onRound={(d) =>
+                        setForm((f) => ({
+                          ...f,
+                          roundOff:
+                            Math.round(((Number(f.roundOff) || 0) + d) * 100) / 100,
+                        }))
+                      }
+                    />
+                  </span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={form.roundOff ?? 0}
+                    onChange={set("roundOff")}
+                    title="Up (+) or down (−), under ₹5; posts to Rounding & Adjustments"
+                  />
+                </div>
+              )}
             {kind.key === "bill" &&
               !form.adjustmentAccount &&
               Number(form.adjustment) <= -1 && (
@@ -2461,5 +2507,22 @@ function CartageAdder({ onAdd }) {
         Cancel
       </button>
     </div>
+  );
+}
+
+// Round the total to the nearest rupee: adds the difference (up or down) to the adjustment / round-off.
+function RoundBtn({ total, onRound }) {
+  const t = Number(total) || 0;
+  const d = Math.round((Math.round(t) - t) * 100) / 100;
+  if (!d) return null;
+  return (
+    <button
+      type="button"
+      className="link-btn small"
+      title={`Round ${amount(t)} to ${amount(Math.round(t))}`}
+      onClick={() => onRound(d)}
+    >
+      {d > 0 ? `round up +${d.toFixed(2)}` : `round down ${d.toFixed(2)}`}
+    </button>
   );
 }

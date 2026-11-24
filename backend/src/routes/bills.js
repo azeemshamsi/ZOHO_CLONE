@@ -19,6 +19,7 @@ const schema = Joi.object({
   shippingCharge: Joi.number().min(0),
   adjustment: Joi.number(),
   adjustmentAccount: Joi.string().allow(""),
+  adjustmentRoundOff: Joi.number().min(-5).max(5),
   ledger: Joi.string().allow(""),
   customerNotes: Joi.string().allow(""),
   terms: Joi.string().allow(""),
