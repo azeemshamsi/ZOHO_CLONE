@@ -53,6 +53,7 @@ async function bookReverse(ctx, order, { accountId, reason = "", note = "", pkg 
     courierName: out.courierName,
     awb: out.awb,
     trackingUrl: out.trackingUrl || "",
+    labelUrl: out.labelUrl || "",
     refs: out.refs || {},
     reason,
     note,
@@ -158,4 +159,28 @@ async function quoteReverse(ctx, order, { pkg = {}, returnTo = "" } = {}) {
   return { rows: sortQuotes(rows), weight: s.weight, to: seller ? seller.name : "you" };
 }
 
-module.exports = { REASONS, quoteReverse, bookReverse, cancelReverse, trackReverse, trackAllReverse };
+// The reverse pickup's label: the courier's own when it gives one, otherwise OrdexaGo's 4x6 return label.
+async function reverseLabel(ctx, order) {
+  const rv = order.reverse;
+  if (!rv?.awb) throw new Error("No reverse pickup is booked on this order");
+  const org = ctx.storeOrg || ctx.org;
+  const acc = rv.account ? await CourierAccount.findById(rv.account) : null;
+  if (rv.labelUrl) return { url: rv.labelUrl };
+  const c = acc && CARRIERS[acc.carrier];
+  if (c?.label && !["velocity", "custom", "bigship", "shiprocket_cargo"].includes(acc.carrier)) {
+    try {
+      const l = await c.label(acc, { ...rv, reverse: true });
+      if (l?.url || l?.pdf) return l;
+    } catch {
+      /* fall back to OrdexaGo's label */
+    }
+  }
+  const sellers = require("../sellers");
+  const seller = rv.returnTo && rv.returnTo !== "own" ? await sellers.pickupFor(org, order, rv.returnTo).catch(() => null) : null;
+  const back = acc ? sellers.withPickup(acc, seller).pickup || {} : seller?.pickup || {};
+  const orgDoc = await Organization.findById(ctx.org).lean();
+  const pdf = await require("../couriers/label").reverseLabelPdf(order, orgDoc, { ...back, name: back.name || (seller ? seller.name : orgDoc.name) });
+  return { pdf };
+}
+
+module.exports = { REASONS, reverseLabel, quoteReverse, bookReverse, cancelReverse, trackReverse, trackAllReverse };

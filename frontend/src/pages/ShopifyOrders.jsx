@@ -1994,7 +1994,15 @@ function ReverseBox({ o, readOnly, onChanged }) {
         </div>
       )}
       {!readOnly && !rv.deliveredAt && (
-        <div style={{ marginTop: 6, display: "flex", gap: 6 }}>
+        <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            title="4x6 label to send the customer: pickup from them, delivery to you, the reverse AWB"
+            onClick={() => openPdf(`/shopify/orders/${o._id}/reverse/label`)}
+          >
+            Return label
+          </button>
           <button
             type="button"
             className="btn btn-sm"

@@ -12,7 +12,7 @@ const H6 = 432;
 
 const barcode = (text, height = 12) => bwipjs.toBuffer({ bcid: "code128", text: String(text), scale: 3, height, includetext: false });
 
-async function drawLabel(doc, o, org, acc) {
+async function drawLabel(doc, o, org, acc, opt = {}) {
   const sh = o.shipment || {};
   const a = o.shippingAddress || {};
   const p = sh.pickup?.address ? sh.pickup : acc?.pickup || {}; // a marketplace seller's pickup when booked from there
@@ -24,7 +24,7 @@ async function drawLabel(doc, o, org, acc) {
   // Seller + payment
   doc.font("b").fontSize(12).fillColor("#000").text(org.name, L, 16, { width: 170, height: 16, ellipsis: true });
   const cod = codOf(o);
-  const payText = o.paymentMode === "prepaid" || !cod ? "PREPAID" : o.paymentMode === "partial" ? "PART COD" : "COD";
+  const payText = opt.reverse ? "RETURN" : o.paymentMode === "prepaid" || !cod ? "PREPAID" : o.paymentMode === "partial" ? "PART COD" : "COD";
   doc.roundedRect(190, 12, 84, cod ? 32 : 22, 5).stroke();
   doc.font("b").fontSize(10).text(payText, 190, 17, { width: 84, align: "center" });
   if (cod) doc.font("b").fontSize(9).text(`Collect ${money(cod)}`, 190, 30, { width: 84, align: "center" });
@@ -72,9 +72,9 @@ async function drawLabel(doc, o, org, acc) {
   if (lines.length > 4) doc.font("r").fontSize(7.5).text(`+ ${lines.length - 4} more item(s)`, L, y);
   line(350);
   // Return address
-  doc.font("b").fontSize(8).text("FROM (Return Address):", L, 355);
+  doc.font("b").fontSize(8).text(opt.reverse ? "PICKUP FROM (customer):" : "FROM (Return Address):", L, 355);
   doc.font("b").fontSize(9).text(p.name || org.name, L, 366, { width: W });
-  doc.font("r").fontSize(7.5).text([p.address || org.address?.street, `${p.city || org.address?.city || ""}, ${stateName(p.state || org.state)}, ${p.pincode || org.address?.pincode || ""}`, `Ph: ${p.phone || org.phone || ""}${org.gstin ? `   GSTIN: ${org.gstin}` : ""}`].filter(Boolean).join("\n"), L, doc.y, { width: W });
+  doc.font("r").fontSize(7.5).text([p.address || org.address?.street, `${p.city || org.address?.city || ""}, ${stateName(p.state || org.state)}, ${p.pincode || org.address?.pincode || ""}`, `Ph: ${p.phone || org.phone || ""}${org.gstin && !opt.reverse ? `   GSTIN: ${org.gstin}` : ""}`].filter(Boolean).join("\n"), L, doc.y, { width: W });
   if (acc?.options?.customText) doc.font("b").fontSize(7.5).text(String(acc.options.customText).slice(0, 150), L, 410, { width: W, align: "center", height: 12, ellipsis: true });
 }
 
@@ -117,4 +117,38 @@ async function labelsPdf(orders, org, accounts = new Map(), format) {
   return done;
 }
 
-module.exports = { labelsPdf };
+// A reverse pickup's label (for couriers that give none, e.g. Velocity): picked up from the customer, delivered
+// to you or the seller, with the reverse AWB.
+async function reverseLabelPdf(order, org, back) {
+  const rv = order.reverse || {};
+  const a = order.shippingAddress || {};
+  const view = {
+    name: order.name,
+    orderDate: rv.bookedAt || new Date(),
+    paymentMode: "prepaid",
+    lines: order.lines,
+    customer: order.customer,
+    shippingAddress: { name: back.name, address1: back.address, city: back.city, province: stateName(back.state), zip: back.pincode, phone: back.phone },
+    shipment: {
+      awb: rv.awb,
+      courierName: rv.courierName,
+      weight: rv.weight,
+      refs: {},
+      pickup: { name: a.name || order.customer?.name || "", address: [a.address1, a.address2].filter(Boolean).join(", "), city: a.city, state: a.province || a.state, pincode: a.zip, phone: a.phone || order.customer?.phone || "" },
+    },
+  };
+  const doc = new PDFDocument({ size: [W4, H6], margin: 0 });
+  doc.registerFont("r", FONT);
+  doc.registerFont("b", BOLD);
+  const chunks = [];
+  doc.on("data", (c) => chunks.push(c));
+  const done = new Promise((res, rej) => {
+    doc.on("end", () => res(Buffer.concat(chunks)));
+    doc.on("error", rej);
+  });
+  await drawLabel(doc, view, org, null, { reverse: true });
+  doc.end();
+  return done;
+}
+
+module.exports = { labelsPdf, reverseLabelPdf };

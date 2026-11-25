@@ -1840,6 +1840,24 @@ router.post(
 // Reverse pickup: the courier collects a delivered order from the customer and brings it back.
 const RV = require("../utils/shopify/reverse");
 router.get("/reverse-reasons", (req, res) => res.send(RV.REASONS));
+router.get(
+  "/orders/:id/reverse/label",
+  ah(async (req, res) => {
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
+    if (!o) throw new HttpError(404, "Order not found");
+    let l;
+    try {
+      l = await RV.reverseLabel(ctxOf(req), o);
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+    if (l.url) return res.send({ url: l.url });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="return-${o.name}.pdf"`);
+    res.send(l.pdf);
+  }),
+);
+
 router.post(
   "/orders/:id/reverse/quotes",
   ah(async (req, res) => {
