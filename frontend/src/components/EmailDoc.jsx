@@ -12,34 +12,7 @@ const split = (s) =>
     .filter(Boolean);
 
 // Print the same PDF that downloads (not the on-screen page): loaded in a hidden frame, then the print dialog.
-// Receipt / label printer: an HTML page exactly the roll's width and the content's length, printed at 100%.
-async function printRoll(kind, id, width) {
-  const { data } = await api.get(`/documents/${kind}/${id}/receipt`, { params: { width } });
-  const f = document.createElement("iframe");
-  f.style.cssText = `position:fixed;left:-9999px;top:0;width:${width}in;height:10px;border:0`;
-  document.body.appendChild(f);
-  const w = f.contentWindow;
-  w.document.open();
-  w.document.write(data.html);
-  w.document.close();
-  const go = () => {
-    // Page length = the content's length (in mm), so nothing is cut or shrunk.
-    const mm = Math.ceil((w.document.documentElement.scrollHeight * 25.4) / 96) + 4;
-    const st = w.document.createElement("style");
-    st.textContent = `@page { size: ${width}in ${mm}mm; margin: 0; }`;
-    w.document.head.appendChild(st);
-    w.focus();
-    w.print();
-    setTimeout(() => f.remove(), 60000);
-  };
-  const imgs = [...w.document.images];
-  if (imgs.some((i) => !i.complete)) Promise.all(imgs.map((i) => (i.complete ? 0 : new Promise((r) => (i.onload = i.onerror = r))))).then(go);
-  else setTimeout(go, 50);
-}
-
 export async function printPdf(kind, id, thermal) {
-  if (thermal)
-    return printRoll(kind, id, thermal).catch((e) => toast(errMsg(e), "error"));
   try {
     const r = await api.get(`/documents/${kind}/${id}/pdf`, { responseType: "blob", params: thermal ? { thermal } : {} });
     const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));

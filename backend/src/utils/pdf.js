@@ -345,11 +345,11 @@ async function thermalPdf(org, d, meta, widthIn = 3) {
     let y = 8;
     const t = (s, o = {}) => {
       if (!s && s !== 0) return;
-      doc.font(o.b ? "b" : "r").fontSize(o.size || fs).fillColor("#000").text(String(s), M + (o.x || 0), y, { width: (o.w || W) - (o.x || 0), align: o.align || "left" });
+      doc.font("b").fontSize(o.size || fs).fillColor("#000").text(String(s), M + (o.x || 0), y, { width: (o.w || W) - (o.x || 0), align: o.align || "left" });
       y = doc.y + (o.gap ?? 1);
     };
     const lr = (l, r, o = {}) => {
-      doc.font(o.b ? "b" : "r").fontSize(o.size || fs).fillColor("#000");
+      doc.font("b").fontSize(o.size || fs).fillColor("#000"); // thermal heads print thin strokes faintly: all bold
       const rw = doc.widthOfString(String(r)) + 2;
       const top = y;
       doc.text(String(l), M, top, { width: W - rw - 4 });
@@ -359,7 +359,7 @@ async function thermalPdf(org, d, meta, widthIn = 3) {
     };
     const rule = (dash) => {
       y += 2;
-      doc.moveTo(M, y).lineTo(PW - M, y).lineWidth(0.6).strokeColor("#000");
+      doc.moveTo(M, y).lineTo(PW - M, y).lineWidth(0.9).strokeColor("#000");
       if (dash) doc.dash(2, { space: 2 });
       doc.stroke().undash();
       y += 4;
