@@ -586,6 +586,59 @@ const MIGRATIONS = [
     },
   },
   {
+    // Approved 25 Nov 2026: store invoices (Shopify / Amazon) show the price actually charged, with no discount.
+    // Each discounted line's rate becomes its amount ÷ quantity and Disc% 0 — line amounts, GST and totals stay
+    // exactly as they were (an invoice where that can't be done to the paisa, an e-invoiced or void one, is left
+    // alone). The old lines are kept in invoice_discount_backup.
+    id: "2026-11-store-invoices-no-discount",
+    run: async () => {
+      const ShopifyOrder = require("../models/ShopifyOrder");
+      const Invoice = require("../models/Invoice");
+      const backup = mongoose.connection.db.collection("invoice_discount_backup");
+      const taxRound = (n) => Math.round(Number((Number(n) * 100).toFixed(6))) / 100;
+      const r4 = (n) => Math.round((Number(n) + Number.EPSILON) * 10000) / 10000;
+      const ids = [...new Set((await ShopifyOrder.find({}, { invoice: 1 }).lean()).map((o) => (o.invoice ? String(o.invoice) : "")).filter(Boolean))];
+      let done = 0;
+      const skipped = [];
+      for (const id of ids) {
+        const inv = await Invoice.findById(id);
+        if (!inv || inv.status === "void" || !inv.lineItems.some((l) => Number(l.discount) > 0)) continue;
+        if (inv.einvoice?.status === "generated") {
+          skipped.push(`${inv.invoiceNumber} (e-invoiced)`);
+          continue;
+        }
+        const old = inv.lineItems.map((l) => l.toObject());
+        let ok = true;
+        for (const l of inv.lineItems) {
+          if (!(Number(l.discount) > 0)) continue;
+          if (l.taxInclusive || !(l.quantity > 0)) {
+            ok = false;
+            break;
+          }
+          // A rate (4 decimals) that gives the same amount to the paisa.
+          const base = r4(l.amount / l.quantity);
+          const rate = [0, 0.0001, -0.0001, 0.0002, -0.0002, 0.0003, -0.0003].map((d) => r4(base + d)).find((r) => taxRound(l.quantity * r) === taxRound(l.amount));
+          if (rate === undefined) {
+            ok = false;
+            break;
+          }
+          l.rate = rate;
+          l.discount = 0;
+        }
+        if (!ok) {
+          skipped.push(`${inv.invoiceNumber} (rate can't match the amount exactly)`);
+          continue;
+        }
+        await backup.updateOne({ _id: inv._id }, { $set: { invoiceNumber: inv.invoiceNumber, organization: inv.organization, lineItems: old, at: new Date() } }, { upsert: true });
+        inv.markModified("lineItems");
+        await inv.save();
+        done++;
+        console.log(`No-discount: ${inv.invoiceNumber} total ${inv.total}`);
+      }
+      console.log(`No-discount: ${done} invoice(s) rewritten; skipped ${skipped.length}${skipped.length ? `: ${skipped.join(", ")}` : ""}`);
+    },
+  },
+  {
     // Items learn where they came from: Shopify (made from an order), or the import (Tally / Zoho / sheet) whose
     // vouchers first used them. The rest are taken as made in OrdexaGo.
     id: "2026-11-item-source",
