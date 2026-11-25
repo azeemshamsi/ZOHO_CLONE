@@ -205,7 +205,7 @@ async function createInvoiceFrom(req, src, links, orderNumber) {
 function settleBill(bill) {
   bill.amountPaid = round2(bill.amountPaid || 0);
   bill.creditsApplied = round2(bill.creditsApplied || 0);
-  const settled = round2(bill.amountPaid + bill.creditsApplied);
+  const settled = round2(bill.amountPaid + bill.creditsApplied + (bill.settledInLedger || 0));
   bill.balance = round2(Math.max(bill.total - settled, 0));
   if (bill.status === "void") {
     bill.balance = 0;

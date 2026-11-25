@@ -69,6 +69,32 @@ router.get(
 
 router.get("/next-number", (req, res) => res.send({ number: "" }));
 
+// Match open bills / debit notes to each supplier's ledger balance (no entries; see utils/ledgerMatch).
+const LM = require("../utils/ledgerMatch");
+const vendorList = (v) => (Array.isArray(v) ? v.map(String).filter((x) => /^[0-9a-f]{24}$/.test(x)) : null);
+router.get(
+  "/ledger-match",
+  ah(async (req, res) => res.send(await LM.plan(req.org)))
+);
+router.post(
+  "/ledger-match",
+  ah(async (req, res) => {
+    const ids = vendorList(req.body?.vendors);
+    if (!ids || !ids.length) throw new HttpError(400, "Choose the suppliers to match");
+    const r = await LM.apply(req.org, ids);
+    await require("../utils/audit").log(req, "bills_matched_to_ledger", { meta: r }).catch(() => {});
+    res.send(r);
+  })
+);
+router.post(
+  "/ledger-match/undo",
+  ah(async (req, res) => {
+    const r = await LM.undo(req.org, vendorList(req.body?.vendors));
+    await require("../utils/audit").log(req, "bills_ledger_match_undone", { meta: r }).catch(() => {});
+    res.send(r);
+  })
+);
+
 // TDS deducted on bills but posted to Rounding & Adjustments (typed in the plain Adjustment box, or imported
 // when Tally's TDS ledger wasn't matched): list them, and move them to a TDS ledger. Only the ledger changes —
 // the bill's amounts and what's owed to the vendor stay the same. A few paise of round-off beside the TDS stay

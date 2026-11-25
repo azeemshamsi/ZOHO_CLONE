@@ -1,7 +1,7 @@
 import BillFromPdf from "../components/BillFromPdf";
 import { leaveTo } from "../lib/backNav";
 import Attachments from "../components/Attachments";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -14,17 +14,133 @@ import Icon from "../components/Icon";
 
 const K = KINDS.bill;
 
+// Bills paid by journal / debit note / marketplace settlement (not bill-wise) still look unpaid: match them to
+// each supplier's ledger balance. Preview first; nothing is posted and Undo puts it back.
+function MatchLedger({ onClose }) {
+  const [groups, setGroups] = useState(null);
+  const [pick, setPick] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState({});
+  useEffect(() => {
+    api
+      .get("/bills/ledger-match")
+      .then((r) => {
+        setGroups(r.data);
+        setPick(Object.fromEntries(r.data.map((g) => [g.vendor, true])));
+      })
+      .catch((e) => (toast(errMsg(e), "error"), setGroups([])));
+  }, []);
+  const chosen = Object.keys(pick).filter((k) => pick[k]);
+  const run = async (undo) => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(undo ? "/bills/ledger-match/undo" : "/bills/ledger-match", undo ? {} : { vendors: chosen });
+      toast(undo ? `Undone on ${data.bills} bill(s), ${data.credits} debit note(s)` : `Matched ${data.bills} bill(s) and ${data.credits} debit note(s) for ${data.vendors} supplier(s)`, "success");
+      window.location.reload();
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <Modal
+      open
+      wide
+      title="Match bills to the ledger"
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn btn-ghost" disabled={busy} onClick={() => window.confirm("Put back every bill and debit note matched to the ledger?") && run(true)} style={{ marginRight: "auto" }}>
+            Undo earlier matching
+          </button>
+          <button className="btn" onClick={onClose}>
+            Close
+          </button>
+          <button className="btn btn-primary" disabled={busy || !chosen.length} onClick={() => run(false)}>
+            {busy ? "Matching…" : `Match ${chosen.length} supplier(s)`}
+          </button>
+        </>
+      }
+    >
+      <p className="small" style={{ marginTop: 0 }}>
+        Bills settled by journal, debit note or a marketplace settlement (Amazon, Flipkart) reduce the supplier's ledger
+        but were never set against a bill, so the bills still show unpaid. This marks them settled so the open bills add
+        up to the ledger balance: the newest bills keep what's still owed. <strong>No entry is posted and no ledger
+        balance changes</strong>; Undo puts them back.
+      </p>
+      {!groups ? (
+        <Spinner />
+      ) : !groups.length ? (
+        <div className="muted">Every supplier's open bills already match their ledger.</div>
+      ) : (
+        <table className="table">
+          <thead>
+            <tr>
+              <th style={{ width: 28 }} />
+              <th>Supplier</th>
+              <th className="num">Ledger balance</th>
+              <th className="num">Open bills − debit notes</th>
+              <th className="num">After</th>
+              <th className="num">Changes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((g) => (
+              <Fragment key={g.vendor}>
+                <tr>
+                  <td>
+                    <input type="checkbox" checked={!!pick[g.vendor]} onChange={(e) => setPick({ ...pick, [g.vendor]: e.target.checked })} />
+                  </td>
+                  <td>{g.name}</td>
+                  <td className="num">{money(Math.abs(g.ledger))} {g.ledger < 0 ? "Dr" : g.ledger > 0 ? "Cr" : ""}</td>
+                  <td className="num">{money(g.billsDue - g.creditsOpen)}</td>
+                  <td className="num">{money(g.after)}</td>
+                  <td className="num">
+                    <button type="button" className="link-btn" onClick={() => setOpen({ ...open, [g.vendor]: !open[g.vendor] })}>
+                      {g.changes.length} {open[g.vendor] ? "▴" : "▾"}
+                    </button>
+                  </td>
+                </tr>
+                {open[g.vendor] &&
+                  g.changes.map((c) => (
+                    <tr key={c.id} className="small muted">
+                      <td />
+                      <td>
+                        {c.type === "bill" ? "Bill" : "Debit note"} {c.number} · {date(c.date)}
+                      </td>
+                      <td />
+                      <td className="num">{money(c.balance)}</td>
+                      <td className="num">{c.left ? `${money(c.left)} left` : "settled"}</td>
+                      <td className="num">−{money(c.settle)}</td>
+                    </tr>
+                  ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Modal>
+  );
+}
+
 export function BillList() {
   const [fromPdf, setFromPdf] = useState(false);
+  const [match, setMatch] = useState(false);
   return (
     <>
     {fromPdf && <BillFromPdf kind="bill" onClose={() => setFromPdf(false)} />}
+    {match && <MatchLedger onClose={() => setMatch(false)} />}
     <DocList
       kind={K}
       headerExtra={
-        <button className="btn" onClick={() => setFromPdf(true)}>
-          <Icon name="upload" size={16} /> From bill PDF
-        </button>
+        <>
+          <button className="btn" onClick={() => setMatch(true)} title="Bills settled by journal / debit note / Amazon settlement: mark them paid from the supplier's ledger balance">
+            Match to ledger
+          </button>
+          <button className="btn" onClick={() => setFromPdf(true)}>
+            <Icon name="upload" size={16} /> From bill PDF
+          </button>
+        </>
       }
       filters={[
         ["all", "All Bills"],

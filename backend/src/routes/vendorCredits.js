@@ -26,7 +26,7 @@ async function findCN(req) {
   return cn;
 }
 
-const used = (cn) => round2(cn.applications.reduce((s, a) => s + a.amount, 0) + cn.refunds.reduce((s, r) => s + r.amount, 0));
+const used = (cn) => round2(cn.applications.reduce((s, a) => s + a.amount, 0) + cn.refunds.reduce((s, r) => s + r.amount, 0) + (cn.settledInLedger || 0));
 
 function refreshStatus(cn) {
   if (cn.status === "draft" || cn.status === "void") return cn;

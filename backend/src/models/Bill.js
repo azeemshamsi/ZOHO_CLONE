@@ -10,6 +10,9 @@ const billSchema = new mongoose.Schema(
     paymentTerms: { type: Number, default: 0 },
     amountPaid: { type: Number, default: 0 },
     creditsApplied: { type: Number, default: 0 },
+    // Paid outside bill-wise allocation (journal, debit note, marketplace settlement) — matched from the supplier's
+    // ledger balance (Bills → Match to ledger). No entry of its own; undo sets it back to 0.
+    settledInLedger: { type: Number, default: 0 },
     balance: { type: Number, default: 0 },
     status: {
       type: String,
