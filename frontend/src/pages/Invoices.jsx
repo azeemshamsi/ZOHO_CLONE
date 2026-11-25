@@ -11,7 +11,7 @@ import { PageHeader, Spinner, toast, Status, Confirm, Modal, MoreMenu, invoiceSt
 import { DocList, DocForm, DocPaper, MiniTable } from "../components/SalesDoc";
 import NameCustomer from "../components/NameCustomer";
 import Icon from "../components/Icon";
-import { DocEmail } from "../components/EmailDoc";
+import { DocEmail, printPdf } from "../components/EmailDoc";
 import { GstPanel } from "../components/GstPanel";
 
 const K = KINDS.invoice;
@@ -228,7 +228,7 @@ export function InvoiceView() {
             <Icon name="edit" size={16} /> Edit
           </Link>
         )}
-        <button className="btn" onClick={() => window.print()}>
+        <button className="btn" onClick={() => printPdf("invoice", id)}>
           <Icon name="print" size={16} /> Print / PDF
         </button>
         <DocEmail kind="invoice" id={id} onSent={load} reminder={inv.balance > 0 && ['sent','partially_paid'].includes(inv.status) && new Date(inv.dueDate) < new Date(new Date().toDateString())} />

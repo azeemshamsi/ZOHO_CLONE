@@ -7,7 +7,7 @@ const { sendOrgMail, canEmail } = require("../utils/mailer");
 const { reminderBody } = require("../utils/reminders");
 const { ah, validate } = require("../utils/http");
 
-const org = (req) => Organization.findById(req.org);
+const org = (req) => Organization.findById(req.org).select("+signatureImage");
 
 // PDF to view or download.
 router.get(

@@ -68,6 +68,10 @@ async function load(org, kind, id) {
 
 async function pdfFor(org, kind, d) {
   const cfg = DOCS[kind];
+  if (org.hasSignature && !org.signatureImage) {
+    const s = await M("Organization").findById(org._id).select("+signatureImage").lean();
+    org = { ...(org.toObject ? org.toObject() : org), signatureImage: s?.signatureImage || "" };
+  }
   if (d.branch) {
     // Branch documents carry the branch's GSTIN, address and contacts.
     const b = await require("../models/Branch").findById(d.branch).lean();
@@ -77,7 +81,7 @@ async function pdfFor(org, kind, d) {
     return receiptPdf(org, d, { title: cfg.title, partyLabel: cfg.partyLabel || "Received From", party: d[`${cfg.party}Name`], appliedLabel: cfg.appliedLabel, applied: cfg.applied(d) });
   }
   const bal = cfg.balance ? cfg.balance(d) : {};
-  return documentPdf(org, d, { title: cfg.title, number: d[cfg.number], partyLabel: cfg.partyLabel || "Bill To", facts: cfg.facts(d), ...bal });
+  return documentPdf(org, d, { title: cfg.title, number: d[cfg.number], partyLabel: cfg.partyLabel || "Bill To", facts: cfg.facts(d), noSignatory: kind === "bill", ...bal });
 }
 
 const fileName = (cfg, d) => `${cfg.label.replace(/\s+/g, "-")}-${d[cfg.number]}.pdf`.replace(/[^\w.-]+/g, "_");

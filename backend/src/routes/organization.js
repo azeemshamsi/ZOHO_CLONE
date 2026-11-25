@@ -56,6 +56,36 @@ router.put(
 );
 
 // Stock Room tab on / off.
+// Signature / stamp printed above "Authorised Signatory" on documents.
+router.get(
+  "/signature",
+  ah(async (req, res) => {
+    const o = await Organization.findById(req.org).select("+signatureImage signatoryLabel").lean();
+    res.send({ image: o?.signatureImage || "", label: o?.signatoryLabel || "Authorised Signatory" });
+  }),
+);
+router.put(
+  "/signature",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        image: Joi.string()
+          .allow("")
+          .max(400000)
+          .pattern(/^data:image\/(png|jpe?g);base64,[A-Za-z0-9+/=]+$/)
+          .messages({ "string.max": "The image is too big — use one under 300 KB", "string.pattern.base": "Use a PNG or JPG image" }),
+        label: Joi.string().trim().allow("").max(60),
+      }),
+      req.body,
+    );
+    const set = {};
+    if (d.image !== undefined) Object.assign(set, { signatureImage: d.image, hasSignature: !!d.image });
+    if (d.label !== undefined) set.signatoryLabel = d.label || "Authorised Signatory";
+    await Organization.updateOne({ _id: req.org }, { $set: set });
+    res.send({ ok: true, hasSignature: set.hasSignature });
+  }),
+);
+
 router.put(
   "/stock-room",
   ah(async (req, res) => {

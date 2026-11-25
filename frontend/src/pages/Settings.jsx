@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { STATES, PAYMENT_TERMS } from "../lib/constants";
@@ -222,6 +222,7 @@ export default function Settings() {
         </div>
       </form>
       <StockCosting />
+      <SignatureCard />
       <StockRoomToggle />
       <EmailSettings />
       <AiSettings />
@@ -752,6 +753,76 @@ function DeleteCompany() {
 }
 
 // The Stock Room tab (photo view of stock on hand) on or off for everyone in the company.
+// Signature / company stamp printed above "Authorised Signatory" on invoices, quotes, orders, notes and receipts.
+function SignatureCard() {
+  const [img, setImg] = useState(null);
+  const [label, setLabel] = useState("Authorised Signatory");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api
+      .get("/organization/signature")
+      .then((r) => (setImg(r.data.image), setLabel(r.data.label)))
+      .catch(() => setImg(""));
+  }, []);
+  const save = async (body, msg) => {
+    setBusy(true);
+    try {
+      await api.put("/organization/signature", body);
+      toast(msg);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  const pick = (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    if (!/^image\/(png|jpe?g)$/.test(f.type)) return toast("Use a PNG or JPG image", "error");
+    if (f.size > 300 * 1024) return toast("The image is too big — use one under 300 KB", "error");
+    const r = new FileReader();
+    r.onload = async () => {
+      await save({ image: r.result }, "Signature saved — it prints on your documents");
+      setImg(r.result);
+    };
+    r.readAsDataURL(f);
+  };
+  return (
+    <div className="card form" style={{ marginTop: 18 }}>
+      <h4 className="section-title" style={{ marginTop: 0 }}>
+        Authorised signatory
+      </h4>
+      <p className="muted small" style={{ marginTop: 0 }}>
+        Printed at the bottom right of invoices, quotes, sales and purchase orders, credit / debit notes and receipts:
+        "For {"<company>"}", your signature or stamp, and the label below. A PNG with a transparent background looks best.
+      </p>
+      <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ width: 180, height: 70, border: "1px dashed var(--line)", borderRadius: 8, display: "grid", placeItems: "center", background: "#fff" }}>
+          {img === null ? <span className="muted small">…</span> : img ? <img src={img} alt="Signature" style={{ maxWidth: 170, maxHeight: 60 }} /> : <span className="muted small">No signature</span>}
+        </div>
+        <label className="btn">
+          {img ? "Change image" : "Upload signature / stamp"}
+          <input type="file" accept="image/png,image/jpeg" hidden disabled={busy} onChange={pick} />
+        </label>
+        {img && (
+          <button className="btn btn-ghost" disabled={busy} onClick={async () => (await save({ image: "" }, "Signature removed"), setImg(""))}>
+            Remove
+          </button>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "end", marginTop: 12, maxWidth: 420 }}>
+        <label style={{ flex: 1 }}>
+          <span className="small">Label under the signature</span>
+          <input value={label} maxLength={60} onChange={(e) => setLabel(e.target.value)} />
+        </label>
+        <button className="btn" disabled={busy} onClick={() => save({ label }, "Label saved")}>
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function StockRoomToggle() {
   const { organization, setOrganization } = useAuth();
   const [on, setOn] = useState(organization?.stockRoom !== false);

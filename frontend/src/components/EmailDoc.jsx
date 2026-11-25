@@ -11,6 +11,32 @@ const split = (s) =>
     .map((x) => x.trim())
     .filter(Boolean);
 
+// Print the same PDF that downloads (not the on-screen page): loaded in a hidden frame, then the print dialog.
+export async function printPdf(kind, id) {
+  try {
+    const r = await api.get(`/documents/${kind}/${id}/pdf`, { responseType: "blob" });
+    const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
+    const f = document.createElement("iframe");
+    f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
+    f.src = url;
+    f.onload = () => {
+      try {
+        f.contentWindow.focus();
+        f.contentWindow.print();
+      } catch {
+        window.open(url, "_blank"); // browsers that block printing a frame: open the PDF to print from there
+      }
+      setTimeout(() => {
+        f.remove();
+        URL.revokeObjectURL(url);
+      }, 120000);
+    };
+    document.body.appendChild(f);
+  } catch (e) {
+    toast(errMsg(e), "error");
+  }
+}
+
 // Download / open the server-made PDF (needs the auth header, so fetch as a blob).
 export async function openPdf(kind, id, download = false) {
   try {

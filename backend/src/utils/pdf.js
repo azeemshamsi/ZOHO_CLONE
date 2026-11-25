@@ -186,6 +186,29 @@ function footerNotes(doc, total, notes, terms, cur = "INR", rate = 1) {
   }
 }
 
+// "For <company>", the signature / stamp, and "Authorised Signatory" at the bottom right (like Tally).
+function signatory(doc, org) {
+  const W = 200;
+  const x = doc.page.width - 40 - W;
+  const need = 92;
+  if (doc.y + need > doc.page.height - doc.page.margins.bottom) doc.addPage();
+  let y = doc.y + 14;
+  doc.font("b").fontSize(9).fillColor("#111827").text(`For ${org.name}`, x, y, { width: W, align: "right" });
+  y = doc.y + 4;
+  const img = org.signatureImage || "";
+  if (/^data:image\/(png|jpe?g);base64,/.test(img)) {
+    try {
+      doc.image(Buffer.from(img.replace(/^data:.*?;base64,/, ""), "base64"), x + W - 150, y, { fit: [150, 50], align: "right", valign: "center" });
+    } catch {
+      /* unreadable image: leave the space for a hand signature */
+    }
+  }
+  y += 54;
+  doc.moveTo(x + W - 150, y).lineTo(x + W, y).lineWidth(0.5).strokeColor("#9ca3af").stroke();
+  doc.font("r").fontSize(8.5).fillColor("#374151").text(org.signatoryLabel || "Authorised Signatory", x, y + 4, { width: W, align: "right" });
+  doc.y = y + 18;
+}
+
 function pageNumbers(doc, org) {
   const range = doc.bufferedPageRange();
   for (let i = 0; i < range.count; i++) {
@@ -255,6 +278,7 @@ async function documentPdf(org, d, meta) {
   if (meta.balance !== undefined) rows.push([meta.balanceLabel || "Balance Due", money(meta.balance, d.currency), true]);
   totals(doc, rows);
   footerNotes(doc, d.total, d.customerNotes, d.terms, d.currency, d.exchangeRate);
+  if (!meta.noSignatory) signatory(doc, org);
   pageNumbers(doc, org);
   return toBuffer(doc);
 }
@@ -290,6 +314,8 @@ async function receiptPdf(org, p, { title, partyLabel, party, appliedLabel, appl
   }
   if (p.unusedAmount) doc.font("r").fontSize(9).fillColor(MUTED).text(`Excess amount kept as credit: ${money(p.unusedAmount)}`, L, doc.y);
   if (p.notes) doc.font("r").fontSize(8.5).fillColor("#374151").text(p.notes, L, doc.y + 8, { width: W });
+  doc.y += 10;
+  signatory(doc, org);
   pageNumbers(doc, org);
   return toBuffer(doc);
 }

@@ -7,7 +7,7 @@ import { PAYMENT_MODES, modeName } from "../lib/constants";
 import { money, amount, date, isoDate, round2, inWords } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, SearchBox, useDebounced, toast, Confirm, Status, invoiceStatus } from "../components/ui";
 import Icon from "../components/Icon";
-import { DocEmail } from "../components/EmailDoc";
+import { DocEmail, printPdf } from "../components/EmailDoc";
 import BankAccountSelect from "../components/BankAccountSelect";
 import SearchSelect, { partyOptions, itemOptions } from "../components/SearchSelect";
 import { useBack, leaveTo } from "../lib/backNav";
@@ -336,7 +336,7 @@ export function PaymentView() {
   return (
     <>
       <PageHeader title={p.paymentNumber} subtitle={p.customerName} back="/payments">
-        <button className="btn" onClick={() => window.print()}>
+        <button className="btn" onClick={() => printPdf("payment", id)}>
           <Icon name="print" size={16} /> Print / PDF
         </button>
         <Link to={`/payments/new?copy=${id}`} className="btn" title="Duplicate (Alt+2)">

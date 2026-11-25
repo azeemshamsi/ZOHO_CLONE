@@ -33,6 +33,10 @@ const organizationSchema = new mongoose.Schema(
     inventoryCosting: { type: String, enum: ["fifo", "average"], default: "fifo" },
     // Stock Room tab (a photo view of stock on hand): an admin can turn it off.
     stockRoom: { type: Boolean, default: true },
+    // Authorised signatory on invoices and other documents: signature / stamp image (data URL, loaded only for PDFs).
+    signatureImage: { type: String, default: "", select: false },
+    hasSignature: { type: Boolean, default: false },
+    signatoryLabel: { type: String, default: "Authorised Signatory" },
     tallyOpeningStock: { type: Number },
     // Closing stock entered by hand (like Tally): [{ date, amount }] — reports to that date (and later, until the next) use it.
     closingStock: { type: [{ _id: false, date: Date, amount: Number }], default: undefined }, // Tally's Opening Stock ledger balance (from a masters import): item opening values are matched to it

@@ -9,7 +9,7 @@ import { money, date } from "../lib/format";
 import { PageHeader, Spinner, toast, Status, Confirm, MoreMenu } from "../components/ui";
 import { DocList, DocForm, DocPaper } from "../components/SalesDoc";
 import Icon from "../components/Icon";
-import { DocEmail } from "../components/EmailDoc";
+import { DocEmail, printPdf } from "../components/EmailDoc";
 
 const K = KINDS.salesOrder;
 
@@ -89,7 +89,7 @@ export function SalesOrderView() {
             <Icon name="edit" size={16} /> Edit
           </Link>
         )}
-        <button className="btn" onClick={() => window.print()}>
+        <button className="btn" onClick={() => printPdf("salesOrder", id)}>
           <Icon name="print" size={16} /> Print / PDF
         </button>
         <DocEmail kind="salesOrder" id={id} onSent={load} />
