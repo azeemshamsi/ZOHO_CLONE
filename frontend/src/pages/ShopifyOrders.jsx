@@ -2043,6 +2043,33 @@ function ReverseModal({ order, couriers, onClose, onDone }) {
       .then((r) => setReasons(r.data))
       .catch(() => {});
   }, []);
+  // Charges with each courier, cheapest first; refreshed when where it goes back to or the package changes.
+  const [quotes, setQuotes] = useState(null);
+  const [picked, setPicked] = useState(false);
+  const qKey = JSON.stringify([f.returnTo, f.weight, f.length, f.breadth, f.height]);
+  useEffect(() => {
+    let off = false;
+    const t = setTimeout(() => {
+      setQuotes(null);
+      const pkg =
+        Number(f.weight) > 0
+          ? { weight: f.weight, length: f.length, breadth: f.breadth, height: f.height }
+          : {};
+      api
+        .post(`/shopify/orders/${order._id}/reverse/quotes`, { returnTo: f.returnTo, pkg })
+        .then((r) => {
+          if (off) return;
+          setQuotes(r.data);
+          const best = (r.data.rows || []).find((x) => x.serviceable !== false && x.charge != null);
+          if (best && !picked) setF((cur) => ({ ...cur, accountId: best.account }));
+        })
+        .catch((e) => !off && setQuotes({ rows: [], note: errMsg(e) }));
+    }, 400);
+    return () => {
+      off = true;
+      clearTimeout(t);
+    };
+  }, [qKey]);
   const acc = active.find((c) => c._id === f.accountId);
   const manualOnly =
     acc && ["custom", "shiprocket_cargo", "velocity", "bigship"].includes(acc.carrier);
@@ -2087,6 +2114,7 @@ function ReverseModal({ order, couriers, onClose, onDone }) {
   return (
     <Modal
       open
+      wide
       title={`Reverse pickup — ${order.name}`}
       onClose={onClose}
       footer={
@@ -2121,7 +2149,10 @@ function ReverseModal({ order, couriers, onClose, onDone }) {
             </select>
           </Field>
           <Field label="Courier" required>
-            <select value={f.accountId} onChange={set("accountId")}>
+            <select
+              value={f.accountId}
+              onChange={(e) => (setPicked(true), set("accountId")(e))}
+            >
               {active.map((c) => (
                 <option key={c._id} value={c._id}>
                   {c.name}
@@ -2129,6 +2160,58 @@ function ReverseModal({ order, couriers, onClose, onDone }) {
               ))}
             </select>
           </Field>
+        </div>
+        <div>
+          <div className="small muted" style={{ marginBottom: 4 }}>
+            Charges{quotes?.weight ? ` · ${quotes.weight} kg` : ""}
+            {quotes?.to ? ` · back to ${quotes.to}` : ""} — click one to choose it
+          </div>
+          {!quotes ? (
+            <div className="small muted">Checking couriers…</div>
+          ) : !quotes.rows?.length ? (
+            <div className="small muted">{quotes.note || "No courier accounts"}</div>
+          ) : (
+            <table className="table" style={{ fontSize: 13 }}>
+              <tbody>
+                {quotes.rows.map((r) => (
+                  <tr
+                    key={r.account}
+                    onClick={() => (setPicked(true), setF({ ...f, accountId: r.account }))}
+                    style={{
+                      cursor: "pointer",
+                      background: r.account === f.accountId ? "var(--brand-soft, #eef4ff)" : undefined,
+                      opacity: r.serviceable === false ? 0.55 : 1,
+                    }}
+                  >
+                    <td>
+                      <input type="radio" readOnly checked={r.account === f.accountId} /> {r.name}
+                      {!r.api && (
+                        <span className="muted small"> · book on its portal, enter AWB</span>
+                      )}
+                    </td>
+                    <td className="num" title={breakdownText(r)}>
+                      {r.serviceable === false ? (
+                        <span className="muted small">{r.note || "Not serviceable"}</span>
+                      ) : r.charge != null ? (
+                        <>
+                          {money(r.charge)}
+                          {!r.returnRate && (
+                            <span className="muted small" title="That lane's rate; the courier's reverse charge may differ">
+                              {" "}
+                              approx.
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="muted small">{r.note || "No rate"}</span>
+                      )}
+                    </td>
+                    <td className="muted small">{r.etd || ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
         <Field label="Note (what the customer said, photos received…)">
           <input value={f.note} onChange={set("note")} />

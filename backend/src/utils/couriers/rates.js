@@ -183,7 +183,7 @@ const QUOTES = {
   async shiprocket(acc, q) {
     const c = CARRIERS.shiprocket;
     if (!q.from) return { serviceable: null, note: "Add the pickup pincode to this courier (Store Settings → Couriers) to check rates" };
-    const { status, data } = await c.call(acc, `/courier/serviceability/?${qs({ pickup_postcode: q.from, delivery_postcode: q.to, weight: q.weight, cod: q.cod ? 1 : 0, declared_value: q.value, length: q.length, breadth: q.breadth, height: q.height })}`);
+    const { status, data } = await c.call(acc, `/courier/serviceability/?${qs({ pickup_postcode: q.from, delivery_postcode: q.to, weight: q.weight, cod: q.cod ? 1 : 0, declared_value: q.value, length: q.length, breadth: q.breadth, height: q.height, ...(q.reverse ? { is_return: 1 } : {}) })}`);
     const list = data.data?.available_courier_companies || [];
     if (!list.length) {
       if (status === 404 || data.status === 404 || /not serviceable|no courier/i.test(data.message || "")) return { serviceable: false, note: data.message || "No courier serves this pincode" };
@@ -410,7 +410,7 @@ const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeo
 // One courier: live check, then the rate card for the charge if the API had none.
 async function quoteAccount(acc, s) {
   const p = acc.pickup || {};
-  const q = { from: p.pincode || "", to: s.consignee.pincode, weight: s.weight, length: s.length, breadth: s.breadth, height: s.height, cod: s.cod, codAmount: s.codAmount, value: s.value, fromCity: p.city || "", fromState: p.state || "", toCity: s.consignee.city || "", toState: s.consignee.stateName || "", packages: s.packages };
+  const q = { from: p.pincode || "", to: s.consignee.pincode, weight: s.weight, length: s.length, breadth: s.breadth, height: s.height, cod: s.cod, codAmount: s.codAmount, value: s.value, fromCity: p.city || "", fromState: p.state || "", toCity: s.consignee.city || "", toState: s.consignee.stateName || "", packages: s.packages, reverse: !!s.reverse };
   // Chargeable weight with this courier's volumetric divisor, rounded up to a whole kg.
   const cwt = chargeableWeight(q, acc.rateCard || {});
   q.cw = cwt.weight;

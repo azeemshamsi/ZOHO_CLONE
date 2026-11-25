@@ -127,4 +127,35 @@ async function trackAllReverse() {
   for (const o of list) if (o.reverse?.awb && !o.reverse.deliveredAt) await trackReverse(o).catch(() => {});
 }
 
-module.exports = { REASONS, bookReverse, cancelReverse, trackReverse, trackAllReverse };
+// Charges for a reverse pickup with each courier: from the customer's pincode to where it goes back (you, or
+// the seller). Shiprocket quotes its return rates; the others quote that lane (their reverse charge may differ).
+async function quoteReverse(ctx, order, { pkg = {}, returnTo = "" } = {}) {
+  const org = ctx.storeOrg || ctx.org;
+  const sellers = require("../sellers");
+  const { quoteAccount, sortQuotes } = require("../couriers/rates");
+  const accs = await CourierAccount.find({ organization: org, active: true });
+  const seller = returnTo === "own" ? null : await sellers.pickupFor(org, order, returnTo || "");
+  const Item = require("../../models/Item");
+  const items = new Map((await Item.find({ _id: { $in: order.lines.map((l) => l.item).filter(Boolean) } }).lean()).map((i) => [String(i._id), i]));
+  const p = await resolvePackage(order, pkg, org, items);
+  if (!p) return { rows: [], note: "Its products have no package type — enter the weight and size to see charges" };
+  const orgDoc = await Organization.findById(ctx.org);
+  const s = shipmentFrom(order, orgDoc, p, items);
+  const cust = s.consignee || {};
+  const rows = await Promise.all(
+    accs.map(async (real) => {
+      const acc = sellers.withPickup(real, seller);
+      const back = acc.pickup || {};
+      // The lane reversed: picked up at the customer, delivered to the return address.
+      const lane = new Proxy(acc, { get: (t, k) => (k === "pickup" ? { ...back, pincode: cust.pincode, city: cust.city, state: cust.stateName || cust.state } : Reflect.get(t, k, t)) });
+      const rs = { ...s, cod: false, codAmount: 0, reverse: true, consignee: { ...cust, pincode: back.pincode || "", city: back.city || "", stateName: back.state || "" } };
+      const r = await quoteAccount(lane, rs);
+      r.api = !!CARRIERS[real.carrier]?.reverse && !["custom", "shiprocket_cargo", "velocity", "bigship"].includes(real.carrier);
+      r.returnRate = real.carrier === "shiprocket";
+      return r;
+    }),
+  );
+  return { rows: sortQuotes(rows), weight: s.weight, to: seller ? seller.name : "you" };
+}
+
+module.exports = { REASONS, quoteReverse, bookReverse, cancelReverse, trackReverse, trackAllReverse };

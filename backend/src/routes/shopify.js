@@ -1841,6 +1841,16 @@ router.post(
 const RV = require("../utils/shopify/reverse");
 router.get("/reverse-reasons", (req, res) => res.send(RV.REASONS));
 router.post(
+  "/orders/:id/reverse/quotes",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ returnTo: Joi.string().allow("").max(40).default(""), pkg: Joi.object().unknown(true).default({}) }), req.body);
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
+    if (!o) throw new HttpError(404, "Order not found");
+    res.send(await RV.quoteReverse(ctxOf(req), o, d));
+  }),
+);
+
+router.post(
   "/orders/:id/reverse",
   ah(async (req, res) => {
     const d = validate(
