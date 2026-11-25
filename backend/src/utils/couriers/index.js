@@ -448,7 +448,12 @@ const bluedart = {
     // Blue Dart's tracking XML isn't always well-formed (stray "<" / "&" in remarks and addresses), which made a
     // strict parser fail on many AWBs: read the few tags needed straight from the text instead.
     const sh0 = bdShipment(xml);
-    if (!sh0 || sh0.StatusType === "NF" || !sh0.Status) throw new Error(sh0?.Status || "No tracking yet");
+    if (!sh0 || sh0.StatusType === "NF" || !sh0.Status) {
+      // What Blue Dart said, in a few words (its own message when there is one), so "no tracking" can be told apart
+      // from a wrong login / key or an AWB under another account.
+      const said = String(xml).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+      throw new Error(sh0?.Status || `No tracking yet${said ? ` (Blue Dart: ${said})` : ""}`);
+    }
     const scans = sh0.Scans?.ScanDetail || [];
     const events = scans.map((d) => ({ at: new Date(`${String(d.ScanDate).split("-").reverse().join("-")} ${d.ScanTime || ""}`.replace(/(\d{2})-([A-Za-z]{3})-(\d{4})/, "$1 $2 $3")), status: d.Scan, location: d.ScannedLocation }));
     let status = normStatus(sh0.Status);
