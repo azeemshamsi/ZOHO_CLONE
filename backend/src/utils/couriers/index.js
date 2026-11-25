@@ -264,6 +264,21 @@ const delhivery = {
 };
 
 /* ---------------- Blue Dart ---------------- */
+// Blue Dart tracking response → { Status, StatusType, Scans: { ScanDetail: [...] } }, tolerant of malformed XML.
+function bdShipment(xml) {
+  const dec = (t) => String(t ?? "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&").trim();
+  const tag = (src, name) => {
+    const m = String(src).match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`));
+    return m ? dec(m[1]) : "";
+  };
+  const block = (String(xml).match(/<Shipment[\s>][\s\S]*?<\/Shipment>/) || [])[0];
+  if (!block) return null;
+  const scans = [...block.matchAll(/<ScanDetail>([\s\S]*?)<\/ScanDetail>/g)].map((m) => ({ Scan: tag(m[1], "Scan"), ScanDate: tag(m[1], "ScanDate"), ScanTime: tag(m[1], "ScanTime"), ScannedLocation: tag(m[1], "ScannedLocation") }));
+  // Status fields sit before the scans; read them from the part before <Scans> so a scan's own tags can't match.
+  const head = block.split(/<Scans[\s>]/)[0];
+  return { Status: tag(head, "Status"), StatusType: tag(head, "StatusType"), Scans: { ScanDetail: scans } };
+}
+
 const bluedart = {
   title: "Blue Dart",
   fields: { credentials: ["licenceKey", "loginId", "clientId", "clientSecret", "trackingKey"], options: ["customerCode", "originArea", "productCode", "vendorCode", "autoPickup"] },
@@ -427,11 +442,12 @@ const bluedart = {
     need(acc, ["loginId"]);
     const key = acc.credentials.trackingKey || acc.credentials.licenceKey;
     const url = `${acc.options.trackUrl || "https://api.bluedart.com/servlet/RoutingServlet"}?${new URLSearchParams({ handler: "tnt", action: "custawbquery", loginid: acc.credentials.loginId, awb: "awb", numbers: sh.awb, format: "xml", lickey: key, verno: "1.3", scan: "1" })}`;
-    const res = await request(url);
+    // A dropped connection (ECONNRESET) is retried once before giving up on this AWB for the hour.
+    const res = await request(url).catch((e) => (/ECONNRESET|ETIMEDOUT|socket hang up|reach the courier/i.test(e.message) ? request(url) : Promise.reject(e)));
     const xml = res.data.raw || "";
-    const { XMLParser } = require("fast-xml-parser");
-    const doc = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_", isArray: (t) => t === "ScanDetail" || t === "Shipment" }).parse(xml);
-    const sh0 = doc.ShipmentData?.Shipment?.[0];
+    // Blue Dart's tracking XML isn't always well-formed (stray "<" / "&" in remarks and addresses), which made a
+    // strict parser fail on many AWBs: read the few tags needed straight from the text instead.
+    const sh0 = bdShipment(xml);
     if (!sh0 || sh0.StatusType === "NF" || !sh0.Status) throw new Error(sh0?.Status || "No tracking yet");
     const scans = sh0.Scans?.ScanDetail || [];
     const events = scans.map((d) => ({ at: new Date(`${String(d.ScanDate).split("-").reverse().join("-")} ${d.ScanTime || ""}`.replace(/(\d{2})-([A-Za-z]{3})-(\d{4})/, "$1 $2 $3")), status: d.Scan, location: d.ScannedLocation }));
