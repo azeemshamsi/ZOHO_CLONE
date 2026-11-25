@@ -104,6 +104,7 @@ router.get(
       receiptsThisFy: round2(receiptsThisFy),
       fiscalYearStart: fy.from,
       months,
+      topCreditors: payAging.parties.filter((p) => p.net > 0).slice(0, 5).map((p) => ({ vendor: p.id, name: p.name, balance: p.net })),
       topDebtors: recvAging.parties.filter((p) => p.net > 0).slice(0, 5).map((p) => ({ customer: p.id, name: p.name, balance: p.net })),
       recentInvoices,
       counts: { customers: customerCount, items: itemCount, invoices: invoiceCount },

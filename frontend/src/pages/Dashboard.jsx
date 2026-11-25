@@ -293,6 +293,24 @@ export default function Dashboard() {
             </ul>
           )}
         </div>
+        <div className="card">
+          <div className="card-head">
+            <h3>Top Vendors by Dues</h3>
+            <span className="muted small">what you owe</span>
+          </div>
+          {!(d.topCreditors || []).length ? (
+            <p className="muted">Nothing owed to vendors.</p>
+          ) : (
+            <ul className="rank">
+              {d.topCreditors.map((t) => (
+                <li key={t.vendor}>
+                  <Link to={`/vendors/${t.vendor}`}>{t.name}</Link>
+                  <strong>{money(t.balance)}</strong>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       <div className="card">
