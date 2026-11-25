@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import api, { errMsg } from "../lib/api";
 import { date } from "../lib/format";
-import { Field, Modal, toast } from "./ui";
+import { Field, Modal, MoreMenu, toast } from "./ui";
 import Icon from "./Icon";
 
 const split = (s) =>
@@ -12,9 +12,9 @@ const split = (s) =>
     .filter(Boolean);
 
 // Print the same PDF that downloads (not the on-screen page): loaded in a hidden frame, then the print dialog.
-export async function printPdf(kind, id) {
+export async function printPdf(kind, id, thermal) {
   try {
-    const r = await api.get(`/documents/${kind}/${id}/pdf`, { responseType: "blob" });
+    const r = await api.get(`/documents/${kind}/${id}/pdf`, { responseType: "blob", params: thermal ? { thermal } : {} });
     const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
     const f = document.createElement("iframe");
     f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
@@ -35,6 +35,24 @@ export async function printPdf(kind, id) {
   } catch (e) {
     toast(errMsg(e), "error");
   }
+}
+
+// Print: A4, or roll paper for a direct thermal / receipt printer (2" or 3" wide).
+export function PrintMenu({ kind, id }) {
+  return (
+    <MoreMenu
+      label={
+        <>
+          <Icon name="print" size={16} /> Print
+        </>
+      }
+      items={[
+        { label: "A4 (full page)", onClick: () => printPdf(kind, id) },
+        { label: "Receipt printer — 3 inch (80 mm)", onClick: () => printPdf(kind, id, 3) },
+        { label: "Receipt printer — 2 inch (58 mm)", onClick: () => printPdf(kind, id, 2) },
+      ]}
+    />
+  );
 }
 
 // Download / open the server-made PDF (needs the auth header, so fetch as a blob).

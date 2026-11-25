@@ -285,8 +285,10 @@ async function documentPdf(org, d, meta) {
   if (meta.balance !== undefined) rows.push([meta.balanceLabel || "Balance Due", money(meta.balance, d.currency), true]);
   totals(doc, rows);
   // Terms: the document's own, else the company's default terms (Settings) — like Tally, which prints them at print time.
-  footerNotes(doc, d.total, d.customerNotes, d.terms || meta.defaultTerms || "", d.currency, d.exchangeRate);
+  // Amount in words and notes, then the authorised signatory, and the terms & conditions last (as in Tally).
+  footerNotes(doc, d.total, d.customerNotes, "", d.currency, d.exchangeRate);
   if (!meta.noSignatory) signatory(doc, org);
+  footerNotes(doc, null, "", d.terms || meta.defaultTerms || "", d.currency, d.exchangeRate);
   pageNumbers(doc, org);
   return toBuffer(doc);
 }
@@ -328,4 +330,117 @@ async function receiptPdf(org, p, { title, partyLabel, party, appliedLabel, appl
   return toBuffer(doc);
 }
 
-module.exports = { documentPdf, receiptPdf, inWords, money, fmtDate };
+/**
+ * Roll-paper (direct thermal / receipt printer) layout, 2" (58 mm) or 3" (80 mm) wide, one long page: company,
+ * document, customer, items (name, then qty x rate = amount), tax, total, amount in words, signatory, terms.
+ * Drawn twice: once to measure the length, once on a page of exactly that length.
+ */
+async function thermalPdf(org, d, meta, widthIn = 3) {
+  const PW = Math.round(Math.min(3, Math.max(2, widthIn)) * 72);
+  const draw = (doc) => {
+    const M = 8;
+    const W = PW - 2 * M;
+    const small = PW < 180;
+    const fs = small ? 6.8 : 7.6;
+    let y = 8;
+    const t = (s, o = {}) => {
+      if (!s && s !== 0) return;
+      doc.font(o.b ? "b" : "r").fontSize(o.size || fs).fillColor("#000").text(String(s), M + (o.x || 0), y, { width: (o.w || W) - (o.x || 0), align: o.align || "left" });
+      y = doc.y + (o.gap ?? 1);
+    };
+    const lr = (l, r, o = {}) => {
+      doc.font(o.b ? "b" : "r").fontSize(o.size || fs).fillColor("#000");
+      const rw = doc.widthOfString(String(r)) + 2;
+      const top = y;
+      doc.text(String(l), M, top, { width: W - rw - 4 });
+      const yl = doc.y;
+      doc.text(String(r), M, top, { width: W, align: "right" });
+      y = Math.max(yl, doc.y) + (o.gap ?? 1);
+    };
+    const rule = (dash) => {
+      y += 2;
+      doc.moveTo(M, y).lineTo(PW - M, y).lineWidth(0.6).strokeColor("#000");
+      if (dash) doc.dash(2, { space: 2 });
+      doc.stroke().undash();
+      y += 4;
+    };
+    t(org.name, { b: true, size: fs + 3, align: "center" });
+    t(addrLines(org.address).join(", "), { align: "center" });
+    t([org.phone ? `Ph: ${org.phone}` : "", org.email].filter(Boolean).join("  "), { align: "center" });
+    if (org.gstin) t(`GSTIN: ${org.gstin}`, { b: true, align: "center" });
+    rule();
+    t(meta.title, { b: true, size: fs + 1.5, align: "center", gap: 2 });
+    lr(`No: ${meta.number || ""}`, (meta.facts.find(([k]) => /date/i.test(k)) || [, ""])[1]);
+    for (const [k, v] of meta.facts.filter(([k, v]) => v && !/date/i.test(k) && !/^Terms$/.test(k))) lr(/[:#]$/.test(k) ? k : `${k}:`, v);
+    rule(true);
+    const party = d.vendorName ? "vendor" : "customer";
+    t(`${meta.partyLabel}: ${d[`${party}Name`] || ""}`, { b: true });
+    const a = d.billingAddress || {};
+    t([a.street, a.city, a.pincode].filter(Boolean).join(", "));
+    if (d[`${party}Gstin`]) t(`GSTIN: ${d[`${party}Gstin`]}`);
+    if (d.placeOfSupply) t(`Place of supply: ${stateName(d.placeOfSupply)} (${d.placeOfSupply})`);
+    rule();
+    lr("Item", "Amount", { b: true });
+    rule(true);
+    (d.lineItems || []).forEach((l, i) => {
+      t(`${i + 1}. ${l.name}`, { b: true, gap: 0 });
+      const extra = [l.hsnSac ? `HSN ${l.hsnSac}` : "", l.taxRate ? `GST ${l.taxRate}%` : "", l.discount ? `Disc ${l.discount}` : ""].filter(Boolean).join(" · ");
+      lr(`  ${l.quantity}${l.unit ? " " + l.unit : ""} x ${num(l.rate)}${extra && !small ? `  ${extra}` : ""}`, num(l.amount), { gap: small && extra ? 0 : 2 });
+      if (small && extra) t(`  ${extra}`, { size: fs - 0.8, gap: 2 });
+    });
+    rule();
+    lr("Sub Total", num(d.subTotal));
+    if (d.isInterState) lr("IGST", num(d.igst));
+    else {
+      lr("CGST", num(d.cgst));
+      lr("SGST", num(d.sgst));
+    }
+    if (d.shippingCharge) lr("Shipping", num(d.shippingCharge));
+    if (d.adjustment) lr("Adjustment / Round off", num(d.adjustment));
+    rule(true);
+    lr("TOTAL", money(d.total, d.currency), { b: true, size: fs + 2.5, gap: 2 });
+    if (meta.paid) lr("Paid / Credits", `(-) ${num(meta.paid)}`);
+    if (meta.balance !== undefined && meta.balance !== d.total) lr(meta.balanceLabel || "Balance Due", money(meta.balance, d.currency), { b: true });
+    t(inWords(d.total), { size: fs - 0.6, gap: 3 });
+    if (d.customerNotes) t(d.customerNotes, { size: fs - 0.4, gap: 3 });
+    if (!meta.noSignatory) {
+      rule(true);
+      t(`For ${org.name}`, { b: true, align: "right", gap: 2 });
+      const img = org.signatureImage || "";
+      let room = 24; // space to sign by hand
+      if (/^data:image\/(png|jpe?g);base64,/.test(img)) {
+        try {
+          doc.image(Buffer.from(img.replace(/^data:.*?;base64,/, ""), "base64"), PW - M - 110, y, { fit: [110, 36], align: "right" });
+          room = 38;
+        } catch {
+          /* unreadable image */
+        }
+      }
+      y += room;
+      t(org.signatoryLabel || "Authorised Signatory", { align: "right", gap: 3 });
+    }
+    const terms = d.terms || meta.defaultTerms || "";
+    if (terms) {
+      rule(true);
+      t("Terms & Conditions", { b: true, size: fs - 0.4 });
+      t(terms, { size: fs - 0.8, gap: 3 });
+    }
+    rule(true);
+    t("Thank you!", { align: "center", size: fs, gap: 0 });
+    return y + 10;
+  };
+  const mk = (h) => {
+    const doc = new PDFDocument({ size: [PW, h], margin: 0 });
+    doc.registerFont("r", FONT);
+    doc.registerFont("b", BOLD);
+    return doc;
+  };
+  const probe = mk(14400);
+  const h = Math.ceil(draw(probe));
+  probe.end();
+  const doc = mk(Math.max(h, 144));
+  draw(doc);
+  return toBuffer(doc);
+}
+
+module.exports = { thermalPdf, documentPdf, receiptPdf, inWords, money, fmtDate };

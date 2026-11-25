@@ -10,7 +10,7 @@ import { money, amount, date, isoDate, round2 } from "../lib/format";
 import { PageHeader, Spinner, toast, Status, Confirm, Modal, MoreMenu, Field, invoiceStatus } from "../components/ui";
 import { DocList, DocForm, DocPaper, MiniTable } from "../components/SalesDoc";
 import Icon from "../components/Icon";
-import { DocEmail, printPdf } from "../components/EmailDoc";
+import { DocEmail, PrintMenu } from "../components/EmailDoc";
 import { GstPanel } from "../components/GstPanel";
 import BankAccountSelect from "../components/BankAccountSelect";
 
@@ -246,9 +246,7 @@ export function CreditNoteView() {
             <Icon name="edit" size={16} /> Edit
           </Link>
         )}
-        <button className="btn" onClick={() => printPdf("creditNote", id)}>
-          <Icon name="print" size={16} /> Print / PDF
-        </button>
+        <PrintMenu kind="creditNote" id={id} />
         <DocEmail kind="creditNote" id={id} onSent={load} />
         {cn.status === "draft" && (
           <button className="btn btn-primary" onClick={() => act(() => api.post(`/credit-notes/${id}/open`), "Credit note opened")}>

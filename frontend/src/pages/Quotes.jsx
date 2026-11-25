@@ -9,7 +9,7 @@ import { money, date } from "../lib/format";
 import { PageHeader, Spinner, toast, Status, Confirm, MoreMenu } from "../components/ui";
 import { DocList, DocForm, DocPaper } from "../components/SalesDoc";
 import Icon from "../components/Icon";
-import { DocEmail, printPdf } from "../components/EmailDoc";
+import { DocEmail, PrintMenu } from "../components/EmailDoc";
 
 const K = KINDS.quote;
 
@@ -93,9 +93,7 @@ export function QuoteView() {
             <Icon name="edit" size={16} /> Edit
           </Link>
         )}
-        <button className="btn" onClick={() => printPdf("quote", id)}>
-          <Icon name="print" size={16} /> Print / PDF
-        </button>
+        <PrintMenu kind="quote" id={id} />
         <DocEmail kind="quote" id={id} onSent={load} />
         {q.status === "draft" && (
           <button className="btn" onClick={() => setStatus("sent", "Marked as sent")}>

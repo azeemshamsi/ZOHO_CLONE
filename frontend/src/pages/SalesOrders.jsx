@@ -9,7 +9,7 @@ import { money, date } from "../lib/format";
 import { PageHeader, Spinner, toast, Status, Confirm, MoreMenu } from "../components/ui";
 import { DocList, DocForm, DocPaper } from "../components/SalesDoc";
 import Icon from "../components/Icon";
-import { DocEmail, printPdf } from "../components/EmailDoc";
+import { DocEmail, PrintMenu } from "../components/EmailDoc";
 
 const K = KINDS.salesOrder;
 
@@ -89,9 +89,7 @@ export function SalesOrderView() {
             <Icon name="edit" size={16} /> Edit
           </Link>
         )}
-        <button className="btn" onClick={() => printPdf("salesOrder", id)}>
-          <Icon name="print" size={16} /> Print / PDF
-        </button>
+        <PrintMenu kind="salesOrder" id={id} />
         <DocEmail kind="salesOrder" id={id} onSent={load} />
         {so.status === "draft" && (
           <button className="btn" onClick={() => setStatus("confirmed", "Sales order confirmed")}>
