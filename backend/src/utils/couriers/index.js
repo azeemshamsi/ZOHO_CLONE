@@ -453,6 +453,8 @@ const bluedart = {
       // What Blue Dart said, in a few words (its own message when there is one), so "no tracking" can be told apart
       // from a wrong login / key or an AWB under another account.
       const said = String(xml).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+      const tags = [...new Set((String(xml).match(/<[A-Za-z][\w:.-]*/g) || []).map((t) => t.slice(1)))].slice(0, 45).join(",");
+      console.error(`[tracking] Blue Dart ${sh.awb} tags: ${tags}`);
       throw new Error(sh0?.Status || `No tracking yet${said ? ` (Blue Dart: ${said})` : ""}`);
     }
     const scans = sh0.Scans?.ScanDetail || [];
