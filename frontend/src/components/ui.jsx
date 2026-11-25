@@ -145,10 +145,27 @@ export function useDebounced(value, ms = 250) {
   return v;
 }
 
+// A dialog opened from inside another (e.g. Reverse Pickup from an order) must sit on top of it, whatever
+// order they appear in the page: each one stacks above those opened before it.
+let modalDepth = 0;
+const useStack = (open) => {
+  const [z, setZ] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    modalDepth++;
+    setZ(50 + Math.min(modalDepth, 40));
+    return () => {
+      modalDepth--;
+    };
+  }, [open]);
+  return z ? { zIndex: z } : undefined;
+};
+
 export function Modal({ open, title, children, footer, onClose, wide }) {
+  const stack = useStack(open);
   if (!open) return null;
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" style={stack} onClick={onClose}>
       <div className={`modal ${wide ? "modal-wide" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>{title}</h3>
@@ -164,9 +181,10 @@ export function Modal({ open, title, children, footer, onClose, wide }) {
 }
 
 export function Confirm({ open, title, text, confirmLabel = "Delete", onConfirm, onCancel, danger = true }) {
+  const stack = useStack(open);
   if (!open) return null;
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
+    <div className="modal-backdrop" style={stack} onClick={onCancel}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>{title}</h3>
         <p className="muted">{text}</p>
