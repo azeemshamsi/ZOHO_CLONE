@@ -9,6 +9,17 @@ const { ah, validate } = require("../utils/http");
 
 const org = (req) => Organization.findById(req.org).select("+signatureImage");
 
+// Receipt / thermal printer page (HTML sized to the roll), printed from the browser.
+router.get(
+  "/:kind/:id/receipt",
+  ah(async (req, res) => {
+    const o = await org(req);
+    const { d } = await load(o, req.params.kind, req.params.id);
+    const w = Math.min(3, Math.max(2, Number(req.query.width) || 3));
+    res.send({ html: await pdfFor(o, req.params.kind, d, { thermal: w, html: true }) });
+  })
+);
+
 // PDF to view or download.
 router.get(
   "/:kind/:id/pdf",

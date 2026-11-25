@@ -1,7 +1,7 @@
 /**
  * Everything needed to turn a document into a PDF and an email.
  */
-const { documentPdf, thermalPdf, receiptPdf, money, fmtDate } = require("./pdf");
+const { documentPdf, thermalPdf, thermalHtml, receiptPdf, money, fmtDate } = require("./pdf");
 
 const M = (name) => require(`../models/${name}`);
 const settleInvoice = (inv) => require("./salesDoc").settleInvoice(inv);
@@ -82,6 +82,7 @@ async function pdfFor(org, kind, d, opts = {}) {
     return receiptPdf(org, d, { title: cfg.title, partyLabel: cfg.partyLabel || "Received From", party: d[`${cfg.party}Name`], appliedLabel: cfg.appliedLabel, applied: cfg.applied(d) });
   }
   const bal = cfg.balance ? cfg.balance(d) : {};
+  if (opts.thermal && opts.html) return thermalHtml(org, d, { title: cfg.title, number: d[cfg.number], partyLabel: cfg.partyLabel || "Bill To", facts: cfg.facts(d), noSignatory: kind === "bill", defaultTerms: ["invoice", "quote", "salesOrder"].includes(kind) ? org.defaultTerms || "" : "", ...bal }, opts.thermal);
   if (opts.thermal) return thermalPdf(org, d, { title: cfg.title, number: d[cfg.number], partyLabel: cfg.partyLabel || "Bill To", facts: cfg.facts(d), noSignatory: kind === "bill", defaultTerms: ["invoice", "quote", "salesOrder"].includes(kind) ? org.defaultTerms || "" : "", ...bal }, opts.thermal);
   return documentPdf(org, d, { title: cfg.title, number: d[cfg.number], partyLabel: cfg.partyLabel || "Bill To", facts: cfg.facts(d), noSignatory: kind === "bill", defaultTerms: ["invoice", "quote", "salesOrder"].includes(kind) ? org.defaultTerms || "" : "", ...bal });
 }

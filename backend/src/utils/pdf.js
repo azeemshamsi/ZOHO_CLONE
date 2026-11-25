@@ -443,4 +443,67 @@ async function thermalPdf(org, d, meta, widthIn = 3) {
   return toBuffer(doc);
 }
 
-module.exports = { thermalPdf, documentPdf, receiptPdf, inWords, money, fmtDate };
+/**
+ * The same roll layout as HTML, for printing from the browser: the page is sized to the roll (2"/3" wide, exactly as
+ * long as the content), so the printer driver prints it at full size instead of shrinking a PDF to its paper.
+ */
+function thermalHtml(org, d, meta, widthIn = 3) {
+  const w = Math.min(3, Math.max(2, Number(widthIn) || 3));
+  const small = w < 2.5;
+  const e = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const row = (l, r, cls = "") => `<div class="lr ${cls}"><span>${e(l)}</span><span>${e(r)}</span></div>`;
+  const party = d.vendorName ? "vendor" : "customer";
+  const a = d.billingAddress || {};
+  const date = (meta.facts.find(([k]) => /date/i.test(k)) || [, ""])[1];
+  const facts = meta.facts.filter(([k, v]) => v && !/date/i.test(k) && !/^Terms$/.test(k));
+  const items = (d.lineItems || [])
+    .map((l, i) => {
+      const extra = [l.hsnSac ? `HSN ${l.hsnSac}` : "", l.taxRate ? `GST ${l.taxRate}%` : "", l.discount ? `Disc ${l.discount}` : ""].filter(Boolean).join(" · ");
+      return `<div class="it"><div class="b">${i + 1}. ${e(l.name)}</div>${row(`${l.quantity}${l.unit ? " " + l.unit : ""} × ${num(l.rate)}`, num(l.amount))}${extra ? `<div class="sm">${e(extra)}</div>` : ""}</div>`;
+    })
+    .join("");
+  const img = /^data:image\/(png|jpe?g);base64,/.test(org.signatureImage || "") ? `<img class="sig" src="${org.signatureImage}" alt="">` : `<div class="signspace"></div>`;
+  const terms = d.terms || meta.defaultTerms || "";
+  const tax = d.isInterState ? row("IGST", num(d.igst)) : row("CGST", num(d.cgst)) + row("SGST", num(d.sgst));
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${e(meta.title)} ${e(meta.number)}</title><style>
+@page { size: ${w}in 200mm; margin: 0; }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+body { width: ${w}in; padding: 2mm ${small ? 1.5 : 2.5}mm 4mm; font-family: Arial, "Helvetica Neue", Helvetica, sans-serif; font-size: ${small ? 9 : 11}pt; line-height: 1.25; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.c { text-align: center; } .r { text-align: right; } .b { font-weight: 700; }
+.h1 { font-size: ${small ? 12.5 : 15}pt; font-weight: 800; }
+.h2 { font-size: ${small ? 10.5 : 12.5}pt; font-weight: 800; margin: 1mm 0; }
+.sm { font-size: ${small ? 7.5 : 9}pt; }
+.lr { display: flex; justify-content: space-between; gap: 2mm; } .lr span:last-child { text-align: right; white-space: nowrap; }
+.tot { font-size: ${small ? 12 : 14.5}pt; font-weight: 800; margin: 1mm 0; }
+hr { border: 0; border-top: 1px solid #000; margin: 1.5mm 0; } hr.d { border-top-style: dashed; }
+.it { margin: 0 0 1.2mm; }
+.sig { display: block; margin-left: auto; max-width: 45mm; max-height: 15mm; } .signspace { height: 10mm; }
+.pre { white-space: pre-wrap; }
+</style></head><body>
+<div class="c h1">${e(org.name)}</div>
+<div class="c sm">${e(addrLines(org.address).join(", "))}</div>
+<div class="c sm">${e([org.phone ? `Ph: ${org.phone}` : "", org.email].filter(Boolean).join("  "))}</div>
+${org.gstin ? `<div class="c b">GSTIN: ${e(org.gstin)}</div>` : ""}
+<hr><div class="c h2">${e(meta.title)}</div>
+${row(`No: ${meta.number || ""}`, date)}
+${facts.map(([k, v]) => row(/[:#]$/.test(k) ? k : `${k}:`, v)).join("")}
+<hr class="d"><div class="b">${e(meta.partyLabel)}: ${e(d[`${party}Name`] || "")}</div>
+${[a.street, a.city, a.pincode].filter(Boolean).length ? `<div class="sm">${e([a.street, a.city, a.pincode].filter(Boolean).join(", "))}</div>` : ""}
+${d[`${party}Gstin`] ? `<div class="sm">GSTIN: ${e(d[`${party}Gstin`])}</div>` : ""}
+${d.placeOfSupply ? `<div class="sm">Place of supply: ${e(stateName(d.placeOfSupply))} (${e(d.placeOfSupply)})</div>` : ""}
+<hr>${row("Item", "Amount", "b")}<hr class="d">${items}<hr>
+${row("Sub Total", num(d.subTotal))}${tax}
+${d.shippingCharge ? row("Shipping", num(d.shippingCharge)) : ""}${d.adjustment ? row("Adjustment / Round off", num(d.adjustment)) : ""}
+<hr class="d">${row("TOTAL", money(d.total, d.currency), "tot")}
+${meta.paid ? row("Paid / Credits", `(-) ${num(meta.paid)}`) : ""}
+${meta.balance !== undefined && meta.balance !== d.total ? row(meta.balanceLabel || "Balance Due", money(meta.balance, d.currency), "b") : ""}
+<div class="sm">${e(inWords(d.total))}</div>
+${d.customerNotes ? `<div class="sm pre" style="margin-top:1mm">${e(d.customerNotes)}</div>` : ""}
+${meta.noSignatory ? "" : `<hr class="d"><div class="r b">For ${e(org.name)}</div>${img}<div class="r">${e(org.signatoryLabel || "Authorised Signatory")}</div>`}
+${terms ? `<hr class="d"><div class="b sm">Terms &amp; Conditions</div><div class="sm pre">${e(terms)}</div>` : ""}
+<hr class="d"><div class="c">Thank you!</div>
+</body></html>`;
+}
+
+module.exports = { thermalHtml, thermalPdf, documentPdf, receiptPdf, inWords, money, fmtDate };
