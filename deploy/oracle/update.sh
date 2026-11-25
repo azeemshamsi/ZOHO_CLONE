@@ -5,7 +5,14 @@ cd /opt/ordexago
 git fetch --quiet origin main
 if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] && [ "${1:-}" != "--force" ]; then echo "Already up to date"; exit 0; fi
 git reset --hard origin/main
+# Keep the previous builds' files for a week: pages opened before this update still find their scripts
+# (otherwise "Failed to fetch dynamically imported module" until they reload).
+OLD=/opt/ordexago/.old-assets
+mkdir -p "$OLD"
+[ -d frontend/dist/assets ] && cp -n frontend/dist/assets/* "$OLD"/ 2>/dev/null || true
 npm run build
+cp -n "$OLD"/* frontend/dist/assets/ 2>/dev/null || true
+find "$OLD" -type f -mtime +7 -delete 2>/dev/null || true
 # Allow big imports (older setups had a 50 MB limit).
 if sudo grep -q "client_max_body_size 50m" /etc/nginx/sites-available/ordexago 2>/dev/null; then
   sudo sed -i 's/client_max_body_size 50m;/client_max_body_size 100m;/' /etc/nginx/sites-available/ordexago && sudo nginx -t && sudo systemctl reload nginx

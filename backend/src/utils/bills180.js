@@ -19,9 +19,33 @@ async function bills180(org) {
   const Vendor = require("../models/Vendor");
   const ids = [...new Set(docs.filter((b) => !b.vendorGstin && b.vendor).map((b) => String(b.vendor)))];
   const vGstin = new Map(ids.length ? (await Vendor.find({ _id: { $in: ids } }, { gstin: 1 }).lean()).map((v) => [String(v._id), v.gstin || ""]) : []);
-  const rows = [];
+  // As Tally: what's owed is the supplier's ledger balance. Bills settled outside bill-wise allocation (journals,
+  // debit notes, Amazon / Flipkart settlements) still show a balance on the bill, so the ledger's payable is laid
+  // on the newest bills first; older ones count as paid. A supplier whose ledger is nil owes nothing.
+  const owed = await ledgerPayables(org, [...new Set(docs.map((b) => String(b.vendor || "")).filter(Boolean))]);
+  const eff = new Map();
+  const byVendor = new Map();
   for (const b of docs) {
-    if (!(b.balance > 0)) continue;
+    const v = String(b.vendor || "");
+    if (!byVendor.has(v)) byVendor.set(v, []);
+    byVendor.get(v).push(b);
+  }
+  for (const [v, list] of byVendor) {
+    if (!v || !owed.has(v)) {
+      for (const b of list) eff.set(String(b._id), b.balance);
+      continue;
+    }
+    let left = Math.max(0, owed.get(v));
+    for (const b of list.sort((x, y) => new Date(y.date) - new Date(x.date))) {
+      const e = r2(Math.min(b.balance > 0 ? b.balance : 0, left));
+      left = r2(left - e);
+      eff.set(String(b._id), e);
+    }
+  }
+  const rows = [];
+  for (const b0 of docs) {
+    const b = { ...b0, balance: eff.has(String(b0._id)) ? eff.get(String(b0._id)) : b0.balance };
+    if (!(b.balance > 0.009)) continue;
     // Bill dates are calendar dates (UTC midnight; imported ones may be India midnight): round to whole days.
     const age = Math.round((today - new Date(b.date)) / DAY);
     if (age <= WARN) continue;
@@ -51,4 +75,22 @@ async function bills180(org) {
   return { rows, summary: { over: { count: over.length, balance: tot(over, "balance"), itc: tot(over, "itc") }, soon: { count: soon.length, balance: tot(soon, "balance"), itc: tot(soon, "itc") } } };
 }
 
-module.exports = { bills180, LIMIT, WARN };
+// Each supplier's payable in the books (credit balance on Accounts Payable), from all entries to date.
+async function ledgerPayables(org, vendorIds) {
+  const out = new Map();
+  if (!vendorIds.length) return out;
+  const want = new Set(vendorIds);
+  const { buildEntries } = require("./ledger");
+  for (const e of await buildEntries(org, {})) {
+    for (const l of e.lines || []) {
+      if (l.account !== "ap" || !l.partyId) continue;
+      const v = String(l.partyId);
+      if (!want.has(v)) continue;
+      out.set(v, r2((out.get(v) || 0) + (l.credit || 0) - (l.debit || 0)));
+    }
+  }
+  for (const v of want) if (!out.has(v)) out.set(v, 0);
+  return out;
+}
+
+module.exports = { bills180, ledgerPayables, LIMIT, WARN };

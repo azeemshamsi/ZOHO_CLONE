@@ -6,6 +6,22 @@ import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 import "./styles.css";
 
+// After an update, a page opened before it asks for files that were replaced ("Failed to fetch dynamically
+// imported module"): load the new version instead (once a minute at most, so it can't loop).
+const reloadForUpdate = () => {
+  try {
+    const last = Number(sessionStorage.getItem("chunkReload") || 0);
+    if (Date.now() - last < 60000) return false;
+    sessionStorage.setItem("chunkReload", String(Date.now()));
+  } catch {}
+  window.location.reload();
+  return true;
+};
+window.__reloadForUpdate = reloadForUpdate;
+window.addEventListener("vite:preloadError", (e) => {
+  if (reloadForUpdate()) e.preventDefault();
+});
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <BrowserRouter>

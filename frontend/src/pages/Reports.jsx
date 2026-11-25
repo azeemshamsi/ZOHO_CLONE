@@ -1163,6 +1163,10 @@ export function ReportPage() {
               try {
                 await f();
               } catch (e) {
+                if (/dynamically imported module|Importing a module script failed|Loading chunk/i.test(e.message || "")) {
+                  toast("OrdexaGo was just updated — reloading the page, then try again", "success");
+                  if (window.__reloadForUpdate?.()) return;
+                }
                 toast(e.message || "Couldn't make the file", "error");
               }
             };
