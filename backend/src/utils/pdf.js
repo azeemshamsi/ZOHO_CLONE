@@ -181,6 +181,13 @@ function footerNotes(doc, total, notes, terms, cur = "INR", rate = 1) {
     ["Terms & Conditions", terms],
   ]) {
     if (!text) continue;
+    // Keep a block together: start it on a new page rather than split a short one across two.
+    doc.font("r").fontSize(8.5);
+    const h = doc.heightOfString(text, { width: W }) + 18;
+    if (doc.y + h > doc.page.height - doc.page.margins.bottom && h < doc.page.height / 2) {
+      doc.addPage();
+      doc.y = 40;
+    }
     doc.font("r").fontSize(8).fillColor(MUTED).text(label, L, doc.y + 4);
     doc.font("r").fontSize(8.5).fillColor("#374151").text(text, L, doc.y + 1, { width: W });
   }
@@ -277,7 +284,8 @@ async function documentPdf(org, d, meta) {
   if (meta.paid) rows.push(["Payments / Credits", `(-) ${num(meta.paid)}`]);
   if (meta.balance !== undefined) rows.push([meta.balanceLabel || "Balance Due", money(meta.balance, d.currency), true]);
   totals(doc, rows);
-  footerNotes(doc, d.total, d.customerNotes, d.terms, d.currency, d.exchangeRate);
+  // Terms: the document's own, else the company's default terms (Settings) — like Tally, which prints them at print time.
+  footerNotes(doc, d.total, d.customerNotes, d.terms || meta.defaultTerms || "", d.currency, d.exchangeRate);
   if (!meta.noSignatory) signatory(doc, org);
   pageNumbers(doc, org);
   return toBuffer(doc);
