@@ -274,8 +274,9 @@ function bdShipment(xml) {
   const block = (String(xml).match(/<Shipment[\s>][\s\S]*?<\/Shipment>/) || [])[0];
   if (!block) return null;
   const scans = [...block.matchAll(/<ScanDetail>([\s\S]*?)<\/ScanDetail>/g)].map((m) => ({ Scan: tag(m[1], "Scan"), ScanDate: tag(m[1], "ScanDate"), ScanTime: tag(m[1], "ScanTime"), ScannedLocation: tag(m[1], "ScannedLocation") }));
-  // Status fields sit before the scans; read them from the part before <Scans> so a scan's own tags can't match.
-  const head = block.split(/<Scans[\s>]/)[0];
+  // Status fields: read them from the shipment with its scans taken out (they can come before or after <Scans>),
+  // so a scan's own tags can't match.
+  const head = block.replace(/<Scans[\s>][\s\S]*?<\/Scans>/, "").replace(/<ScanDetail>[\s\S]*?<\/ScanDetail>/g, "");
   return { Status: tag(head, "Status"), StatusType: tag(head, "StatusType"), Scans: { ScanDetail: scans } };
 }
 
@@ -455,7 +456,14 @@ const bluedart = {
       throw new Error(sh0?.Status || `No tracking yet${said ? ` (Blue Dart: ${said})` : ""}`);
     }
     const scans = sh0.Scans?.ScanDetail || [];
-    const events = scans.map((d) => ({ at: new Date(`${String(d.ScanDate).split("-").reverse().join("-")} ${d.ScanTime || ""}`.replace(/(\d{2})-([A-Za-z]{3})-(\d{4})/, "$1 $2 $3")), status: d.Scan, location: d.ScannedLocation }));
+    // Dates come as "25-Nov-2026" or "25 November 2026", times as "23:15" or "2315" (India time).
+    const when = (d, t) => {
+      const day = String(d || "").replace(/-/g, " ");
+      const tm = /^\d{3,4}$/.test(String(t || "").trim()) ? String(t).trim().padStart(4, "0").replace(/(\d{2})(\d{2})/, "$1:$2") : String(t || "").trim();
+      const v = new Date(`${day} ${tm || "00:00"} GMT+0530`);
+      return Number.isNaN(+v) ? null : v;
+    };
+    const events = scans.map((d) => ({ at: when(d.ScanDate, d.ScanTime), status: d.Scan, location: d.ScannedLocation }));
     let status = normStatus(sh0.Status);
     if (sh0.StatusType === "DL") status = /rto|return/i.test(sh0.Status) ? "rto" : "delivered";
     if (sh0.StatusType === "RT") status = "rto";
