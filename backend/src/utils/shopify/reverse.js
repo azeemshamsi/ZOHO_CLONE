@@ -76,7 +76,28 @@ async function bookReverse(ctx, order, { accountId, reason = "", note = "", pkg 
   order.remarks = `${order.remarks ? `${order.remarks}\n` : ""}Reverse pickup ${out.courierName} ${out.awb} booked ${new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}${reason ? ` (${reason})` : ""}`;
   order.markModified("reverse");
   await order.save();
+  const sw = await awbToShopify(order);
+  if (sw) warning = [warning, sw].filter(Boolean).join(" · ");
   return { reverse: order.reverse, warning };
+}
+
+// Puts the reverse AWB on the Shopify return (and the order's Return AWB metafield). Returns a warning, or "".
+async function awbToShopify(order) {
+  const rv = order.reverse;
+  if (!rv?.awb || rv.shopifyAwb === rv.awb || (order.channel && order.channel !== "shopify")) return "";
+  const ShopifyStore = require("../../models/ShopifyStore");
+  const store = await ShopifyStore.findOne({ organization: order.organization });
+  if (!store?.connected) return "";
+  try {
+    await require("./returns").returnTrackingToShopify(store, order);
+    rv.shopifyAwb = rv.awb;
+    rv.shopifyAwbError = "";
+  } catch (e) {
+    rv.shopifyAwbError = e.message;
+  }
+  order.markModified("reverse");
+  await order.save();
+  return rv.shopifyAwbError ? `AWB not saved in Shopify: ${rv.shopifyAwbError}` : "";
 }
 
 async function cancelReverse(order, { force = false } = {}) {
@@ -107,6 +128,7 @@ async function cancelReverse(order, { force = false } = {}) {
 async function trackReverse(order) {
   const rv = order.reverse;
   if (!rv?.awb || !rv.account || rv.deliveredAt) return null;
+  if (rv.shopifyAwb !== rv.awb) await awbToShopify(order); // booked before this was added, or it failed then
   const acc = await CourierAccount.findById(rv.account);
   if (!acc || acc.carrier === "custom") return null;
   const t = await CARRIERS[acc.carrier].track(acc, rv);

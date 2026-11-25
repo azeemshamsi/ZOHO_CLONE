@@ -1987,6 +1987,14 @@ function ReverseBox({ o, readOnly, onChanged }) {
           ""
         )}
       </div>
+      {rv.shopifyAwb === rv.awb ? (
+        <div className="small muted">AWB saved on the Shopify return</div>
+      ) : rv.shopifyAwbError ? (
+        <div className="small text-red">
+          AWB not saved in Shopify: {rv.shopifyAwbError} (Refresh tracking
+          tries again)
+        </div>
+      ) : null}
       {rv.deliveredAt && (
         <div className="small">
           Check the product, then close the return (Scan Returns, or Mark Return

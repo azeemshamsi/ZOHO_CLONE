@@ -45,6 +45,39 @@ async function createInShopify(store, order, note) {
   return r.return.id;
 }
 
+// The reverse pickup's AWB in Shopify: as the return's tracking (Order → Returns, with the tracking link), and in
+// the order's "Return AWB" metafield (courier + AWB) for searching later. Updated if the AWB changes.
+async function returnTrackingToShopify(store, order) {
+  const rv = order.reverse || {};
+  if (!rv.awb || !order.shopifyId) return { skipped: true };
+  const tracking = { number: String(rv.awb), ...(/^https?:\/\//.test(rv.trackingUrl || "") ? { url: rv.trackingUrl } : {}) };
+  const errs = [];
+  if (order.shopifyReturnId) {
+    const d = await gql(
+      store,
+      `query($id: ID!) { return(id: $id) { reverseFulfillmentOrders(first: 5) { nodes { id reverseDeliveries(first: 5) { nodes { id } } } } } }`,
+      { id: order.shopifyReturnId },
+    );
+    const rfo = d.return?.reverseFulfillmentOrders?.nodes?.[0];
+    if (rfo) {
+      const existing = rfo.reverseDeliveries?.nodes?.[0];
+      const r = existing
+        ? await gql(store, `mutation($id: ID!, $t: ReverseDeliveryTrackingInput) { reverseDeliveryShippingUpdate(reverseDeliveryId: $id, trackingInput: $t, notifyCustomer: false) { userErrors { message } } }`, { id: existing.id, t: tracking })
+        : await gql(store, `mutation($id: ID!, $t: ReverseDeliveryTrackingInput) { reverseDeliveryCreateWithShipping(reverseFulfillmentOrderId: $id, reverseDeliveryLineItems: [], trackingInput: $t, notifyCustomer: false) { userErrors { message } } }`, { id: rfo.id, t: tracking });
+      const ue = (r.reverseDeliveryShippingUpdate || r.reverseDeliveryCreateWithShipping)?.userErrors || [];
+      if (ue.length) errs.push(ue.map((e) => e.message).join("; "));
+    } else errs.push("the Shopify return has nothing to ship back");
+  }
+  const m = await gql(
+    store,
+    `mutation($m: [MetafieldsSetInput!]!) { metafieldsSet(metafields: $m) { userErrors { message } } }`,
+    { m: [{ ownerId: order.shopifyId, namespace: "ordexago", key: "return_awb", type: "single_line_text_field", value: `${rv.courierName || ""} ${rv.awb}`.trim() }] },
+  );
+  if (m.metafieldsSet?.userErrors?.length) errs.push(m.metafieldsSet.userErrors.map((e) => e.message).join("; "));
+  if (errs.length) throw new Error(errs.join(" · "));
+  return { ok: true };
+}
+
 async function closeInShopify(store, id) {
   const r = await gql(store, `mutation($id: ID!) { returnClose(id: $id) { return { id status } userErrors { field message } } }`, { id });
   const errs = r.returnClose?.userErrors || [];
@@ -183,4 +216,5 @@ async function findByCode(org, codes) {
   return found[0];
 }
 
-module.exports = { markReturnCreated, markReturnClosed, findByCode };
+module.exports = {
+  returnTrackingToShopify, markReturnCreated, markReturnClosed, findByCode };
