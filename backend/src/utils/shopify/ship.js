@@ -1309,12 +1309,18 @@ async function trackAll() {
   const customs = new Map(
     (await CourierAccount.find({ carrier: "custom" }, { options: 1 }).lean()).map((a) => [String(a._id), !!a.options?.trackWith]),
   );
+  let ok = 0;
+  let failed = 0;
   for (const o of orders) {
     if (o.shipment?.carrier === "custom" && !customs.get(String(o.shipment.account))) continue;
-    await trackOrder(o).catch((e) =>
-      console.error(`[tracking] ${o.name} (${o.shipment?.awb}): ${e.message}`),
-    );
+    await trackOrder(o)
+      .then(() => ok++)
+      .catch((e) => {
+        failed++;
+        console.error(`[tracking] ${o.name} (${o.shipment?.carrier} ${o.shipment?.awb}): ${e.message}`);
+      });
   }
+  console.log(`[tracking] run: ${orders.length} order(s) — ${ok} checked, ${failed} failed`);
   await require("./reverse")
     .trackAllReverse()
     .catch(() => {});

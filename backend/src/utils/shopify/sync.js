@@ -288,7 +288,11 @@ async function upsert(orgId, n, toClose = []) {
     await ShopifyOrder.create(doc);
     return "created";
   }
-  if (existing.shopifyUpdatedAt && n.shopifyUpdatedAt <= existing.shopifyUpdatedAt) return "same";
+  // Same update already read — unless something that matters differs (Shopify can report a cancellation with the
+  // same updatedAt as the edit just before it, e.g. #201295: items removed, then cancelled, both at 05:12:51).
+  const sameCancel = !!existing.cancelledAt === !!n.cancelledAt;
+  if (existing.shopifyUpdatedAt && n.shopifyUpdatedAt < existing.shopifyUpdatedAt) return "same";
+  if (existing.shopifyUpdatedAt && +n.shopifyUpdatedAt === +existing.shopifyUpdatedAt && sameCancel && existing.fulfillmentStatus === n.fulfillmentStatus) return "same";
   const wasFulfilled = existing.fulfillmentStatus === "FULFILLED" || existing.fulfillmentStatus === "PARTIALLY_FULFILLED";
   const prevReturn = existing.returnStatus || "";
   Object.assign(existing, n);
@@ -368,12 +372,35 @@ async function syncStore(store, { full = false } = {}) {
       await o.save();
     }
     counts.delivered = await refreshDeliveries(store).catch((e) => (console.error(`Shopify delivery check failed: ${e.message}`), 0));
+    counts.cancelled = await refreshCancels(store).catch((e) => (console.error(`Shopify cancel check failed: ${e.message}`), 0));
     await ShopifyStore.updateOne({ _id: store._id }, { lastSyncAt: startedAt, connected: true, sync: { running: false, startedAt, finishedAt: new Date(), ...counts, error: "" } });
   } catch (e) {
     await ShopifyStore.updateOne({ _id: store._id }, { sync: { running: false, startedAt, finishedAt: new Date(), ...counts, error: e.message } });
     throw e;
   }
   return counts;
+}
+
+// Orders still waiting here (New / Packed) checked directly against Shopify for a cancellation that was
+// missed, so a cancelled order never sits in New.
+async function refreshCancels(store) {
+  const open = (await ShopifyOrder.find({ organization: store.organization, status: { $in: ["new", "packed"] } }, { shopifyId: 1, status: 1, name: 1, invoiceNumber: 1, remarks: 1 })).filter((o) => String(o.shopifyId || "").startsWith("gid://"));
+  let changed = 0;
+  for (let i = 0; i < open.length; i += 100) {
+    const batch = open.slice(i, i + 100);
+    const data = await gql(store, `query($ids: [ID!]!) { nodes(ids: $ids) { ... on Order { id cancelledAt } } }`, { ids: batch.map((o) => o.shopifyId) });
+    const byId = new Map((data.nodes || []).filter(Boolean).map((n) => [n.id, n]));
+    for (const o of batch) {
+      const n = byId.get(o.shopifyId);
+      if (!n?.cancelledAt) continue;
+      const set = { status: "cancelled", cancelledAt: new Date(n.cancelledAt), statusChangedAt: new Date() };
+      if (o.invoiceNumber) set.remarks = [o.remarks, `Cancelled in Shopify — invoice ${o.invoiceNumber} is still in the books`].filter(Boolean).join("\n");
+      await ShopifyOrder.updateOne({ _id: o._id }, { $set: set });
+      changed++;
+    }
+  }
+  if (changed) require("./orderIndex").forget(store.organization);
+  return changed;
 }
 
 // Shopify doesn't always mark an order as updated when its fulfilment gets delivered, so orders out with the
