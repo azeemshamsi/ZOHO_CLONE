@@ -12,9 +12,9 @@ const split = (s) =>
     .filter(Boolean);
 
 // Print the same PDF that downloads (not the on-screen page): loaded in a hidden frame, then the print dialog.
-export async function printPdf(kind, id, thermal) {
+export async function printPdf(kind, id, thermal, paper) {
   try {
-    const r = await api.get(`/documents/${kind}/${id}/pdf`, { responseType: "blob", params: thermal ? { thermal } : {} });
+    const r = await api.get(`/documents/${kind}/${id}/pdf`, { responseType: "blob", params: thermal ? { thermal } : paper ? { paper } : {} });
     const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
     const f = document.createElement("iframe");
     f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0";
@@ -48,6 +48,7 @@ export function PrintMenu({ kind, id }) {
       }
       items={[
         { label: "A4 (full page)", onClick: () => printPdf(kind, id) },
+        { label: "A5 (half page)", onClick: () => printPdf(kind, id, null, "A5") },
         { label: "Receipt printer — 3 inch (80 mm)", onClick: () => printPdf(kind, id, 3) },
         { label: "Receipt printer — 2 inch (58 mm)", onClick: () => printPdf(kind, id, 2) },
       ]}

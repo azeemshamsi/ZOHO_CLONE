@@ -27,7 +27,7 @@ router.get(
     const o = await org(req);
     const { cfg, d } = await load(o, req.params.kind, req.params.id);
     const w = Number(req.query.thermal);
-    const buf = await pdfFor(o, req.params.kind, d, w >= 2 && w <= 3 ? { thermal: w } : {});
+    const buf = await pdfFor(o, req.params.kind, d, w >= 2 && w <= 3 ? { thermal: w } : { paper: req.query.paper === "A5" ? "A5" : "A4" });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `${req.query.download ? "attachment" : "inline"}; filename="${fileName(cfg, d)}"`);
     res.send(buf);

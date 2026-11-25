@@ -84,7 +84,7 @@ async function pdfFor(org, kind, d, opts = {}) {
   const bal = cfg.balance ? cfg.balance(d) : {};
   if (opts.thermal && opts.html) return thermalHtml(org, d, { title: cfg.title, number: d[cfg.number], partyLabel: cfg.partyLabel || "Bill To", facts: cfg.facts(d), noSignatory: kind === "bill", defaultTerms: ["invoice", "quote", "salesOrder"].includes(kind) ? org.defaultTerms || "" : "", ...bal }, opts.thermal);
   if (opts.thermal) return thermalPdf(org, d, { title: cfg.title, number: d[cfg.number], partyLabel: cfg.partyLabel || "Bill To", facts: cfg.facts(d), noSignatory: kind === "bill", defaultTerms: ["invoice", "quote", "salesOrder"].includes(kind) ? org.defaultTerms || "" : "", ...bal }, opts.thermal);
-  return documentPdf(org, d, { title: cfg.title, number: d[cfg.number], partyLabel: cfg.partyLabel || "Bill To", facts: cfg.facts(d), noSignatory: kind === "bill", defaultTerms: ["invoice", "quote", "salesOrder"].includes(kind) ? org.defaultTerms || "" : "", ...bal });
+  return documentPdf(org, d, { paper: opts.paper, title: cfg.title, number: d[cfg.number], partyLabel: cfg.partyLabel || "Bill To", facts: cfg.facts(d), noSignatory: kind === "bill", defaultTerms: ["invoice", "quote", "salesOrder"].includes(kind) ? org.defaultTerms || "" : "", ...bal });
 }
 
 const fileName = (cfg, d) => `${cfg.label.replace(/\s+/g, "-")}-${d[cfg.number]}.pdf`.replace(/[^\w.-]+/g, "_");

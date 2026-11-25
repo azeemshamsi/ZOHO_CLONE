@@ -46,8 +46,9 @@ function toBuffer(doc) {
   });
 }
 
-function setup() {
-  const doc = new PDFDocument({ size: "A4", margin: 40, bufferPages: true });
+function setup(size = "A4") {
+  // A5: narrower margins so a normal invoice still fits one page.
+  const doc = new PDFDocument({ size, margin: size === "A5" ? 22 : 40, bufferPages: true });
   doc.registerFont("r", FONT);
   doc.registerFont("b", BOLD);
   doc.font("r");
@@ -55,14 +56,14 @@ function setup() {
 }
 
 function header(doc, org, title, number) {
-  const L = 40;
-  const W = doc.page.width - 80;
-  doc.font("b").fontSize(15).fillColor("#111827").text(org.name, L, 40, { width: W * 0.6 });
+  const L = doc.page.margins.left;
+  const W = doc.page.width - 2 * doc.page.margins.left;
+  doc.font("b").fontSize(15).fillColor("#111827").text(org.name, L, doc.page.margins.top, { width: W * 0.6 });
   doc.font("r").fontSize(8.5).fillColor(MUTED);
   const lines = [...addrLines(org.address), org.gstin && `GSTIN ${org.gstin}`, [org.phone, org.email].filter(Boolean).join(" · ")].filter(Boolean);
   lines.forEach((l) => doc.text(l, L, doc.y, { width: W * 0.6 }));
   const leftBottom = doc.y;
-  doc.font("b").fontSize(18).fillColor(BRAND).text(title, L, 40, { width: W, align: "right" });
+  doc.font("b").fontSize(18).fillColor(BRAND).text(title, L, doc.page.margins.top, { width: W, align: "right" });
   doc.font("r").fontSize(10).fillColor("#111827").text(`# ${number}`, L, doc.y + 2, { width: W, align: "right" });
   doc.y = Math.max(leftBottom, doc.y) + 14;
   doc.moveTo(L, doc.y).lineTo(L + W, doc.y).strokeColor(LINE).lineWidth(1).stroke();
@@ -71,8 +72,8 @@ function header(doc, org, title, number) {
 
 // Two columns: party on the left, key/value facts on the right.
 function partyBlock(doc, label, partyName, gstin, address, facts, shipTo) {
-  const L = 40;
-  const W = doc.page.width - 80;
+  const L = doc.page.margins.left;
+  const W = doc.page.width - 2 * doc.page.margins.left;
   const top = doc.y;
   const ship = shipTo && (shipTo.street || shipTo.city || shipTo.pincode);
   const colW = ship ? W * 0.27 : W * 0.5;
@@ -96,14 +97,14 @@ function partyBlock(doc, label, partyName, gstin, address, facts, shipTo) {
   for (const [k, v] of facts.filter(([, v]) => v)) {
     doc.font("r").fontSize(9).fillColor(MUTED).text(k, L + W * fx, y, { width: W * (0.77 - fx + 0.05) });
     doc.font("r").fontSize(9).fillColor("#111827").text(v, L + W * 0.77, y, { width: W * 0.23, align: "right" });
-    y += 15;
+    y += doc.page.width < 500 ? 12.5 : 15;
   }
-  doc.y = Math.max(leftEnd, y) + 14;
+  doc.y = Math.max(leftEnd, y) + (doc.page.width < 500 ? 8 : 14);
 }
 
 function itemTable(doc, items, inter) {
-  const L = 40;
-  const W = doc.page.width - 80;
+  const L = doc.page.margins.left;
+  const W = doc.page.width - 2 * doc.page.margins.left;
   const cols = [
     ["#", 0.05, "left"],
     ["Item & Description", 0.34, "left"],
@@ -130,10 +131,10 @@ function itemTable(doc, items, inter) {
   items.forEach((l, idx) => {
     const desc = [l.name, l.description].filter(Boolean).join("\n");
     doc.font("r").fontSize(8.5);
-    const h = Math.max(doc.heightOfString(desc, { width: cols[1][1] * W - 8 }), 10) + 8;
+    const h = Math.max(doc.heightOfString(desc, { width: cols[1][1] * W - 8 }), 10) + (doc.page.width < 500 ? 5 : 8);
     if (y + h > doc.page.height - 120) {
       doc.addPage();
-      y = head(40);
+      y = head(doc.page.margins.top);
     }
     const cells = [String(idx + 1), desc, l.hsnSac || "", `${l.quantity}${l.unit ? " " + l.unit : ""}`, num(l.rate), l.discount ? String(l.discount) : "", `${l.taxRate}%`, num(l.amount)];
     doc.fillColor("#111827");
@@ -145,14 +146,14 @@ function itemTable(doc, items, inter) {
 }
 
 function totals(doc, rows) {
-  const L = 40;
-  const W = doc.page.width - 80;
+  const L = doc.page.margins.left;
+  const W = doc.page.width - 2 * doc.page.margins.left;
   const x = L + W * 0.55;
   const w = W * 0.45;
   let y = doc.y;
   if (y + rows.length * 16 > doc.page.height - 60) {
     doc.addPage();
-    y = 40;
+    y = doc.page.margins.top;
   }
   for (const [k, v, strong] of rows) {
     if (strong) {
@@ -161,14 +162,14 @@ function totals(doc, rows) {
     doc.font(strong ? "b" : "r").fontSize(strong ? 10 : 9).fillColor(strong ? "#111827" : "#374151");
     doc.text(k, x + 6, y, { width: w * 0.55 });
     doc.text(v, x + w * 0.55, y, { width: w * 0.45 - 6, align: "right" });
-    y += 18;
+    y += doc.page.width < 500 ? 15 : 18;
   }
   doc.y = y + 6;
 }
 
 function footerNotes(doc, total, notes, terms, cur = "INR", rate = 1) {
-  const L = 40;
-  const W = doc.page.width - 80;
+  const L = doc.page.margins.left;
+  const W = doc.page.width - 2 * doc.page.margins.left;
   if (total !== null) {
     doc.font("r").fontSize(8).fillColor(MUTED).text("Total in words", L, doc.y);
     const words = cur && cur !== "INR" ? inWords(total).replace("Indian Rupee", cur).replace("Paise", "Cents") : inWords(total);
@@ -186,7 +187,7 @@ function footerNotes(doc, total, notes, terms, cur = "INR", rate = 1) {
     const h = doc.heightOfString(text, { width: W }) + 18;
     if (doc.y + h > doc.page.height - doc.page.margins.bottom && h < doc.page.height / 2) {
       doc.addPage();
-      doc.y = 40;
+      doc.y = doc.page.margins.top;
     }
     doc.font("r").fontSize(8).fillColor(MUTED).text(label, L, doc.y + 4);
     doc.font("r").fontSize(8.5).fillColor("#374151").text(text, L, doc.y + 1, { width: W });
@@ -196,10 +197,11 @@ function footerNotes(doc, total, notes, terms, cur = "INR", rate = 1) {
 // "For <company>", the signature / stamp, and "Authorised Signatory" at the bottom right (like Tally).
 function signatory(doc, org) {
   const W = 200;
-  const x = doc.page.width - 40 - W;
-  const need = 92;
+  const x = doc.page.width - doc.page.margins.right - W;
+  const compact = doc.page.width < 500; // A5
+  const need = compact ? 74 : 92;
   if (doc.y + need > doc.page.height - doc.page.margins.bottom) doc.addPage();
-  let y = doc.y + 14;
+  let y = doc.y + (compact ? 6 : 14);
   doc.font("b").fontSize(9).fillColor("#111827").text(`For ${org.name}`, x, y, { width: W, align: "right" });
   y = doc.y + 4;
   const img = org.signatureImage || "";
@@ -210,7 +212,7 @@ function signatory(doc, org) {
       /* unreadable image: leave the space for a hand signature */
     }
   }
-  y += 54;
+  y += compact ? 40 : 54;
   doc.moveTo(x + W - 150, y).lineTo(x + W, y).lineWidth(0.5).strokeColor("#9ca3af").stroke();
   doc.font("r").fontSize(8.5).fillColor("#374151").text(org.signatoryLabel || "Authorised Signatory", x, y + 4, { width: W, align: "right" });
   doc.y = y + 18;
@@ -222,7 +224,7 @@ function pageNumbers(doc, org) {
     doc.switchToPage(i);
     const m = doc.page.margins.bottom;
     doc.page.margins.bottom = 0; // writing in the margin must not start a new page
-    doc.font("r").fontSize(7.5).fillColor(MUTED).text(`${org.name} · Page ${i + 1} of ${range.count}`, 40, doc.page.height - 30, { width: doc.page.width - 80, align: "center", lineBreak: false });
+    doc.font("r").fontSize(7.5).fillColor(MUTED).text(`${org.name} · Page ${i + 1} of ${range.count}`, doc.page.margins.left, doc.page.height - (doc.page.margins.left < 40 ? 18 : 30), { width: doc.page.width - 2 * doc.page.margins.left, align: "center", lineBreak: false });
     doc.page.margins.bottom = m;
   }
 }
@@ -238,8 +240,8 @@ async function gstBlock(doc, d) {
   const hasE = e.status === "generated" && e.irn;
   const hasW = w.status === "generated" && w.ewbNo;
   if (!hasE && !hasW) return;
-  const L = 40;
-  const W = doc.page.width - 80;
+  const L = doc.page.margins.left;
+  const W = doc.page.width - 2 * doc.page.margins.left;
   const top = doc.y;
   let qrH = 0;
   if (hasE && e.signedQr) {
@@ -263,7 +265,7 @@ async function gstBlock(doc, d) {
 }
 
 async function documentPdf(org, d, meta) {
-  const doc = setup();
+  const doc = setup(meta.paper === "A5" ? "A5" : "A4");
   header(doc, org, meta.title, meta.number);
   await gstBlock(doc, d);
   const party = d.vendorName ? "vendor" : "customer";
@@ -296,8 +298,8 @@ async function documentPdf(org, d, meta) {
 async function receiptPdf(org, p, { title, partyLabel, party, appliedLabel, applied }) {
   const doc = setup();
   header(doc, org, title, p.paymentNumber);
-  const L = 40;
-  const W = doc.page.width - 80;
+  const L = doc.page.margins.left;
+  const W = doc.page.width - 2 * doc.page.margins.left;
   partyBlock(doc, partyLabel, party, "", {}, [
     ["Payment Date", fmtDate(p.date)],
     ["Payment Mode", { cash: "Cash", bank_transfer: "Bank Transfer", upi: "UPI", cheque: "Cheque", card: "Card", other: "Other" }[p.mode] || p.mode],
