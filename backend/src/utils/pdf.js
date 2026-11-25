@@ -105,16 +105,16 @@ function partyBlock(doc, label, partyName, gstin, address, facts, shipTo) {
 function itemTable(doc, items, inter) {
   const L = doc.page.margins.left;
   const W = doc.page.width - 2 * doc.page.margins.left;
-  const cols = [
-    ["#", 0.05, "left"],
-    ["Item & Description", 0.34, "left"],
-    ["HSN/SAC", 0.1, "left"],
-    ["Qty", 0.08, "right"],
-    ["Rate", 0.12, "right"],
-    ["Disc%", 0.09, "right"],
-    [inter ? "IGST" : "GST", 0.08, "right"],
-    ["Amount", 0.14, "right"],
-  ];
+  // Disc% only when a line has a discount; its room goes to the other columns (A5 needs it for HSN and amounts).
+  const anyDisc = items.some((l) => Number(l.discount) > 0);
+  const a5 = doc.page.width < 500;
+  const cols = (
+    anyDisc
+      ? [["#", 0.05, "left", "no"], ["Item & Description", 0.34, "left", "desc"], ["HSN/SAC", 0.1, "left", "hsn"], ["Qty", 0.08, "right", "qty"], ["Rate", 0.12, "right", "rate"], ["Disc%", 0.09, "right", "disc"], [inter ? "IGST" : "GST", 0.08, "right", "gst"], ["Amount", 0.14, "right", "amt"]]
+      : a5
+        ? [["#", 0.05, "left", "no"], ["Item & Description", 0.3, "left", "desc"], ["HSN/SAC", 0.15, "left", "hsn"], ["Qty", 0.1, "right", "qty"], ["Rate", 0.14, "right", "rate"], [inter ? "IGST" : "GST", 0.08, "right", "gst"], ["Amount", 0.18, "right", "amt"]]
+        : [["#", 0.05, "left", "no"], ["Item & Description", 0.39, "left", "desc"], ["HSN/SAC", 0.11, "left", "hsn"], ["Qty", 0.08, "right", "qty"], ["Rate", 0.13, "right", "rate"], [inter ? "IGST" : "GST", 0.09, "right", "gst"], ["Amount", 0.15, "right", "amt"]]
+  );
   const xs = [];
   let x = L;
   for (const c of cols) {
@@ -129,16 +129,19 @@ function itemTable(doc, items, inter) {
   };
   let y = head(doc.y);
   items.forEach((l, idx) => {
-    const desc = [l.name, l.description].filter(Boolean).join("\n");
-    doc.font("r").fontSize(8.5);
-    const h = Math.max(doc.heightOfString(desc, { width: cols[1][1] * W - 8 }), 10) + (doc.page.width < 500 ? 5 : 8);
+    // Item name a touch smaller on A5; SKU under it (unless the description already carries it).
+    const nameFs = doc.page.width < 500 ? 7.8 : 8.5;
+    const skuLine = l.sku && !String(l.description || "").includes(l.sku) ? `SKU: ${l.sku}` : "";
+    const desc = [l.name, l.description, skuLine].filter(Boolean).join("\n");
+    doc.font("r").fontSize(nameFs);
+    const h = Math.max(doc.heightOfString(desc, { width: cols[1][1] * W - 8 }), doc.font("r").fontSize(8.5).heightOfString(`${l.quantity}${l.unit ? " " + l.unit : ""}`, { width: cols[3][1] * W - 8 }), 10) + (doc.page.width < 500 ? 5 : 8);
     if (y + h > doc.page.height - 120) {
       doc.addPage();
       y = head(doc.page.margins.top);
     }
-    const cells = [String(idx + 1), desc, l.hsnSac || "", `${l.quantity}${l.unit ? " " + l.unit : ""}`, num(l.rate), l.discount ? String(l.discount) : "", `${l.taxRate}%`, num(l.amount)];
+    const val = { no: String(idx + 1), desc, hsn: l.hsnSac || "", qty: `${l.quantity}${l.unit ? " " + l.unit : ""}`, rate: num(l.rate), disc: l.discount ? String(l.discount) : "", gst: `${l.taxRate}%`, amt: num(l.amount) };
     doc.fillColor("#111827");
-    cells.forEach((v, i) => doc.font(i === 1 ? "r" : "r").fontSize(8.5).text(v, xs[i] + 4, y, { width: cols[i][1] * W - 8, align: cols[i][2] }));
+    cols.forEach((c, i) => doc.font("r").fontSize(c[3] === "desc" ? nameFs : 8.5).text(val[c[3]], xs[i] + 4, y, { width: c[1] * W - 8, align: c[2] }));
     y += h;
     doc.moveTo(L, y - 3).lineTo(L + W, y - 3).strokeColor(LINE).lineWidth(0.5).stroke();
   });
@@ -182,15 +185,20 @@ function footerNotes(doc, total, notes, terms, cur = "INR", rate = 1) {
     ["Terms & Conditions", terms],
   ]) {
     if (!text) continue;
-    // Keep a block together: start it on a new page rather than split a short one across two.
-    doc.font("r").fontSize(8.5);
-    const h = doc.heightOfString(text, { width: W }) + 18;
-    if (doc.y + h > doc.page.height - doc.page.margins.bottom && h < doc.page.height / 2) {
+    // Keep a block together on this page, in smaller type if that's what it takes (down to 6 pt); only a block
+    // that can't fit even then starts a new page.
+    const room = doc.page.height - doc.page.margins.bottom - 4 - doc.y;
+    let fs = 8.5;
+    const hOf = (f) => (doc.font("r").fontSize(f), doc.heightOfString(text, { width: W }) + f + 6);
+    while (fs > 6 && hOf(fs) > room) fs -= 0.5;
+    if (hOf(fs) > room && hOf(8.5) < doc.page.height / 2) {
+      fs = 8.5;
       doc.addPage();
       doc.y = doc.page.margins.top;
     }
-    doc.font("r").fontSize(8).fillColor(MUTED).text(label, L, doc.y + 4);
-    doc.font("r").fontSize(8.5).fillColor("#374151").text(text, L, doc.y + 1, { width: W });
+    doc.font("r").fontSize(Math.min(8, fs)).fillColor(MUTED).text(label, L, doc.y + 4, { lineBreak: false });
+    doc.y += Math.min(8, fs) + 2;
+    doc.font("r").fontSize(fs).fillColor("#374151").text(text, L, doc.y + 1, { width: W });
   }
 }
 
@@ -216,6 +224,28 @@ function signatory(doc, org) {
   doc.moveTo(x + W - 150, y).lineTo(x + W, y).lineWidth(0.5).strokeColor("#9ca3af").stroke();
   doc.font("r").fontSize(8.5).fillColor("#374151").text(org.signatoryLabel || "Authorised Signatory", x, y + 4, { width: W, align: "right" });
   doc.y = y + 18;
+}
+
+// A5: terms on the left beside the signatory (as on many Indian invoices), in smaller type if needed, so the
+// whole invoice stays on one page. False when even that doesn't fit (the caller then prints them below).
+function signatoryBesideTerms(doc, org, terms) {
+  const L = doc.page.margins.left;
+  const W = doc.page.width - 2 * L;
+  const tw = W - 215;
+  const top = doc.y;
+  const room = doc.page.height - doc.page.margins.bottom - 4 - top;
+  if (room < 74 || tw < 100) return false;
+  const hOf = (f) => (doc.font("r").fontSize(f), doc.heightOfString(terms, { width: tw }) + Math.min(8, f) + 10);
+  let fs = 7.5;
+  while (fs > 5.5 && hOf(fs) > room) fs -= 0.25;
+  if (hOf(fs) > room) return false;
+  doc.font("r").fontSize(Math.min(8, fs + 0.5)).fillColor(MUTED).text("Terms & Conditions", L, top + 6, { width: tw, lineBreak: false });
+  doc.font("r").fontSize(fs).fillColor("#374151").text(terms, L, top + 6 + Math.min(8, fs + 0.5) + 3, { width: tw });
+  const end = doc.y;
+  doc.y = top;
+  signatory(doc, org);
+  doc.y = Math.max(end, doc.y);
+  return true;
 }
 
 function pageNumbers(doc, org) {
@@ -289,8 +319,13 @@ async function documentPdf(org, d, meta) {
   // Terms: the document's own, else the company's default terms (Settings) — like Tally, which prints them at print time.
   // Amount in words and notes, then the authorised signatory, and the terms & conditions last (as in Tally).
   footerNotes(doc, d.total, d.customerNotes, "", d.currency, d.exchangeRate);
-  if (!meta.noSignatory) signatory(doc, org);
-  footerNotes(doc, null, "", d.terms || meta.defaultTerms || "", d.currency, d.exchangeRate);
+  const terms = d.terms || meta.defaultTerms || "";
+  if (meta.paper === "A5" && terms && !meta.noSignatory && signatoryBesideTerms(doc, org, terms)) {
+    /* both drawn, side by side */
+  } else {
+    if (!meta.noSignatory) signatory(doc, org);
+    footerNotes(doc, null, "", terms, d.currency, d.exchangeRate);
+  }
   pageNumbers(doc, org);
   return toBuffer(doc);
 }
@@ -386,6 +421,7 @@ async function thermalPdf(org, d, meta, widthIn = 3) {
     rule(true);
     (d.lineItems || []).forEach((l, i) => {
       t(`${i + 1}. ${l.name}`, { b: true, gap: 0 });
+      if (l.sku && !String(l.description || "").includes(l.sku)) t(`  SKU: ${l.sku}`, { size: fs - 0.6, gap: 0 });
       const extra = [l.hsnSac ? `HSN ${l.hsnSac}` : "", l.taxRate ? `GST ${l.taxRate}%` : "", l.discount ? `Disc ${l.discount}` : ""].filter(Boolean).join(" · ");
       lr(`  ${l.quantity}${l.unit ? " " + l.unit : ""} x ${num(l.rate)}${extra && !small ? `  ${extra}` : ""}`, num(l.amount), { gap: small && extra ? 0 : 2 });
       if (small && extra) t(`  ${extra}`, { size: fs - 0.8, gap: 2 });

@@ -2079,6 +2079,9 @@ export function DocPaper({
                 {l.description && (
                   <div className="doc-small">{l.description}</div>
                 )}
+                {l.sku && !String(l.description || "").includes(l.sku) && (
+                  <div className="doc-small">SKU: {l.sku}</div>
+                )}
                 {l.discount > 0 && (
                   <div className="doc-small">Discount {l.discount}%</div>
                 )}

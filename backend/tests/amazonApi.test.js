@@ -201,7 +201,8 @@ test("self-ship: the courier and AWB are confirmed to Amazon, then the order is 
   assert.equal(inv.total, 950);
   assert.equal(inv.body.placeOfSupply, "27");
   assert.equal(inv.body.ledger, "amz-sales");
-  assert.deepEqual(inv.body.lineItems.map((l) => [l.name, l.quantity, l.discount, l.taxRate]), [["Mango wood board", 2, 10, 5], ["Shipping charges", 1, 0, 5]]);
+  // The promotion comes off the rate (₹900 for 2, GST 5% inside): no discount shown or booked.
+  assert.deepEqual(inv.body.lineItems.map((l) => [l.name, l.quantity, l.discount, l.rate, l.taxRate]), [["Mango wood board", 2, 0, 428.5714, 5], ["Shipping charges", 1, 0, 47.619, 5]]);
   assert.equal(customers.find((c) => String(c._id) === inv.body.customer).displayName, "Amazon B2C");
   assert.equal(AS.carrierOf({ courierName: "Delhivery Surface" }).carrierCode, "Delhivery");
   assert.deepEqual(AS.carrierOf({ courierName: "Trackon" }), { carrierCode: "Other", carrierName: "Trackon" });

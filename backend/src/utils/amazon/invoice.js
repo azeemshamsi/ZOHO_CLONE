@@ -1,6 +1,6 @@
 /**
  * Invoice an Amazon order in the company that owns the Amazon account. Amazon.in amounts are GST inclusive:
- * rates come out of the price, promotions become line discounts, shipping is a line at the order's highest
+ * rates come out of the price, promotions come off the rate (not shown or booked), shipping is a line at the order's highest
  * rate, and paise left over go to Adjustment so the total equals what Amazon shows.
  * Consumers → customer "Amazon B2C" (same as the MTR import); Amazon Business buyers → their GSTIN.
  */
@@ -66,8 +66,9 @@ async function invoiceAmazonOrder(order, acc, { user } = {}) {
     if (sameOrg) l.item = item._id;
     const tr = item.taxRate;
     const gross = r2(l.unitPrice * l.quantity);
-    const discount = gross > 0 ? r4(Math.min(100, ((l.discount || 0) / gross) * 100)) : 0;
-    lineItems.push({ item: String(item._id), name: item.name, description: l.sku ? `SKU ${l.sku}` : "", hsnSac: item.hsnSac, unit: item.unit || "pcs", quantity: l.quantity, rate: r4(l.unitPrice / (1 + tr / 100)), discount, taxRate: tr });
+    // Discounts aren't shown or accounted: the rate is the price actually charged (after discount), net of GST.
+    const net = Math.max(0, r2(gross - (l.discount || 0)));
+    lineItems.push({ item: String(item._id), name: item.name, description: l.sku ? `SKU ${l.sku}` : "", hsnSac: item.hsnSac, unit: item.unit || "pcs", quantity: l.quantity, rate: r4(net / l.quantity / (1 + tr / 100)), discount: 0, taxRate: tr });
   }
   const ship = r2(order.shippingTotal || 0);
   if (ship > 0) {

@@ -82,6 +82,10 @@ async function pdfFor(org, kind, d, opts = {}) {
     return receiptPdf(org, d, { title: cfg.title, partyLabel: cfg.partyLabel || "Received From", party: d[`${cfg.party}Name`], appliedLabel: cfg.appliedLabel, applied: cfg.applied(d) });
   }
   const bal = cfg.balance ? cfg.balance(d) : {};
+  if (d.lineItems?.length) {
+    const lines = await require("./lineSkus").withSkus(d.lineItems);
+    d = { ...(d.toObject ? d.toObject() : d), lineItems: lines };
+  }
   if (opts.thermal && opts.html) return thermalHtml(org, d, { title: cfg.title, number: d[cfg.number], partyLabel: cfg.partyLabel || "Bill To", facts: cfg.facts(d), noSignatory: kind === "bill", defaultTerms: ["invoice", "quote", "salesOrder"].includes(kind) ? org.defaultTerms || "" : "", ...bal }, opts.thermal);
   if (opts.thermal) return thermalPdf(org, d, { title: cfg.title, number: d[cfg.number], partyLabel: cfg.partyLabel || "Bill To", facts: cfg.facts(d), noSignatory: kind === "bill", defaultTerms: ["invoice", "quote", "salesOrder"].includes(kind) ? org.defaultTerms || "" : "", ...bal }, opts.thermal);
   return documentPdf(org, d, { paper: opts.paper, title: cfg.title, number: d[cfg.number], partyLabel: cfg.partyLabel || "Bill To", facts: cfg.facts(d), noSignatory: kind === "bill", defaultTerms: ["invoice", "quote", "salesOrder"].includes(kind) ? org.defaultTerms || "" : "", ...bal });

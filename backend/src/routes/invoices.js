@@ -76,6 +76,7 @@ router.get(
     const mine = (list) => list.filter((a) => String(a.invoice) === String(invoice._id)).reduce((s, a) => s + a.amount, 0);
     res.send({
       ...invoice.toJSON(),
+      lineItems: await require("../utils/lineSkus").withSkus(invoice.lineItems),
       payments: payments.map((p) => ({
         _id: p._id,
         paymentNumber: p.paymentNumber,

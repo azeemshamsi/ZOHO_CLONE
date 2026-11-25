@@ -1,6 +1,6 @@
 /**
  * One-click invoice for a Shopify order. Shopify amounts are GST inclusive: rates are taken out of
- * the price, discounts become line discounts, shipping becomes a line at the order's highest GST rate,
+ * the price (charged after any discount: discounts aren't shown or booked), shipping becomes a line at the order's highest GST rate,
  * and any paise left over from rounding goes into Adjustment so the total matches Shopify exactly.
  */
 const Customer = require("../../models/Customer");
@@ -107,8 +107,9 @@ async function invoiceOrder(ctx, order, store) {
     if (sameOrg) l.item = item._id;
     const tr = item.taxRate;
     const gross = r2(l.unitPrice * l.quantity);
-    const discount = gross > 0 ? r4(Math.min(100, ((l.discount || 0) / gross) * 100)) : 0;
-    lineItems.push({ item: String(item._id), name: item.name, description: l.variantTitle ? "" : "", hsnSac: item.hsnSac, unit: item.unit || "pcs", quantity: l.quantity, rate: r4(l.unitPrice / (1 + tr / 100)), discount, taxRate: tr });
+    // Discounts aren't shown or accounted: the rate is the price actually charged (after discount), net of GST.
+    const net = Math.max(0, r2(gross - (l.discount || 0)));
+    lineItems.push({ item: String(item._id), name: item.name, description: l.variantTitle ? "" : "", hsnSac: item.hsnSac, unit: item.unit || "pcs", quantity: l.quantity, rate: r4(net / l.quantity / (1 + tr / 100)), discount: 0, taxRate: tr });
   }
   const ship = r2(order.shippingTotal || 0);
   if (ship > 0) {
