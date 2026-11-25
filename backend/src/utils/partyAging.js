@@ -1,44 +1,38 @@
 /**
- * What each customer / vendor owes or is owed, with ageing, the way Tally's bill-wise outstanding works:
- * open invoices (bills) and journal debits (credits for vendors) are the dues; on-account receipts
- * (payments), open credit notes (vendor credits) and journal credits are set against the oldest dues first.
+ * What each customer / vendor owes or is owed, with ageing: each party's ledger balance (as in Tally), its
+ * receipts / payments / credit notes / journals set against its oldest dues first.
  */
 const { round2 } = require("./http");
 
 const DAY = 86400000;
 const BUCKETS = ["1-15", "16-30", "31-45", "45+"];
 
-async function partyAging(org, kind, today) {
+async function partyAging(org, kind, today, entries = null) {
+  // From the ledger itself (as Tally's debtors / creditors): each party's balance is the sum of its receivable
+  // (payable) lines, whatever voucher posted them — invoices, receipts, journals, credit notes, imports — so dues
+  // and advances add up to the ledger. Ageing: the party's credits are set against its oldest debits first.
   const sales = kind === "customer";
-  const Doc = require(`../models/${sales ? "Invoice" : "Bill"}`);
-  const Pay = require(`../models/${sales ? "Payment" : "VendorPayment"}`);
-  const Note = require(`../models/${sales ? "CreditNote" : "VendorCredit"}`);
-  const Journal = require("../models/Journal");
-  const Party = require(`../models/${sales ? "Customer" : "Vendor"}`);
   const acc = sales ? "ar" : "ap";
-  const [docs, pays, notes, journals] = await Promise.all([
-    Doc.find({ organization: org, status: { $nin: ["draft", "void", "paid"] }, balance: { $gt: 0 } }, { [kind]: 1, date: 1, dueDate: 1, balance: 1, exchangeRate: 1 }).lean(),
-    Pay.find({ organization: org, unusedAmount: { $gt: 0 } }, { [kind]: 1, date: 1, unusedAmount: 1, exchangeRate: 1 }).lean(),
-    Note.find({ organization: org, status: "open", balance: { $gt: 0 } }, { [kind]: 1, date: 1, balance: 1, exchangeRate: 1 }).lean(),
-    Journal.find({ organization: org, [`lines.${kind}`]: { $ne: null } }, { date: 1, lines: 1 }).lean(),
-  ]);
+  const Doc = require(`../models/${sales ? "Invoice" : "Bill"}`);
+  const Party = require(`../models/${sales ? "Customer" : "Vendor"}`);
+  if (!entries) entries = await require("./ledger").buildEntries(org, {});
+  const dueOf = new Map((await Doc.find({ organization: org }, { dueDate: 1 }).lean()).map((d) => [String(d._id), d.dueDate]));
+  const docType = sales ? "Invoice" : "Bill";
   const P = new Map();
   const get = (id) => {
     const k = String(id);
-    if (!P.has(k)) P.set(k, { id: k, dues: [], credit: 0 });
+    if (!P.has(k)) P.set(k, { id: k, name: "", dues: [], credit: 0 });
     return P.get(k);
   };
-  const r = (d) => Number(d.exchangeRate) || 1;
-  for (const d of docs) get(d[kind]).dues.push({ due: d.dueDate || d.date, amount: round2(d.balance * r(d)) });
-  for (const p of pays) get(p[kind]).credit += p.unusedAmount * r(p);
-  for (const n of notes) get(n[kind]).credit += n.balance * r(n);
-  for (const j of journals)
-    for (const l of j.lines) {
-      if (!l[kind] || l.account !== acc) continue;
-      const v = sales ? l.debit - l.credit : l.credit - l.debit;
-      if (v > 0) get(l[kind]).dues.push({ due: j.date, amount: v });
-      else if (v < 0) get(l[kind]).credit += -v;
+  for (const e of entries) {
+    for (const l of e.lines || []) {
+      if (l.account !== acc || !l.partyId) continue;
+      if (l.partyName) get(l.partyId).name = l.partyName;
+      const v = round2(sales ? l.debit - l.credit : l.credit - l.debit);
+      if (v > 0) get(l.partyId).dues.push({ due: (e.type === docType && dueOf.get(String(e.id))) || e.date, amount: v });
+      else if (v < 0) get(l.partyId).credit += -v;
     }
+  }
   const names = new Map((await Party.find({ organization: org, _id: { $in: [...P.keys()] } }, { displayName: 1 }).lean()).map((p) => [String(p._id), p.displayName]));
   const out = { due: 0, advances: 0, current: 0, overdue: 0, buckets: Object.fromEntries(BUCKETS.map((b) => [b, 0])), parties: [] };
   for (const p of P.values()) {
@@ -61,7 +55,7 @@ async function partyAging(org, kind, today) {
     net = round2(net - credit);
     if (net > 0) out.due += net;
     else out.advances += -net;
-    if (net) out.parties.push({ id: p.id, name: names.get(p.id) || "(deleted)", net });
+    if (net) out.parties.push({ id: p.id, name: names.get(p.id) || p.name || "(deleted)", net });
   }
   for (const k of ["due", "advances", "current", "overdue"]) out[k] = round2(out[k]);
   for (const b of BUCKETS) out.buckets[b] = round2(out.buckets[b]);

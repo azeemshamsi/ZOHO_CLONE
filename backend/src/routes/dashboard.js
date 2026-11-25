@@ -21,15 +21,14 @@ router.get(
     const fy = fiscalYear(today);
     const monthsBack = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 11, 1));
 
-    const [accounts, entries, recvAging, payAging, customerCount, itemCount, invoiceCount] = await Promise.all([
+    const [accounts, entries, customerCount, itemCount, invoiceCount] = await Promise.all([
       chartOfAccounts(org),
       buildEntries(org, { to: end }),
-      partyAging(org, "customer", today),
-      partyAging(org, "vendor", today),
       Customer.countDocuments({ organization: org }),
       Item.countDocuments({ organization: org }),
       Invoice.countDocuments({ organization: org, status: { $nin: ["draft", "void"] } }),
     ]);
+    const [recvAging, payAging] = await Promise.all([partyAging(org, "customer", today, entries), partyAging(org, "vendor", today, entries)]);
     const group = new Map(accounts.map((a) => [a.code, a]));
     const isCash = (code) => ["Cash", "Bank"].includes(group.get(code)?.group);
 
