@@ -135,7 +135,7 @@ async function peekNumber(org, key, prefix) {
 function settleInvoice(inv) {
   inv.amountPaid = round2(inv.amountPaid || 0);
   inv.creditsApplied = round2(inv.creditsApplied || 0);
-  const received = round2(inv.amountPaid + inv.creditsApplied);
+  const received = round2(inv.amountPaid + inv.creditsApplied + (inv.settledInLedger || 0));
   inv.balance = round2(Math.max(inv.total - received, 0));
   if (inv.status === "void") {
     inv.balance = 0;

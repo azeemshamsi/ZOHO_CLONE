@@ -43,6 +43,9 @@ const invoiceSchema = new mongoose.Schema(
     paymentTerms: { type: Number, default: 0 },
     amountPaid: { type: Number, default: 0 },
     creditsApplied: { type: Number, default: 0 },
+    // Received outside bill-wise allocation (journal, cash/bank entry, marketplace settlement) — matched from the
+    // customer's ledger balance (Invoices → Match to ledger). No entry of its own; undo sets it back to 0.
+    settledInLedger: { type: Number, default: 0 },
     balance: { type: Number, default: 0 },
     status: {
       type: String,

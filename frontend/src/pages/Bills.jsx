@@ -16,14 +16,15 @@ const K = KINDS.bill;
 
 // Bills paid by journal / debit note / marketplace settlement (not bill-wise) still look unpaid: match them to
 // each supplier's ledger balance. Preview first; nothing is posted and Undo puts it back.
-function MatchLedger({ onClose }) {
+export function MatchLedger({ onClose, base = "/bills", party = "Supplier", doc = "Bill", credit = "Debit note" }) {
+  const sales = base === "/invoices";
   const [groups, setGroups] = useState(null);
   const [pick, setPick] = useState({});
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState({});
   useEffect(() => {
     api
-      .get("/bills/ledger-match")
+      .get(`${base}/ledger-match`)
       .then((r) => {
         setGroups(r.data);
         setPick(Object.fromEntries(r.data.map((g) => [g.vendor, true])));
@@ -34,8 +35,8 @@ function MatchLedger({ onClose }) {
   const run = async (undo) => {
     setBusy(true);
     try {
-      const { data } = await api.post(undo ? "/bills/ledger-match/undo" : "/bills/ledger-match", undo ? {} : { vendors: chosen });
-      toast(undo ? `Undone on ${data.bills} bill(s), ${data.credits} debit note(s)` : `Matched ${data.bills} bill(s) and ${data.credits} debit note(s) for ${data.vendors} supplier(s)`, "success");
+      const { data } = await api.post(undo ? `${base}/ledger-match/undo` : `${base}/ledger-match`, undo ? {} : { vendors: chosen });
+      toast(undo ? `Undone on ${data.bills} ${doc.toLowerCase()}(s), ${data.credits} ${credit.toLowerCase()}(s)` : `Matched ${data.bills} ${doc.toLowerCase()}(s) and ${data.credits} ${credit.toLowerCase()}(s) for ${data.vendors} ${party.toLowerCase()}(s)`, "success");
       window.location.reload();
     } catch (e) {
       toast(errMsg(e), "error");
@@ -46,40 +47,40 @@ function MatchLedger({ onClose }) {
     <Modal
       open
       wide
-      title="Match bills to the ledger"
+      title={`Match ${doc.toLowerCase()}s to the ledger`}
       onClose={onClose}
       footer={
         <>
-          <button className="btn btn-ghost" disabled={busy} onClick={() => window.confirm("Put back every bill and debit note matched to the ledger?") && run(true)} style={{ marginRight: "auto" }}>
+          <button className="btn btn-ghost" disabled={busy} onClick={() => window.confirm(`Put back every ${doc.toLowerCase()} and ${credit.toLowerCase()} matched to the ledger?`) && run(true)} style={{ marginRight: "auto" }}>
             Undo earlier matching
           </button>
           <button className="btn" onClick={onClose}>
             Close
           </button>
           <button className="btn btn-primary" disabled={busy || !chosen.length} onClick={() => run(false)}>
-            {busy ? "Matching…" : `Match ${chosen.length} supplier(s)`}
+            {busy ? "Matching…" : `Match ${chosen.length} ${party.toLowerCase()}(s)`}
           </button>
         </>
       }
     >
       <p className="small" style={{ marginTop: 0 }}>
-        Bills settled by journal, debit note or a marketplace settlement (Amazon, Flipkart) reduce the supplier's ledger
-        but were never set against a bill, so the bills still show unpaid. This marks them settled so the open bills add
-        up to the ledger balance: the newest bills keep what's still owed. <strong>No entry is posted and no ledger
-        balance changes</strong>; Undo puts them back.
+        {sales
+          ? "Invoices received by journal, cash / bank entry, credit note or a marketplace settlement (Amazon, Flipkart, Pepperfry) reduce the customer's ledger but were never set against an invoice, so they still show unpaid or overdue. This marks them received so the open invoices add up to the ledger balance: the newest invoices keep what's still due."
+          : "Bills settled by journal, debit note or a marketplace settlement (Amazon, Flipkart) reduce the supplier's ledger but were never set against a bill, so the bills still show unpaid. This marks them settled so the open bills add up to the ledger balance: the newest bills keep what's still owed."}{" "}
+        <strong>No entry is posted and no ledger balance changes</strong>; Undo puts them back.
       </p>
       {!groups ? (
         <Spinner />
       ) : !groups.length ? (
-        <div className="muted">Every supplier's open bills already match their ledger.</div>
+        <div className="muted">Every {party.toLowerCase()}'s open {doc.toLowerCase()}s already match their ledger.</div>
       ) : (
         <table className="table">
           <thead>
             <tr>
               <th style={{ width: 28 }} />
-              <th>Supplier</th>
+              <th>{party}</th>
               <th className="num">Ledger balance</th>
-              <th className="num">Open bills − debit notes</th>
+              <th className="num">Open {doc.toLowerCase()}s − {credit.toLowerCase()}s</th>
               <th className="num">After</th>
               <th className="num">Changes</th>
             </tr>
@@ -92,7 +93,7 @@ function MatchLedger({ onClose }) {
                     <input type="checkbox" checked={!!pick[g.vendor]} onChange={(e) => setPick({ ...pick, [g.vendor]: e.target.checked })} />
                   </td>
                   <td>{g.name}</td>
-                  <td className="num">{money(Math.abs(g.ledger))} {g.ledger < 0 ? "Dr" : g.ledger > 0 ? "Cr" : ""}</td>
+                  <td className="num">{money(Math.abs(g.ledger))} {g.ledger === 0 ? "" : (g.ledger > 0) !== sales ? "Cr" : "Dr"}</td>
                   <td className="num">{money(g.billsDue - g.creditsOpen)}</td>
                   <td className="num">{money(g.after)}</td>
                   <td className="num">
@@ -106,7 +107,7 @@ function MatchLedger({ onClose }) {
                     <tr key={c.id} className="small muted">
                       <td />
                       <td>
-                        {c.type === "bill" ? "Bill" : "Debit note"} {c.number} · {date(c.date)}
+                        {c.type === "bill" ? doc : credit} {c.number} · {date(c.date)}
                       </td>
                       <td />
                       <td className="num">{money(c.balance)}</td>

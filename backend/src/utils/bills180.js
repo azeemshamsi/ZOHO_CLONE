@@ -76,17 +76,19 @@ async function bills180(org) {
 }
 
 // Each supplier's payable in the books (credit balance on Accounts Payable), from all entries to date.
-async function ledgerPayables(org, vendorIds) {
+async function ledgerPayables(org, vendorIds, account = "ap") {
   const out = new Map();
   if (!vendorIds.length) return out;
   const want = new Set(vendorIds);
   const { buildEntries } = require("./ledger");
+  // Payables: credit balance on Accounts Payable; receivables (account "ar"): debit balance on Accounts Receivable.
+  const sign = account === "ar" ? -1 : 1;
   for (const e of await buildEntries(org, {})) {
     for (const l of e.lines || []) {
-      if (l.account !== "ap" || !l.partyId) continue;
+      if (l.account !== account || !l.partyId) continue;
       const v = String(l.partyId);
       if (!want.has(v)) continue;
-      out.set(v, r2((out.get(v) || 0) + (l.credit || 0) - (l.debit || 0)));
+      out.set(v, r2((out.get(v) || 0) + sign * ((l.credit || 0) - (l.debit || 0))));
     }
   }
   for (const v of want) if (!out.has(v)) out.set(v, 0);

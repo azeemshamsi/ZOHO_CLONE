@@ -7,29 +7,34 @@
  * Only the bill's / debit note's "settled in ledger" amount changes (so balance and status): no entry is posted,
  * no balance in any ledger moves, and Undo puts it back.
  */
-const Bill = require("../models/Bill");
-const VendorCredit = require("../models/VendorCredit");
-const { ledgerPayables } = require("./bills180");
-const { settleBill } = require("./salesDoc");
+const b180 = require("./bills180");
+const salesDoc = require("./salesDoc");
+
+// Purchases (bills / debit notes against Accounts Payable) or sales (invoices / credit notes against Receivable).
+const SIDES = {
+  purchase: () => ({ Doc: require("../models/Bill"), Credit: require("../models/VendorCredit"), party: "vendor", partyName: "vendorName", number: "billNumber", open: ["open", "partially_paid"], account: "ap", settle: salesDoc.settleBill }),
+  sales: () => ({ Doc: require("../models/Invoice"), Credit: require("../models/CreditNote"), party: "customer", partyName: "customerName", number: "invoiceNumber", open: ["sent", "partially_paid"], account: "ar", settle: salesDoc.settleInvoice }),
+};
 
 const r2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const newest = (a, b) => new Date(b.date) - new Date(a.date) || String(b._id).localeCompare(String(a._id));
 
-async function plan(org, vendorIds = null) {
+async function plan(org, vendorIds = null, side = "purchase") {
+  const S = SIDES[side]();
   const [bills, credits] = await Promise.all([
-    Bill.find({ organization: org, status: { $in: ["open", "partially_paid"] } }, { lineItems: 0 }).lean(),
-    VendorCredit.find({ organization: org, status: "open" }, { lineItems: 0 }).lean(),
+    S.Doc.find({ organization: org, status: { $in: S.open } }, { lineItems: 0 }).lean(),
+    S.Credit.find({ organization: org, status: "open" }, { lineItems: 0 }).lean(),
   ]);
   const vendors = new Map();
   const add = (d, kind) => {
-    const v = String(d.vendor || "");
+    const v = String(d[S.party] || "");
     if (!v || (vendorIds && !vendorIds.includes(v)) || !(d.balance > 0)) return;
-    if (!vendors.has(v)) vendors.set(v, { vendor: v, name: d.vendorName || "", bills: [], credits: [] });
+    if (!vendors.has(v)) vendors.set(v, { vendor: v, name: d[S.partyName] || "", bills: [], credits: [] });
     vendors.get(v)[kind].push(d);
   };
   bills.forEach((b) => add(b, "bills"));
   credits.forEach((c) => add(c, "credits"));
-  const owed = await ledgerPayables(org, [...vendors.keys()]);
+  const owed = await b180.ledgerPayables(org, [...vendors.keys()], S.account);
   const out = [];
   for (const g of vendors.values()) {
     const P = owed.get(g.vendor) || 0;
@@ -41,7 +46,7 @@ async function plan(org, vendorIds = null) {
       const keep = r2(Math.min(b.balance, keepBills));
       keepBills = r2(keepBills - keep);
       const settle = r2(b.balance - keep);
-      if (settle > 0.009) changes.push({ type: "bill", id: String(b._id), number: b.billNumber, date: b.date, balance: b.balance, settle, left: keep });
+      if (settle > 0.009) changes.push({ type: "bill", id: String(b._id), number: b[S.number], date: b.date, balance: b.balance, settle, left: keep });
     }
     let keepCredits = Math.max(0, -P);
     for (const c of g.credits.sort(newest)) {
@@ -56,21 +61,22 @@ async function plan(org, vendorIds = null) {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-async function apply(org, vendorIds) {
-  const groups = await plan(org, vendorIds);
+async function apply(org, vendorIds, side = "purchase") {
+  const S = SIDES[side]();
+  const groups = await plan(org, vendorIds, side);
   let bills = 0;
   let credits = 0;
   for (const g of groups)
     for (const ch of g.changes) {
       if (ch.type === "bill") {
-        const b = await Bill.findOne({ _id: ch.id, organization: org });
+        const b = await S.Doc.findOne({ _id: ch.id, organization: org });
         if (!b) continue;
         b.settledInLedger = r2((b.settledInLedger || 0) + ch.settle);
-        settleBill(b);
+        S.settle(b);
         await b.save();
         bills++;
       } else {
-        const c = await VendorCredit.findOne({ _id: ch.id, organization: org });
+        const c = await S.Credit.findOne({ _id: ch.id, organization: org });
         if (!c) continue;
         c.settledInLedger = r2((c.settledInLedger || 0) + ch.settle);
         c.balance = r2(Math.max(0, c.balance - ch.settle));
@@ -83,19 +89,20 @@ async function apply(org, vendorIds) {
 }
 
 // Undo: every "settled in ledger" amount back to 0 (for these suppliers, or all).
-async function undo(org, vendorIds = null) {
+async function undo(org, vendorIds = null, side = "purchase") {
+  const S = SIDES[side]();
   const q = { organization: org, settledInLedger: { $gt: 0 } };
   let bills = 0;
   let credits = 0;
-  for (const b of await Bill.find(q)) {
-    if (vendorIds && !vendorIds.includes(String(b.vendor))) continue;
+  for (const b of await S.Doc.find(q)) {
+    if (vendorIds && !vendorIds.includes(String(b[S.party]))) continue;
     b.settledInLedger = 0;
-    settleBill(b);
+    S.settle(b);
     await b.save();
     bills++;
   }
-  for (const c of await VendorCredit.find(q)) {
-    if (vendorIds && !vendorIds.includes(String(c.vendor))) continue;
+  for (const c of await S.Credit.find(q)) {
+    if (vendorIds && !vendorIds.includes(String(c[S.party]))) continue;
     c.balance = r2(c.balance + c.settledInLedger);
     c.settledInLedger = 0;
     if (c.balance > 0 && c.status === "closed") c.status = "open";

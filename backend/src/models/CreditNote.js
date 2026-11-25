@@ -44,6 +44,7 @@ const creditNoteSchema = new mongoose.Schema(
     reason: { type: String, default: "" },
     status: { type: String, enum: ["draft", "open", "closed", "void"], default: "draft" },
     balance: { type: Number, default: 0 }, // credit still available
+    settledInLedger: { type: Number, default: 0 }, // used up in the ledger without allocation (Match to ledger)
     applications: { type: [applicationSchema], default: [] },
     refunds: { type: [refundSchema], default: [] },
   },

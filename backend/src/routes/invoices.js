@@ -51,6 +51,32 @@ router.get(
   })
 );
 
+// Match open invoices / credit notes to each customer's ledger balance (no entries; see utils/ledgerMatch).
+const LM = require("../utils/ledgerMatch");
+const partyList = (v) => (Array.isArray(v) ? v.map(String).filter((x) => /^[0-9a-f]{24}$/.test(x)) : null);
+router.get(
+  "/ledger-match",
+  ah(async (req, res) => res.send(await LM.plan(req.org, null, "sales")))
+);
+router.post(
+  "/ledger-match",
+  ah(async (req, res) => {
+    const ids = partyList(req.body?.vendors);
+    if (!ids || !ids.length) throw new HttpError(400, "Choose the customers to match");
+    const r = await LM.apply(req.org, ids, "sales");
+    await require("../utils/audit").log(req, "invoices_matched_to_ledger", { meta: r }).catch(() => {});
+    res.send(r);
+  })
+);
+router.post(
+  "/ledger-match/undo",
+  ah(async (req, res) => {
+    const r = await LM.undo(req.org, partyList(req.body?.vendors), "sales");
+    await require("../utils/audit").log(req, "invoices_ledger_match_undone", { meta: r }).catch(() => {});
+    res.send(r);
+  })
+);
+
 router.get(
   "/next-number",
   ah(async (req, res) => {

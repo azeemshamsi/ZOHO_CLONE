@@ -13,13 +13,22 @@ import NameCustomer from "../components/NameCustomer";
 import Icon from "../components/Icon";
 import { DocEmail, PrintMenu } from "../components/EmailDoc";
 import { GstPanel } from "../components/GstPanel";
+import { MatchLedger } from "./Bills";
 
 const K = KINDS.invoice;
 
 export function InvoiceList() {
+  const [match, setMatch] = useState(false);
   return (
+    <>
+    {match && <MatchLedger base="/invoices" party="Customer" doc="Invoice" credit="Credit note" onClose={() => setMatch(false)} />}
     <DocList
       kind={K}
+      headerExtra={
+        <button className="btn" onClick={() => setMatch(true)} title="Invoices received by journal / cash entry / marketplace settlement: mark them received from the customer's ledger balance">
+          Match to ledger
+        </button>
+      }
       filters={[
         ["all", "All Invoices"],
         ["draft", "Draft"],
@@ -49,6 +58,7 @@ export function InvoiceList() {
         { label: "Balance Due", num: true, render: (r) => money(r.balance, r.currency) },
       ]}
     />
+    </>
   );
 }
 

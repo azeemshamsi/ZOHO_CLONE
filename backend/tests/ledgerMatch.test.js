@@ -29,3 +29,13 @@ test("ledger owes 600: newest bills keep 600, older settled", async () => {
   assert.deepStrictEqual(p[0].changes.filter((c) => c.type === "bill").map((c) => [c.number, c.settle, c.left]), [["A1", 900, 100]]);
   assert.strictEqual(p[0].after, 600);
 });
+
+test("sales: a customer with a nil ledger has every open invoice settled", async () => {
+  const Invoice = require("../src/models/Invoice");
+  const CreditNote = require("../src/models/CreditNote");
+  Invoice.find = () => ({ lean: async () => [{ _id: "i1", customer: V, customerName: "Vedanta", invoiceNumber: "SH/419", date: "2026-11-12", balance: 22479 }] });
+  CreditNote.find = () => ({ lean: async () => [] });
+  owed = new Map([[V, 0]]);
+  const p = await LM.plan("o", null, "sales");
+  assert.deepStrictEqual(p[0].changes.map((c) => [c.number, c.settle, c.left]), [["SH/419", 22479, 0]]);
+});
