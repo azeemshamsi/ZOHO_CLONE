@@ -929,7 +929,7 @@ const shiprocket_cargo = {
 const velErr = (d) => (d && typeof d === "object" ? d.message || d.error || d.errors || d.payload?.message || d : d);
 const velocity = {
   title: "Velocity Shipping",
-  fields: { credentials: ["apiKey"], options: ["warehouseId", "pickupLocation", "carrierId"] },
+  fields: { credentials: ["apiKey"], options: ["warehouseId", "pickupLocation", "carrierId", "returnWarehouseId"] },
   help: "Velocity dashboard → Settings → API Keys → Generate API Key (up to 365 days; shown once). Warehouse ID and pickup location name are on your warehouse in Velocity. Carrier ID is optional (blank = your Velocity shipping rules).",
   base: (acc) => (acc.baseUrl || "https://shazam.velocity.in").replace(/\/$/, ""),
   async call(acc, path, json) {
@@ -984,6 +984,59 @@ const velocity = {
     const p2 = a.data?.payload || {};
     if (!p2.awb_code) throw new Error(`Velocity created order ${p1.order_id} but couldn't assign a courier: ${short(velErr(a.data))}`);
     return { awb: String(p2.awb_code), courierName: p2.courier_name || "Velocity", labelUrl: p2.label_url || "", refs };
+  },
+  // Reverse pickup: reverse-order-orchestration creates the return, assigns the courier and schedules the pickup
+  // from the customer; it comes back to the return warehouse (or your pickup warehouse).
+  async reverse(acc, s) {
+    const wh = acc.options.returnWarehouseId || acc.options.warehouseId;
+    if (!wh) throw new Error("Velocity: enter the Warehouse ID (or Return warehouse ID) on this courier (Store → Couriers)");
+    const c = s.from || s.consignee; // the customer
+    const back = acc.pickup || {}; // you, or the seller
+    if (!back.pincode) throw new Error("Velocity: the return address has no pincode (courier's pickup address)");
+    const at = new Date(Date.now() + 5.5 * 3600000).toISOString();
+    const { status, data } = await this.call(acc, "/reverse-order-orchestration", {
+      order_id: s.reference,
+      order_date: `${at.slice(0, 10)} ${at.slice(11, 16)}`,
+      carrier_id: String(acc.options.carrierId || ""),
+      pickup_customer_name: c.name,
+      pickup_last_name: "",
+      pickup_address: [c.address1, c.address2].filter(Boolean).join(", ") || c.address || "",
+      pickup_city: c.city,
+      pickup_state: c.stateName || c.state || "",
+      pickup_country: "India",
+      pickup_pincode: String(c.pincode || ""),
+      pickup_email: c.email || "",
+      pickup_phone: String(c.phone || "").replace(/\D/g, "").slice(-10),
+      pickup_isd_code: "91",
+      shipping_customer_name: back.name || "",
+      shipping_last_name: "",
+      shipping_address: back.address || "",
+      shipping_city: back.city || "",
+      shipping_state: back.state || "",
+      shipping_country: "India",
+      shipping_pincode: String(back.pincode),
+      shipping_email: back.email || "",
+      shipping_phone: String(back.phone || "").replace(/\D/g, "").slice(-10),
+      shipping_isd_code: "91",
+      warehouse_id: String(wh),
+      order_items: s.items.map((i) => ({ name: i.name, sku: i.sku || i.name.slice(0, 40), units: i.quantity, selling_price: r2(i.price), discount: 0 })),
+      payment_method: "PREPAID",
+      total_discount: 0,
+      sub_total: r2(s.value),
+      length: s.length,
+      breadth: s.breadth,
+      height: s.height,
+      weight: s.weight,
+      request_pickup: true,
+    });
+    const p = data?.payload || {};
+    if (status >= 400 || !p.awb_code) throw new Error(`Velocity didn't book the reverse pickup (${status}): ${short(velErr(data))}`);
+    return {
+      awb: String(p.awb_code),
+      courierName: p.courier_name || "Velocity",
+      trackingUrl: "",
+      refs: { orderId: p.order_id, shipmentId: p.shipment_id, charge: p.charges?.reverse_charges || "" },
+    };
   },
   async track(acc, sh) {
     const { status, data } = await this.call(acc, "/order-tracking", { awbs: [sh.awb] });

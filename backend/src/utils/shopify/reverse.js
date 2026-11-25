@@ -150,7 +150,7 @@ async function quoteReverse(ctx, order, { pkg = {}, returnTo = "" } = {}) {
       const lane = new Proxy(acc, { get: (t, k) => (k === "pickup" ? { ...back, pincode: cust.pincode, city: cust.city, state: cust.stateName || cust.state } : Reflect.get(t, k, t)) });
       const rs = { ...s, cod: false, codAmount: 0, reverse: true, consignee: { ...cust, pincode: back.pincode || "", city: back.city || "", stateName: back.state || "" } };
       const r = await quoteAccount(lane, rs);
-      r.api = !!CARRIERS[real.carrier]?.reverse && !["custom", "shiprocket_cargo", "velocity", "bigship"].includes(real.carrier);
+      r.api = !!CARRIERS[real.carrier]?.reverse && !["custom", "shiprocket_cargo", "bigship"].includes(real.carrier);
       r.returnRate = real.carrier === "shiprocket";
       return r;
     }),

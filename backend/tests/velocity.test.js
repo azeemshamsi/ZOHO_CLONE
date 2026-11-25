@@ -5,6 +5,7 @@ const http = require("../src/utils/couriers/http");
 const calls = [];
 http.request = async (url, opts = {}) => {
   calls.push({ url, opts });
+  if (url.endsWith("/reverse-order-orchestration")) return { status: 200, data: { status: 1, payload: { awb_code: "VEHR43", courier_name: "Ekart Standard", order_id: "ORDM", shipment_id: "SHIU", charges: { reverse_charges: "91.30" } } } };
   if (url.endsWith("/forward-order")) return { status: 200, data: { status: 1, payload: { order_created: 1, awb_generated: 0, shipment_id: "SHI1", order_id: "ORD1" } } };
   if (url.endsWith("/forward-order-shipment")) return { status: 200, data: { status: 1, payload: { awb_generated: 1, awb_code: "3481", courier_name: "Delhivery Standard", label_url: "https://l/v" } } };
   if (url.endsWith("/order-tracking"))
@@ -35,4 +36,12 @@ test("Velocity rates: cheapest courier first, weight sent in grams", async () =>
   const q = await quoteAccount(acc, s);
   assert.deepStrictEqual([q.serviceable, q.charge, q.courierId], [true, 115, "C1"]);
   assert.strictEqual(calls.find((c) => c.url.endsWith("/rates")).opts.json.dead_weight, 500);
+});
+
+test("Velocity: reverse pickup from the customer back to the warehouse", async () => {
+  const back = { ...acc, options: { ...acc.options, returnWarehouseId: "RET1" }, pickup: { name: "Shiraz", phone: "+91 98765 43210", address: "Main Rd", city: "Saharanpur", state: "Uttar Pradesh", pincode: "247001" } };
+  const out = await V.reverse(back, { ...s, from: s.consignee, reference: "200970-RT", cod: false });
+  assert.deepStrictEqual([out.awb, out.courierName, out.refs.charge], ["VEHR43", "Ekart Standard", "91.30"]);
+  const j = calls.find((c) => c.url.endsWith("/reverse-order-orchestration")).opts.json;
+  assert.deepStrictEqual([j.pickup_pincode, j.shipping_pincode, j.warehouse_id, j.payment_method, j.shipping_phone, j.request_pickup], ["411001", "247001", "RET1", "PREPAID", "9876543210", true]);
 });
