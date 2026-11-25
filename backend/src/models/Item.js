@@ -10,6 +10,9 @@ const itemSchema = new mongoose.Schema(
     hsnSac: { type: String, default: "" },
     rate: { type: Number, default: 0 }, // selling price (excl. tax)
     purchaseRate: { type: Number, default: 0 },
+    // Cost for working out zakat only (admins, Settings → Zakat). Never in the books, reports or item screens:
+    // not loaded unless asked for (select: false).
+    zakatCost: { type: Number, default: 0, select: false },
     taxRate: { type: Number, default: 18 }, // GST %
     description: { type: String, default: "" },
     active: { type: Boolean, default: true },

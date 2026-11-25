@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { Link } from "react-router-dom";
 import { STATES, PAYMENT_TERMS } from "../lib/constants";
 import { PageHeader, Field, toast, Spinner } from "../components/ui";
 
@@ -223,6 +224,7 @@ export default function Settings() {
       </form>
       <StockCosting />
       <SignatureCard />
+      <ZakatLink />
       <StockRoomToggle />
       <EmailSettings />
       <AiSettings />
@@ -753,6 +755,23 @@ function DeleteCompany() {
 }
 
 // The Stock Room tab (photo view of stock on hand) on or off for everyone in the company.
+// Zakat valuation: admins only, and only from here (no menu or dashboard entry).
+function ZakatLink() {
+  const { user } = useAuth();
+  if (!(user?.superadmin || user?.role === "admin")) return null;
+  return (
+    <div className="card" style={{ marginTop: 18, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+      <div>
+        <strong>Zakat valuation</strong>
+        <div className="muted small">Private (admins only): zakat cost per item, stock value and zakat. Nothing here touches the accounts.</div>
+      </div>
+      <Link className="btn" to="/zakat">
+        Open
+      </Link>
+    </div>
+  );
+}
+
 // Signature / company stamp printed above "Authorised Signatory" on invoices, quotes, orders, notes and receipts.
 function SignatureCard() {
   const [img, setImg] = useState(null);

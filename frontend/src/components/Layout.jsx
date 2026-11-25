@@ -185,6 +185,7 @@ const PATH_MODULES = [
   ["/settings", "settings"],
   ["/users", "settings"],
   ["/security", "settings"],
+  ["/zakat", "settings"],
 ];
 // Pages outside the company role permissions (only for the OrdexaGo superadmin).
 const SUPER_PATHS = ["/superadmin"];

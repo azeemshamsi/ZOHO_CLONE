@@ -1,3 +1,4 @@
+import Zakat from "./pages/Zakat";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./lib/auth";
 import Layout from "./components/Layout";
@@ -214,6 +215,7 @@ export default function App() {
           <Route path="settings" element={<Settings />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="security" element={<Security />} />
+          <Route path="zakat" element={<Zakat />} />
           <Route path="account" element={<Account />} />
           <Route path="superadmin" element={<Superadmin />} />
           <Route path="sellers" element={<Sellers />} />
