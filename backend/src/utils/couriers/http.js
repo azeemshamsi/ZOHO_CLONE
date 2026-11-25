@@ -19,7 +19,8 @@ async function request(url, { method = "GET", headers = {}, json, form, raw, tim
     try {
       data = JSON.parse(text);
     } catch {
-      data = { raw: text.slice(0, 500) };
+      // Non-JSON answers (Blue Dart's tracking XML…) kept whole — cutting them at 500 characters broke tracking.
+      data = { raw: text.slice(0, 2000000) };
     }
     return { status: r.status, data, headers: r.headers };
   } catch (e) {
