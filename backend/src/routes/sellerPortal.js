@@ -250,7 +250,7 @@ router.get(
     await require("../utils/shopify/labelOut").sendLabel(res, o, {
       org: s.organization,
       storeOrg: s.organization,
-      own: req.query.own === "1",
+      own: true, // sellers always get the OrdexaGo-format label, never the courier's own
     });
   }),
 );
