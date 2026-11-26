@@ -30,7 +30,8 @@ const schema = Joi.object({
 
 async function check(req, data) {
   const accounts = await chartOfAccounts(req.org);
-  const target = accounts.find((a) => a.code === data.account);
+  const party = await require("../utils/bankActions").partyOf(req.org, data.account);
+  const target = party ? { code: data.account, name: party.name, type: "party" } : accounts.find((a) => a.code === data.account);
   if (!target) throw new HttpError(400, "Pick the account to record these lines in");
   if (["ar", "ap"].includes(target.code)) throw new HttpError(400, "Rules can't post to receivables or payables");
   const banks = new Set(accounts.filter((a) => ["Cash", "Bank"].includes(a.group)).map((a) => a.code));
@@ -53,7 +54,20 @@ router.get(
   ah(async (req, res) => {
     const [rules, accounts] = await Promise.all([BankRule.find({ organization: req.org }).sort({ priority: 1, createdAt: 1 }).lean(), chartOfAccounts(req.org)]);
     const name = (c) => (accounts.find((a) => a.code === c) || { name: "Deleted account" }).name;
-    res.send(rules.map((r) => ({ ...r, accountName: name(r.account), accountNames: r.accounts.map(name) })));
+    // Rules posting to a customer / vendor show the party's name.
+    const ids = { Customer: [], Vendor: [] };
+    for (const r of rules) {
+      const m = /^party:(customer|vendor):([0-9a-f]{24})$/.exec(r.account || "");
+      if (m) ids[m[1] === "customer" ? "Customer" : "Vendor"].push(m[2]);
+    }
+    const pname = new Map();
+    for (const [M, list] of Object.entries(ids))
+      if (list.length) for (const p of await require(`../models/${M}`).find({ _id: { $in: list }, organization: req.org }, { displayName: 1 }).lean()) pname.set(String(p._id), `${p.displayName} (${M === "Customer" ? "customer" : "vendor"})`);
+    const label = (c) => {
+      const m = /^party:(customer|vendor):([0-9a-f]{24})$/.exec(c || "");
+      return m ? pname.get(m[2]) || "Deleted party" : name(c);
+    };
+    res.send(rules.map((r) => ({ ...r, accountName: label(r.account), accountNames: r.accounts.map(name) })));
   })
 );
 

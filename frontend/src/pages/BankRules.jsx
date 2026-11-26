@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import SearchSelect from "../components/SearchSelect";
 import api, { errMsg } from "../lib/api";
 import { money, date } from "../lib/format";
 import { PageHeader, Spinner, Empty, Field, toast, Modal, Confirm } from "../components/ui";
@@ -36,25 +37,27 @@ const blankRule = () => ({
   active: true,
 });
 
-function AccountPicker({ accounts, value, onChange, exclude = [] }) {
-  const choices = accounts.filter((a) => !["ar", "ap", ...exclude].includes(a.code) && a.active !== false);
-  const groups = [...new Set(choices.map((a) => a.group))];
-  return (
-    <select required value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">Select an account</option>
-      {groups.map((g) => (
-        <optgroup key={g} label={g}>
-          {choices
-            .filter((a) => a.group === g)
-            .map((a) => (
-              <option key={a.code} value={a.code}>
-                {a.name}
-              </option>
-            ))}
-        </optgroup>
-      ))}
-    </select>
-  );
+// Ledger or party (as in Tally): any account, or a customer / vendor — money in from a customer is a receipt
+// against their ledger, money out to a vendor a payment against theirs. Parties are "party:customer:<id>".
+let partyCache = null;
+const loadParties = () =>
+  (partyCache ||= Promise.all([api.get("/customers", { params: { status: "active" } }), api.get("/vendors", { params: { status: "active" } })])
+    .then(([c, v]) => ({ customers: c.data || [], vendors: v.data || [] }))
+    .catch(() => ((partyCache = null), { customers: [], vendors: [] })));
+
+export function AccountPicker({ accounts, value, onChange, exclude = [] }) {
+  const [parties, setParties] = useState({ customers: [], vendors: [] });
+  useEffect(() => {
+    loadParties().then(setParties);
+  }, []);
+  const options = useMemo(() => {
+    const acc = accounts
+      .filter((a) => !["ar", "ap", ...exclude].includes(a.code) && a.active !== false)
+      .map((a) => ({ value: a.code, label: a.name, sub: a.group || "Ledger" }));
+    const party = (kind, label) => (c) => ({ value: `party:${kind}:${c._id}`, label: c.displayName, sub: [label, c.gstin].filter(Boolean).join(" · "), search: [c.companyName, c.phone, c.email].filter(Boolean).join(" ") });
+    return [...acc, ...parties.customers.map(party("customer", "Customer (Sundry Debtor)")), ...parties.vendors.map(party("vendor", "Vendor (Sundry Creditor)"))];
+  }, [accounts, parties, exclude.join(",")]);
+  return <SearchSelect required value={value} options={options} onChange={onChange} placeholder="Type a ledger, customer or vendor…" />;
 }
 
 function RuleModal({ open, rule, accounts, banks, onClose, onSaved }) {
@@ -277,6 +280,7 @@ export function BankRules() {
     load();
   };
   const recordAs = (r) => {
+    if (String(r.account).startsWith("party:")) return r.applyTo === "deposits" ? "Receipt from party (journal)" : "Payment to party (journal)";
     const a = accounts.find((x) => x.code === r.account);
     if (r.applyTo === "withdrawals" && a?.type === "expense") return "Expense";
     return r.applyTo === "deposits" ? "Deposit (journal)" : "Withdrawal (journal)";
@@ -386,4 +390,3 @@ export function BankRules() {
   );
 }
 
-export { AccountPicker };

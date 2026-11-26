@@ -470,20 +470,7 @@ function MatchModal({ line, accounts, bankCode, onClose, onDone }) {
         <h4 className="section-title">Or categorise it as a new transaction</h4>
         <div className="row-3">
           <Field label="Account" required>
-            <select value={cat.account} onChange={(e) => setCat({ ...cat, account: e.target.value })}>
-              <option value="">Select an account</option>
-              {groups.map((g) => (
-                <optgroup key={g} label={g}>
-                  {choices
-                    .filter((a) => a.group === g)
-                    .map((a) => (
-                      <option key={a.code} value={a.code}>
-                        {a.name}
-                      </option>
-                    ))}
-                </optgroup>
-              ))}
-            </select>
+<AccountPicker accounts={accounts} value={cat.account} onChange={(v) => setCat({ ...cat, account: v })} exclude={[bankCode]} />
           </Field>
           {isOut && chosen?.type === "expense" && (
             <Field label="GST included" hint="Splits out input tax credit">

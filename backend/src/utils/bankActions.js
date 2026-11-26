@@ -49,8 +49,43 @@ async function context(org) {
 
 // Record a new transaction from the line: an Expense for spending against an expense account,
 // otherwise a Journal between the bank account and the chosen account.
+// A customer / vendor picked as the "account" (party:customer:<id> / party:vendor:<id>): a receipt / payment
+// journal between the bank and that party's receivable / payable, as Tally's party ledgers.
+async function partyOf(org, account) {
+  const m = /^party:(customer|vendor):([0-9a-f]{24})$/.exec(String(account || ""));
+  if (!m) return null;
+  const M = require(`../models/${m[1] === "customer" ? "Customer" : "Vendor"}`);
+  const p = await M.findOne({ _id: m[2], organization: org }, { displayName: 1 }).lean();
+  if (!p) throw new HttpError(400, `That ${m[1]} no longer exists`);
+  return { kind: m[1], id: p._id, name: p.displayName };
+}
+
 async function categorizeLine(org, line, { account, taxRate = 0, notes = "", rule = "" }, ctx) {
   if (line.status !== "unmatched") throw new HttpError(400, "This line is already matched or categorised");
+  const party = await partyOf(org, account);
+  if (party) {
+    const description = notes || line.description;
+    const amt = line.deposit || line.withdrawal;
+    const ctl = party.kind === "customer" ? "ar" : "ap";
+    const pl = { account: ctl, [party.kind]: party.id, contactName: party.name, description };
+    const lines = line.deposit
+      ? [{ account: line.account, debit: amt, credit: 0, description }, { ...pl, debit: 0, credit: amt }]
+      : [{ ...pl, debit: amt, credit: 0 }, { account: line.account, debit: 0, credit: amt, description }];
+    const j = await Journal.create({
+      organization: org,
+      number: await nextNumber(org, "journal", ctx.orgDoc.journalPrefix || "MJ-"),
+      date: line.date,
+      reference: party.name,
+      notes: `Bank: ${description}`,
+      lines,
+      total: amt,
+    });
+    const dateStr = new Date(line.date).toISOString().slice(0, 10);
+    line.status = "categorized";
+    line.match = { type: "Journal", id: j._id, number: j.number, party: party.name, key: `Journal|${j._id}|${dateStr}|${line.deposit || 0}|${line.withdrawal || 0}`, ...(rule ? { rule } : {}) };
+    await line.save();
+    return line;
+  }
   const target = ctx.accounts.find((a) => a.code === account);
   if (!target) throw new HttpError(400, "Pick an account");
   if (["ar", "ap", line.account].includes(target.code)) {
@@ -185,4 +220,4 @@ async function applyRules(org, lines) {
   return result;
 }
 
-module.exports = { entryKey, usedKeys, candidatesFor, matchLine, context, categorizeLine, undoLine, ruleMatches, applyRules };
+module.exports = { partyOf, entryKey, usedKeys, candidatesFor, matchLine, context, categorizeLine, undoLine, ruleMatches, applyRules };

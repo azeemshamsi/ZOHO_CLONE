@@ -20,6 +20,7 @@ const bankStatementLineSchema = new mongoose.Schema(
       number: { type: String },
       key: { type: String },
       rule: { type: String }, // name of the transaction rule that categorised it
+      party: { type: String }, // customer / vendor it was recorded against
     },
     batch: { type: String, default: "" },
   },
