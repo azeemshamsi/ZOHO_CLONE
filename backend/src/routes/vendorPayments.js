@@ -84,6 +84,55 @@ router.get(
   })
 );
 
+// Edit a payment made (keeps its number): what it paid is taken off those bills, then the new amounts applied.
+router.put(
+  "/:id",
+  ah(async (req, res) => {
+    const p = await VendorPayment.findOne({ _id: req.params.id, organization: req.org });
+    if (!p) throw new HttpError(404, "Payment not found");
+    const data = validate(schema, req.body);
+    if (!(await require("../utils/ledger").isBankAccount(req.org, data.bankAccount))) throw new HttpError(400, "Pick a cash or bank account");
+    const vendor = await Vendor.findOne({ _id: data.vendor, organization: req.org });
+    if (!vendor) throw new HttpError(400, "Choose a valid vendor");
+    const allocations = data.allocations.filter((a) => a.amount > 0);
+    const allocated = round2(allocations.reduce((s, a) => s + a.amount, 0));
+    if (allocated > round2(data.amount)) throw new HttpError(400, "The amounts applied to bills are more than the amount paid");
+
+    const docs = new Map();
+    const load = async (id) => {
+      const k = String(id);
+      if (!docs.has(k)) docs.set(k, await Bill.findOne({ _id: id, organization: req.org }));
+      return docs.get(k);
+    };
+    for (const a of p.allocations) {
+      const bill = await load(a.bill);
+      if (!bill) continue;
+      bill.amountPaid = round2(Math.max(bill.amountPaid - a.amount, 0));
+      if (["paid", "partially_paid"].includes(bill.status)) bill.status = "open";
+      settleBill(bill);
+    }
+    const applied = [];
+    for (const a of allocations) {
+      const bill = await load(a.bill);
+      if (!bill || ["void", "draft"].includes(bill.status) || String(bill.vendor) !== String(vendor._id)) throw new HttpError(400, "One of the selected bills is not valid");
+      if (round2(a.amount) > round2(bill.balance)) throw new HttpError(400, `Payment for bill ${bill.billNumber} is more than its balance due`);
+      bill.amountPaid = round2(bill.amountPaid + round2(a.amount));
+      settleBill(bill);
+      applied.push({ bill: bill._id, billNumber: bill.billNumber, amount: round2(a.amount) });
+    }
+    for (const b of docs.values()) if (b) await b.save();
+    Object.assign(p, {
+      ...data,
+      vendorName: vendor.displayName,
+      allocations: applied,
+      unusedAmount: round2(data.amount - allocated),
+      ...(await require("../utils/salesDoc").currencyFor(req, vendor, data.exchangeRate)),
+    });
+    await p.save();
+    res.send(p);
+  })
+);
+
 router.delete(
   "/:id",
   ah(async (req, res) => {

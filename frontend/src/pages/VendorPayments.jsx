@@ -82,6 +82,17 @@ export function VendorPaymentList() {
 }
 
 export function VendorPaymentForm() {
+  // Editing an existing payment (/:id/edit): its fields and what it paid, with those amounts counted back into
+  // each bill's balance due so they can be changed.
+  const { id: editId } = useParams();
+  const [orig, setOrig] = useState(null);
+  useEffect(() => {
+    if (!editId) return;
+    api.get(`/vendor-payments/${editId}`).then(({ data }) => {
+      setOrig(data);
+      setForm((f) => ({ ...f, vendor: data.vendor?._id || data.vendor || "", date: isoDate(data.date), amount: data.amount, mode: data.mode || f.mode, bankAccount: data.bankAccount?._id || data.bankAccount || "", reference: data.reference || "", notes: data.notes || "", exchangeRate: data.exchangeRate || f.exchangeRate }));
+    });
+  }, [editId]);
   const [payCurrencies, setPayCurrencies] = useState([]);
   useEffect(() => {
     api.get("/currencies").then((r) => setPayCurrencies(r.data)).catch(() => {});
@@ -119,7 +130,27 @@ export function VendorPaymentForm() {
 
   useEffect(() => {
     if (!form.vendor) return setBills([]);
-    api.get("/bills", { params: { vendor: form.vendor, open: "1" } }).then((r) => {
+    if (editId && !orig) return;
+    api.get("/bills", { params: { vendor: form.vendor, open: "1" } }).then(async (r) => {
+      if (orig && String(orig.vendor?._id || orig.vendor) === String(form.vendor)) {
+        // This payment's own bills: balance due as it was before the payment, and its amounts pre-filled.
+        const list = [...r.data];
+        const pre = {};
+        for (const a of orig.allocations || []) {
+          const did = String(a.bill?._id || a.bill);
+          let d = list.find((x) => x._id === did);
+          if (!d) {
+            d = (await api.get(`/bills/${did}`).catch(() => ({ data: null }))).data;
+            if (!d) continue;
+            list.push(d);
+          }
+          list[list.indexOf(d)] = { ...d, balance: round2((Number(d.balance) || 0) + a.amount) };
+          pre[did] = a.amount;
+        }
+        setBills(list);
+        setAlloc(pre);
+        return;
+      }
       setBills(r.data);
       const pre = params.get("bill");
       if (pre) {
@@ -130,7 +161,7 @@ export function VendorPaymentForm() {
         }
       } else setAlloc({});
     });
-  }, [form.vendor, params]);
+  }, [form.vendor, params, orig]);
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
   const applied = round2(Object.values(alloc).reduce((s, v) => s + (Number(v) || 0), 0));
@@ -161,7 +192,7 @@ export function VendorPaymentForm() {
     setBusy(true);
     setError("");
     try {
-      const { data } = await api.post("/vendor-payments", {
+      const { data } = await (editId ? api.put.bind(null, `/vendor-payments/${editId}`) : api.post.bind(null, "/vendor-payments"))({
         ...form,
         amount: received,
         exchangeRate: payCur !== "INR" ? Number(form.exchangeRate) || undefined : undefined,
@@ -169,7 +200,7 @@ export function VendorPaymentForm() {
           .filter(([, v]) => Number(v) > 0)
           .map(([bill, v]) => ({ bill, amount: Number(v) })),
       });
-      toast("Payment recorded");
+      toast(editId ? "Payment updated" : "Payment recorded");
       navigate(`/payments-made/${data._id}`);
     } catch (err) {
       setError(errMsg(err));
@@ -179,7 +210,7 @@ export function VendorPaymentForm() {
 
   return (
     <>
-      <PageHeader title={copyOf ? "Record Payment (copy)" : "Record Payment"} back="/payments-made" />
+      <PageHeader title={editId ? `Edit ${orig?.paymentNumber || "Payment"}` : copyOf ? "Record Payment (copy)" : "Record Payment"} back={editId ? `/payments-made/${editId}` : "/payments-made"} />
       <form className="card form" onSubmit={submit}>
         <div className="form-grid">
           <Field label="Vendor Name" required>
@@ -339,6 +370,9 @@ export function VendorPaymentView() {
         <button className="btn" onClick={() => printPdf("vendorPayment", id)}>
           <Icon name="print" size={16} /> Print / PDF
         </button>
+        <Link to={`/payments-made/${id}/edit`} className="btn" title="Edit (Alt+E)">
+          <Icon name="edit" size={16} /> Edit
+        </Link>
         <Link to={`/payments-made/new?copy=${id}`} className="btn" title="Duplicate (Alt+2)">
           Duplicate
         </Link>

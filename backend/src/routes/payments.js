@@ -88,6 +88,57 @@ router.get(
   })
 );
 
+// Edit a receipt (keeps its number): what it paid is taken off those invoices, then the new amounts applied.
+// Checked in full before anything is saved.
+router.put(
+  "/:id",
+  ah(async (req, res) => {
+    const payment = await Payment.findOne({ _id: req.params.id, organization: req.org });
+    if (!payment) throw new HttpError(404, "Payment not found");
+    const data = validate(schema, req.body);
+    if (!(await require("../utils/ledger").isBankAccount(req.org, data.bankAccount))) throw new HttpError(400, "Pick a cash or bank account");
+    const customer = await Customer.findOne({ _id: data.customer, organization: req.org });
+    if (!customer) throw new HttpError(400, "Choose a valid customer");
+    const allocations = data.allocations.filter((a) => a.amount > 0);
+    const allocated = round2(allocations.reduce((s, a) => s + a.amount, 0));
+    if (allocated > round2(data.amount)) throw new HttpError(400, "The amounts applied to invoices are more than the amount received");
+
+    const docs = new Map(); // invoice id → doc, with this payment's old amounts taken off
+    const load = async (id) => {
+      const k = String(id);
+      if (!docs.has(k)) docs.set(k, await Invoice.findOne({ _id: id, organization: req.org }));
+      return docs.get(k);
+    };
+    for (const a of payment.allocations) {
+      const inv = await load(a.invoice);
+      if (!inv) continue;
+      inv.amountPaid = round2(Math.max(inv.amountPaid - a.amount, 0));
+      if (["paid", "partially_paid"].includes(inv.status)) inv.status = "sent";
+      settle(inv);
+    }
+    const applied = [];
+    for (const a of allocations) {
+      const inv = await load(a.invoice);
+      if (!inv || inv.status === "void" || String(inv.customer) !== String(customer._id)) throw new HttpError(400, "One of the selected invoices is not valid");
+      if (round2(a.amount) > round2(inv.balance)) throw new HttpError(400, `Payment for ${inv.invoiceNumber} is more than its balance due`);
+      if (inv.status === "draft") inv.status = "sent";
+      inv.amountPaid = round2(inv.amountPaid + round2(a.amount));
+      settle(inv);
+      applied.push({ invoice: inv._id, invoiceNumber: inv.invoiceNumber, amount: round2(a.amount) });
+    }
+    for (const inv of docs.values()) if (inv) await inv.save();
+    Object.assign(payment, {
+      ...data,
+      customerName: customer.displayName,
+      allocations: applied,
+      unusedAmount: round2(data.amount - allocated),
+      ...(await require("../utils/salesDoc").currencyFor(req, customer, data.exchangeRate)),
+    });
+    await payment.save();
+    res.send(payment);
+  })
+);
+
 router.delete(
   "/:id",
   ah(async (req, res) => {

@@ -184,6 +184,7 @@ export default function App() {
           <Route path="bills/:id/edit" element={<BillForm />} />
           <Route path="payments-made" element={<VendorPaymentList />} />
           <Route path="payments-made/new" element={<VendorPaymentForm />} />
+          <Route path="payments-made/:id/edit" element={<VendorPaymentForm key="payments-made-edit" />} />
           <Route path="payments-made/:id" element={<VendorPaymentView />} />
           <Route path="expenses" element={<ExpenseList />} />
           <Route path="expenses/new" element={<ExpenseForm />} />
@@ -211,6 +212,7 @@ export default function App() {
           <Route path="banking/:code" element={<BankAccountPage />} />
           <Route path="payments" element={<PaymentList />} />
           <Route path="payments/new" element={<PaymentForm />} />
+          <Route path="payments/:id/edit" element={<PaymentForm key="payments-edit" />} />
           <Route path="payments/:id" element={<PaymentView />} />
           <Route path="settings" element={<Settings />} />
           <Route path="users" element={<UsersPage />} />
