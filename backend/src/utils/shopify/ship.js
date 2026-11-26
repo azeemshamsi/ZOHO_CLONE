@@ -1311,8 +1311,12 @@ async function trackAll() {
   );
   let ok = 0;
   let failed = 0;
+  const skipped = [];
   for (const o of orders) {
-    if (o.shipment?.carrier === "custom" && !customs.get(String(o.shipment.account))) continue;
+    if (o.shipment?.carrier === "custom" && !customs.get(String(o.shipment.account))) {
+      skipped.push(`${o.name} (${o.shipment?.courierName || "custom"} ${o.shipment?.awb || ""})`);
+      continue;
+    }
     await trackOrder(o)
       .then(() => ok++)
       .catch((e) => {
@@ -1320,7 +1324,7 @@ async function trackAll() {
         console.error(`[tracking] ${o.name} (${o.shipment?.carrier} ${o.shipment?.awb}): ${e.message}`);
       });
   }
-  console.log(`[tracking] run: ${orders.length} order(s) — ${ok} checked, ${failed} failed`);
+  console.log(`[tracking] run: ${orders.length} order(s) — ${ok} checked, ${failed} failed${skipped.length ? `; not tracked (custom courier, no tracking account): ${skipped.join(", ")}` : ""}`);
   await require("./reverse")
     .trackAllReverse()
     .catch(() => {});
