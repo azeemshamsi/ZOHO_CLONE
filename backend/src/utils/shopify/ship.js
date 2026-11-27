@@ -628,7 +628,7 @@ async function fulfillInShopify(store, order, sh, lines = null) {
   const open = (data.order?.fulfillmentOrders?.nodes || []).filter((f) =>
     ["OPEN", "IN_PROGRESS", "SCHEDULED"].includes(f.status),
   );
-  if (!open.length) return false;
+  if (!open.length) return order.reshipAt ? retrackInShopify(store, order, sh) : false;
   const res = await gql(
     store,
     `mutation($f: FulfillmentInput!) { fulfillmentCreate(fulfillment: $f) { fulfillment { id status } userErrors { field message } } }`,
@@ -647,6 +647,22 @@ async function fulfillInShopify(store, order, sh, lines = null) {
     },
   );
   const errs = res.fulfillmentCreate?.userErrors || [];
+  if (errs.length) throw new Error(errs.map((e) => e.message).join("; "));
+  return true;
+}
+
+// Shipped again after an RTO: Shopify's order is already fulfilled, so its latest fulfilment gets the new courier
+// and AWB (the customer is told, as with a new shipment).
+async function retrackInShopify(store, order, sh) {
+  const d = await gql(store, `query($id: ID!) { order(id: $id) { fulfillments(first: 20) { id status createdAt } } }`, { id: order.shopifyId });
+  const f = (d.order?.fulfillments || []).filter((x) => x.status !== "CANCELLED").sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+  if (!f) return false;
+  const r = await gql(
+    store,
+    `mutation($id: ID!, $t: FulfillmentTrackingInput!, $n: Boolean) { fulfillmentTrackingInfoUpdate(fulfillmentId: $id, trackingInfoInput: $t, notifyCustomer: $n) { fulfillment { id } userErrors { message } } }`,
+    { id: f.id, t: { company: sh.courierName, number: sh.awb, ...(sh.trackingUrl ? { url: sh.trackingUrl } : {}) }, n: store.notifyCustomer !== false },
+  );
+  const errs = r.fulfillmentTrackingInfoUpdate?.userErrors || [];
   if (errs.length) throw new Error(errs.map((e) => e.message).join("; "));
   return true;
 }
@@ -1330,7 +1346,41 @@ async function trackAll() {
     .catch(() => {});
 }
 
+/**
+ * Ship an RTO'd / returned order again: the old shipment(s) go to pastShipments, the order goes back to Packed to
+ * book with any courier. If the return was closed with a credit note (stock back, invoice cancelled out), the order
+ * is unlinked from that invoice so a fresh invoice is made when it goes out again; otherwise the invoice stays.
+ */
+async function reshipOrder(order, user) {
+  if (!["rto", "returned"].includes(order.status)) throw new Error("Only an RTO or returned order can be shipped again");
+  const old = allShipments(order).map((s) => ({ ...(s.toObject?.() || s), endedAs: order.status, endedAt: order.returnedAt || order.statusChangedAt || new Date() }));
+  const past = [...(order.pastShipments || []), ...old];
+  const note = [`Shipped again after ${order.status === "rto" ? "RTO" : "return"}${old[0]?.awb ? ` (earlier ${old[0].courierName || ""} ${old[0].awb})` : ""}`];
+  if (order.returnCreditNote && order.invoice) {
+    past[past.length - 1] = { ...past[past.length - 1], invoice: order.invoice, invoiceNumber: order.invoiceNumber, creditNote: order.returnCreditNote };
+    note.push(`invoice ${order.invoiceNumber} was cancelled by its credit note — create a new invoice`);
+    order.invoice = undefined;
+    order.invoiceNumber = undefined;
+    order.returnCreditNote = undefined;
+  }
+  order.pastShipments = past;
+  order.shipment = undefined;
+  order.extraShipments = undefined;
+  order.boxes = undefined;
+  order.partBooked = false;
+  order.awbScannedAt = undefined;
+  order.awbScans = [];
+  order.status = "packed";
+  order.statusChangedAt = new Date();
+  order.reshipAt = new Date();
+  order.deliveredAt = undefined;
+  order.remarks = [order.remarks, `${note.join(" — ")} · ${new Date().toLocaleDateString("en-IN")}${user?.name ? ` by ${user.name}` : ""}`].filter(Boolean).join("\n");
+  await order.save();
+  return order;
+}
+
 module.exports = {
+  reshipOrder,
   takesPayment,
   isCodOrder,
   accountForPayment,

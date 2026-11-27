@@ -229,6 +229,9 @@ const shopifyOrderSchema = new mongoose.Schema(
     // Shipped in several boxes (each its own AWB): box 1 is `shipment`, boxes 2… are here, each like `shipment`
     // plus { box, of, lines: [{ lineId, title, sku, quantity }] }. `boxes` keeps the split: [{ box, lines }].
     extraShipments: { type: [mongoose.Schema.Types.Mixed], default: undefined },
+    // Shipped again after an RTO / return: the earlier shipments (AWB, courier, status, dates) and invoices.
+    pastShipments: { type: [mongoose.Schema.Types.Mixed], default: undefined },
+    reshipAt: Date,
     boxes: { type: mongoose.Schema.Types.Mixed, default: undefined },
     // Reverse pickup (utils/shopify/reverse.js): the courier brings a delivered order back.
     reverse: { type: mongoose.Schema.Types.Mixed, default: undefined },

@@ -2608,6 +2608,29 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly: roIn, 
                   Mark Return Created
                 </button>
               )}
+              {["rto", "returned"].includes(o.status) &&
+                !readOnly &&
+                (!o.channel || o.channel === "shopify") && (
+                  <button
+                    className="btn btn-primary"
+                    disabled={busy}
+                    title="The parcel came back and the customer still wants it: book it again with a new AWB"
+                    onClick={() =>
+                      window.confirm(
+                        `Ship ${o.name} again?\n\nThe order goes back to Packed so you can book it with any courier (new AWB). The old AWB${sh.awb ? ` (${sh.awb})` : ""} is kept in the order's remarks and history, and Shopify gets the new tracking.` +
+                          (o.returnCreditNote
+                            ? `\n\nThe return was closed with a credit note, so the old invoice ${o.invoiceNumber || ""} is cancelled out — create a new invoice before shipping.`
+                            : ""),
+                      ) &&
+                      act(
+                        () => api.post(`/shopify/orders/${o._id}/reship`),
+                        "Moved to Packed — book the shipment again",
+                      )
+                    }
+                  >
+                    Ship Again
+                  </button>
+                )}
               {["rto", "return_created", "shipped", "delivered"].includes(
                 o.status,
               ) && (

@@ -1889,6 +1889,22 @@ router.get(
   }),
 );
 
+// Ship an RTO'd / returned parcel again (back to Packed, book any courier; old AWB kept in history).
+router.post(
+  "/orders/:id/reship",
+  ah(async (req, res) => {
+    const o = await ShopifyOrder.findOne({ _id: req.params.id, organization: req.storeOrg });
+    if (!o) throw new HttpError(404, "Order not found");
+    try {
+      await require("../utils/shopify/ship").reshipOrder(o, req.user);
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+    require("../utils/shopify/orderIndex").forget(req.storeOrg);
+    res.send(o);
+  }),
+);
+
 router.post(
   "/orders/:id/reverse/quotes",
   ah(async (req, res) => {
@@ -2926,6 +2942,7 @@ router.moduleOf = function (req) {
   // Handover scan: shipping, or the scan-only permission (AWB Scan role).
   if (p === "/orders/awb-scan" || p === "/orders/awb-scans") return ["store_shipping", "store_shipping.awb_scan"];
   // Creating invoices from orders: full store orders, or the invoice-only permission (Invoicing Desk).
+  if (/^\/orders\/[^/]+\/reship$/.test(p)) return ["store_orders", "store_shipping"];
   if (p === "/orders/invoice") return ["store_orders", "store_orders.invoice"];
   // Payment proof: full store_orders, or the order taker on an order they just created (checked in the route).
   if (/^\/orders\/[^/]+\/payment-proofs/.test(p))
