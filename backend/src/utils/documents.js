@@ -10,10 +10,10 @@ const DOCS = {
   invoice: {
     model: "Invoice", module: "sales", party: "customer", number: "invoiceNumber", title: "TAX INVOICE", label: "Invoice",
     facts: (d) => [["Invoice Date", fmtDate(d.date)], ["Due Date", fmtDate(d.dueDate)], ["Terms", d.paymentTerms ? `Net ${d.paymentTerms}` : "Due on Receipt"], ["Reference#", d.orderNumber]],
-    balance: (d) => ({ paid: d.total - d.balance, balance: d.balance }),
+    // No "Payments / Balance Due" on the invoice itself: it shows the invoice total only.
     markSent: (d) => d.status === "draft" && ((d.status = "sent"), settleInvoice(d), true),
     body: (d, org, name) =>
-      `Dear ${name},\n\nThank you for your business. Your invoice ${d.invoiceNumber} is attached.\n\nInvoice Amount: ${money(d.total)}\nDue Date: ${fmtDate(d.dueDate)}\nBalance Due: ${money(d.balance)}\n\nIf you have any questions, just reply to this email.\n\nRegards,\n${org.name}`,
+      `Dear ${name},\n\nThank you for your business. Your invoice ${d.invoiceNumber} is attached.\n\nInvoice Amount: ${money(d.total)}\n\nIf you have any questions, just reply to this email.\n\nRegards,\n${org.name}`,
   },
   quote: {
     model: "Quote", module: "sales", party: "customer", number: "number", title: "QUOTE", label: "Quote",

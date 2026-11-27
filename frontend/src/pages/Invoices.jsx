@@ -314,18 +314,12 @@ export function InvoiceView() {
           title={K.docTitle}
           number={inv.invoiceNumber}
           ribbon={status !== "draft" ? { text: status.replace("_", " "), cls: status } : null}
-          balance={{ label: "Balance Due", value: inv.balance }}
           meta={[
             ["Invoice Date", date(inv.date)],
             ["Terms", (PAYMENT_TERMS.find((p) => p[0] === inv.paymentTerms) || [0, `Net ${inv.paymentTerms}`])[1]],
             ["Due Date", date(inv.dueDate)],
             ["Reference#", inv.orderNumber],
           ]}
-          extraTotals={[
-            inv.amountPaid > 0 && ["Payment Made", <span className="text-paid">(-) {amount(inv.amountPaid)}</span>],
-            inv.creditsApplied > 0 && ["Credits Applied", <span className="text-paid">(-) {amount(inv.creditsApplied)}</span>],
-            ["Balance Due", money(inv.balance, inv.currency), "doc-grand"],
-          ].filter(Boolean)}
         />
         <Attachments docType="invoice" docId={inv._id} />
       </div>
