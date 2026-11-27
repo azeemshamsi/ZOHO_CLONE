@@ -37,6 +37,9 @@ export function GstPanel({ kind, doc, onChanged, eligible }) {
   const e = doc.einvoice || {};
   const w = doc.eway || {};
   const einvOn = organization?.einvoicing?.enabled && eligible;
+  // Recording an IRN by hand (generated on the portal or another software) works even with e-invoicing off in
+  // Settings, on any B2B / export document.
+  const manualIrn = !einvOn && eligible && e.status !== "generated";
   const clearOn = !!organization?.gsp?.active;
   const [busy, setBusy] = useState("");
   const viaClear = async (what) => {
@@ -52,7 +55,7 @@ export function GstPanel({ kind, doc, onChanged, eligible }) {
   };
   const goods = (doc.lineItems || []).some((l) => !String(l.hsnSac || "").startsWith("99"));
   const ewayOn = kind === "invoice" && organization?.ewayBills?.enabled && goods && doc.status !== "draft";
-  if (!einvOn && !ewayOn && e.status !== "generated" && w.status !== "generated") return null;
+  if (!einvOn && !manualIrn && !ewayOn && e.status !== "generated" && w.status !== "generated") return null;
   if (doc.status === "void" && e.status !== "generated") return null;
 
   const getJson = async () => {
@@ -77,6 +80,19 @@ export function GstPanel({ kind, doc, onChanged, eligible }) {
   };
   return (
     <div className="card gst-panel no-print">
+      {manualIrn && e.status !== "cancelled" && (
+        <div className="gst-row">
+          <div className="gst-main">
+            <div className="gst-title">e-Invoice</div>
+            <div className="muted small">Got an IRN for this invoice from the e-invoice portal or elsewhere? Record it here and it prints on the invoice.</div>
+          </div>
+          <div className="gst-actions">
+            <button className="btn btn-sm" onClick={() => setModal({ type: "irn" })}>
+              Add IRN manually
+            </button>
+          </div>
+        </div>
+      )}
       {(einvOn || e.status === "generated" || e.status === "cancelled") && (
         <div className="gst-row">
           <div className="gst-main">
@@ -101,7 +117,7 @@ export function GstPanel({ kind, doc, onChanged, eligible }) {
             )}
           </div>
           <div className="gst-actions">
-            {e.status !== "generated" && doc.status !== "draft" && (
+            {e.status !== "generated" && (doc.status !== "draft" || !clearOn) && (
               <>
                 {clearOn && (
                   <button className="btn btn-sm btn-primary" disabled={!!busy} onClick={() => viaClear("irn")}>
