@@ -115,7 +115,7 @@ function ClearSettings() {
                   <input type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
                 </Field>
               </div>
-              <Field label="Clear auth token (optional)" hint={a.tokenSaved ? `Saved (…${a.tokenEnd}). Leave blank to keep it.` : "Only if Clear also gave you an auth token (X-CT-Auth-Token)"}>
+              <Field label="Clear auth token (X-CT-Auth-Token)" hint={a.tokenSaved ? `Saved (…${a.tokenEnd}). Leave blank to keep it.` : "Needed by Clear's gateway on every call, along with the client ID / secret. Clear issues it on request (your Clear account manager, or gst-sales@cleartax.in)."}>
                 <input type="password" autoComplete="new-password" value={f.token} onChange={(e) => setF({ ...f, token: e.target.value.trim() })} />
               </Field>
               <Field

@@ -110,7 +110,16 @@ async function login(acc, gstin, force = false) {
   const res = await request(`${base(acc)}/vital/v1.04/auth`, { method: "POST", headers: headersOf(acc, gstin, false), json: { Data: enc }, timeout: 45000 });
   check401(res);
   const d = res.data || {};
-  if (String(d.Status) !== "1" || !d.Data?.AuthToken) throw new Error(`Clear login failed: ${errorsOf(d).join("; ") || short(d)}`);
+  if (String(d.Status) !== "1" || !d.Data?.AuthToken) {
+    const why = errorsOf(d).join("; ") || short(d);
+    // Clear's gateway wants its own auth token (X-CT-Auth-Token) besides the client ID / secret.
+    const hint = /Invalid Auth-Token|Client-ID|Client-Secret/i.test(why)
+      ? acc.token
+        ? " — Clear's gateway refused the auth token / client ID / secret: check all three are for the same environment (sandbox vs live) and this GSTIN."
+        : " — add Clear's auth token (X-CT-Auth-Token) in the field above; Clear issues it on request (your Clear account manager, or gst-sales@cleartax.in)."
+      : "";
+    throw new Error(`Clear login failed: ${why}${hint}`);
+  }
   const sek = aes(appKey, Buffer.from(d.Data.Sek, "base64"), true);
   acc.authToken = d.Data.AuthToken;
   acc.sek = sek.toString("base64");
