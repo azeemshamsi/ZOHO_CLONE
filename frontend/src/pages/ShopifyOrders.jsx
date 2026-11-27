@@ -2289,7 +2289,11 @@ function ReverseModal({ order, couriers, onClose, onDone }) {
   );
 }
 
-function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly, canInvoice }) {
+function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly: roIn, canInvoice }) {
+  // Order actions (pack, book, ship, status changes) need full Store: Orders or Shipping. A user whose only "full"
+  // store permission is returns or invoicing (e.g. Returns Desk + Invoicing Desk) gets the read-only view.
+  const { user: me } = useAuth();
+  const readOnly = roIn || !can(me, ["store_orders", "store_shipping"], "full");
   const [o, setO] = useState(null);
   const [busy, setBusy] = useState(false);
   const [reverseOpen, setReverseOpen] = useState(false);
@@ -2702,7 +2706,7 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly, canInv
         {o.reverse?.awb && (
           <ReverseBox
             o={o}
-            readOnly={readOnly}
+            readOnly={roIn || !can(me, ["store_returns", "store_orders", "store_shipping"], "full")}
             onChanged={() => (load(), onChanged())}
           />
         )}
