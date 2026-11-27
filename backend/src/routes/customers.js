@@ -55,6 +55,60 @@ async function receivablesByCustomer(org) {
   return map;
 }
 
+// A new customer's details from a store order (Shopify / marketplace order number): name, phone, email,
+// addresses, GSTIN for a B2B order. Nothing is saved; an existing customer with the same GSTIN / email / phone is
+// pointed out so it isn't created twice.
+router.get(
+  "/from-order",
+  ah(async (req, res) => {
+    const raw = String(req.query.order || "").trim().replace(/^#/, "");
+    if (!raw) throw new HttpError(400, "Enter the order number");
+    const ShopifyStore = require("../models/ShopifyStore");
+    const ShopifyOrder = require("../models/ShopifyOrder");
+    const shared = (await ShopifyStore.exists({ organization: req.org, shop: { $nin: ["", null] } }))
+      ? null
+      : await ShopifyStore.findOne({ sharedWith: req.org, connected: true }, { organization: 1 }).lean();
+    const storeOrg = shared ? shared.organization : req.org;
+    const o =
+      (await ShopifyOrder.findOne({ organization: storeOrg, name: `#${raw}` }).lean()) ||
+      (await ShopifyOrder.findOne({ organization: storeOrg, name: raw }).lean()) ||
+      (/^\d+$/.test(raw) ? await ShopifyOrder.findOne({ organization: storeOrg, orderNumber: Number(raw) }).lean() : null);
+    if (!o) throw new HttpError(404, `No store order ${raw} in OrdexaGo — sync the store first if it's new`);
+    const digits = (p) => String(p || "").replace(/\D/g, "").slice(-10);
+    const ship = o.shippingAddress || {};
+    const bill = o.billingAddress?.address1 ? o.billingAddress : ship;
+    const addr = (a) => ({ street: [a.address1, a.address2].filter(Boolean).join(", "), city: a.city || "", state: a.state || "", pincode: a.zip || "", country: a.country || "India" });
+    const gstin = (o.b2b?.gstin || "").toUpperCase();
+    const phone = digits(o.customer?.phone || ship.phone || bill.phone);
+    const email = (o.customer?.email || "").toLowerCase();
+    const company = o.b2b?.name || bill.company || ship.company || "";
+    const name = (company || o.customer?.name || ship.name || bill.name || "").trim();
+    const existing = (await Customer.find({ organization: req.org }, { displayName: 1, gstin: 1, email: 1, phone: 1 }).lean()).find(
+      (c) => (gstin && (c.gstin || "").toUpperCase() === gstin) || (email && (c.email || "").toLowerCase() === email) || (phone.length === 10 && digits(c.phone) === phone),
+    );
+    const [first, ...rest] = String(o.customer?.name || ship.name || "").trim().split(/\s+/);
+    res.send({
+      order: o.name,
+      existing: existing ? { _id: existing._id, displayName: existing.displayName } : null,
+      customer: {
+        customerType: company ? "business" : "individual",
+        displayName: name,
+        companyName: company,
+        firstName: first || "",
+        lastName: rest.join(" "),
+        email,
+        phone: phone || o.customer?.phone || "",
+        gstTreatment: gstin ? "registered" : "consumer",
+        gstin,
+        placeOfSupply: gstin ? gstin.slice(0, 2) : ship.state || bill.state || "",
+        billingAddress: addr(bill),
+        shippingAddress: addr(ship),
+        notes: `Created from store order ${o.name}`,
+      },
+    });
+  })
+);
+
 router.get(
   "/",
   ah(async (req, res) => {

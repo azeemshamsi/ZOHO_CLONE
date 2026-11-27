@@ -114,6 +114,49 @@ export function AddressFields({ value, onChange }) {
   );
 }
 
+// New customer from a store order: type the order number, the order's buyer details fill the form (nothing is saved
+// until you click Save). Warns when that buyer is already a customer.
+function FromOrder({ onFill }) {
+  const [no, setNo] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [found, setFound] = useState(null);
+  const fill = async () => {
+    if (!no.trim()) return;
+    setBusy(true);
+    try {
+      const { data } = await api.get("/customers/from-order", { params: { order: no.trim() } });
+      onFill(data.customer);
+      setFound(data);
+      toast(`Filled from order ${data.order} — check and Save`);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="card" style={{ marginBottom: 14, display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap" }}>
+      <label style={{ flex: "0 1 260px" }}>
+        <span className="small">Create from a store order</span>
+        <input
+          placeholder="Order number, e.g. 201843"
+          value={no}
+          onChange={(e) => setNo(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), fill())}
+        />
+      </label>
+      <button type="button" className="btn" disabled={busy || !no.trim()} onClick={fill}>
+        {busy ? "Looking up…" : "Fill details"}
+      </button>
+      {found?.existing && (
+        <div className="small" style={{ color: "#b45309" }}>
+          This buyer looks like an existing customer:{" "}
+          <Link to={`/customers/${found.existing._id}`}>{found.existing.displayName}</Link>. Open that instead of creating a duplicate.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function CustomerForm() {
   const [currencies, setCurrencies] = useState([]);
   useEffect(() => {
@@ -206,6 +249,7 @@ export function CustomerForm() {
   return (
     <>
       <PageHeader title={id ? "Edit Customer" : "New Customer"} back={id ? `/customers/${id}` : "/customers"} />
+      {!id && <FromOrder onFill={(c) => setForm((f) => ({ ...f, ...c, billingAddress: { ...emptyAddress, ...c.billingAddress }, shippingAddress: { ...emptyAddress, ...c.shippingAddress } }))} />}
       <form className="card form" onSubmit={submit}>
         <div className="form-grid">
           <Field label="Customer Type">
