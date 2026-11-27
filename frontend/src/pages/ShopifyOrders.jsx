@@ -2289,7 +2289,7 @@ function ReverseModal({ order, couriers, onClose, onDone }) {
   );
 }
 
-function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
+function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly, canInvoice }) {
   const [o, setO] = useState(null);
   const [busy, setBusy] = useState(false);
   const [reverseOpen, setReverseOpen] = useState(false);
@@ -2363,7 +2363,19 @@ function OrderModal({ id, couriers, onClose, onChanged, onShip, readOnly }) {
         title={`Order ${o.name}`}
         onClose={onClose}
         footer={
-          readOnly ? null : (
+          readOnly ? (
+            canInvoice && !fk && !o.invoice && o.status !== "cancelled" ? (
+              <div className="order-actions">
+                <button
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={() => act(() => api.post("/shopify/orders/invoice", { ids: [o._id] }), "Invoice created")}
+                >
+                  Create Invoice
+                </button>
+              </div>
+            ) : null
+          ) : (
             <div className="order-actions">
               {fk &&
                 !fkEkart &&
@@ -3346,6 +3358,8 @@ export function ShopifyOrders() {
     ["store_orders", "store_shipping", "store_returns"],
     "full",
   );
+  // Invoice-only roles (e.g. Invoicing Desk): see orders and create invoices from them, nothing else.
+  const canInvoice = can(user, ["store_orders", "store_orders.invoice"], "full");
   const companyName = (id) =>
     (organizations || []).find((c) => String(c._id) === String(id))?.name ||
     "other company";
@@ -3844,6 +3858,14 @@ export function ShopifyOrders() {
           </div>
         )}
 
+        {!canAct && canInvoice && sel.size > 0 && (
+          <div className="bulk-bar">
+            <strong>{sel.size} selected</strong>
+            <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => bulk("/shopify/orders/invoice", { ids }, "Invoices")}>
+              Generate Invoices
+            </button>
+          </div>
+        )}
         {canAct && sel.size > 0 && (
           <div className="bulk-bar">
             <strong>{sel.size} selected</strong>
@@ -4241,7 +4263,7 @@ export function ShopifyOrders() {
                             {o.invoiceNumber}
                           </Link>
                         )
-                      ) : o.status !== "cancelled" ? (
+                      ) : o.status !== "cancelled" && canInvoice ? (
                         <button
                           className="btn btn-sm"
                           disabled={busy}
@@ -4369,6 +4391,7 @@ export function ShopifyOrders() {
           id={view}
           couriers={couriers}
           readOnly={!canAct}
+          canInvoice={canInvoice}
           onClose={() => setView(null)}
           onChanged={load}
           onShip={(i) => setShip(i)}

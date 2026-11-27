@@ -2892,6 +2892,8 @@ router.moduleOf = function (req) {
   const p = req.path;
   if (/^\/new-order/.test(p)) return "store_orders.new_order";
   if (/^\/abandoned-checkouts/.test(p)) return "store_orders.abandoned";
+  // Creating invoices from orders: full store orders, or the invoice-only permission (Invoicing Desk).
+  if (p === "/orders/invoice") return ["store_orders", "store_orders.invoice"];
   // Payment proof: full store_orders, or the order taker on an order they just created (checked in the route).
   if (/^\/orders\/[^/]+\/payment-proofs/.test(p))
     return ["store_orders", "store_orders.new_order"];
