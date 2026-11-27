@@ -1077,6 +1077,24 @@ router.post(
   }),
 );
 
+// Handover scans: search by AWB / order, or a date range — was it scanned, when, by whom.
+router.get(
+  "/orders/awb-scans",
+  ah(async (req, res) => {
+    const AwbScan = require("../models/AwbScan");
+    const q = String(req.query.q || "").trim().toUpperCase().replace(/^#/, "");
+    const filter = { organization: req.storeOrg };
+    if (!q) {
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || "") ? new Date(`${req.query.from}T00:00:00+05:30`) : new Date(Date.now() - 7 * 86400000);
+      const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || "") ? new Date(`${req.query.to}T23:59:59.999+05:30`) : new Date();
+      filter.at = { $gte: from, $lte: to };
+    }
+    let list = await AwbScan.find(filter).sort({ at: -1 }).limit(q ? 20000 : 5000).lean();
+    if (q) list = list.filter((x) => x.code.includes(q) || String(x.orderName || "").replace(/^#/, "").toUpperCase() === q).slice(0, 200);
+    res.send(list.map((x) => ({ _id: x._id, code: x.code, at: x.at, byName: x.byName, orderName: x.orderName, order: x.order, channel: x.channel, courier: x.courier, matched: x.matched })));
+  }),
+);
+
 router.get(
   "/orders/:id",
   ah(async (req, res) => {
@@ -1625,16 +1643,28 @@ router.post(
       Joi.object({
         code: Joi.string().trim().allow(""),
         codes: Joi.array().items(Joi.string().trim().max(80)).max(10),
+        // For an AWB that isn't an order in OrdexaGo: which marketplace / courier it belongs to.
+        channel: Joi.string().valid("", "amazon", "flipkart", "pepperfry", "other").default(""),
       }).or("code", "codes"),
       req.body,
     );
     const codes = d.codes?.length ? d.codes : [d.code];
+    const AwbScan = require("../models/AwbScan");
+    const fmtAt = (t) => new Date(t).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
     const o = await R.findByCode(req.storeOrg, codes);
-    if (!o)
-      throw new HttpError(
-        404,
-        `No order with AWB or order number "${codes.join('" / "')}"`,
-      );
+    if (!o) {
+      // Not an order here (Amazon / Flipkart / Pepperfry shipped outside OrdexaGo…): still recorded, once.
+      const code = String(codes[0] || "").trim().toUpperCase();
+      if (!/^[A-Z0-9-]{6,40}$/.test(code)) throw new HttpError(400, `"${codes[0]}" doesn't look like an AWB`);
+      const prev = (await AwbScan.find({ organization: req.storeOrg, code }).sort({ at: 1 }).limit(1).lean())[0];
+      if (prev)
+        return res.send({ already: true, unmatched: true, scannedAt: prev.at, message: `${code} already scanned on ${fmtAt(prev.at)}${prev.channel ? ` (${prev.channel})` : ""}` });
+      if (!d.channel)
+        throw new HttpError(404, `No order with AWB or order number "${codes.join('" / "')}" — if it's an Amazon / Flipkart / Pepperfry parcel, pick that marketplace above and scan again`);
+      const now = new Date();
+      await AwbScan.create({ organization: req.storeOrg, code, at: now, by: req.user._id, byName: req.user.name || "", channel: d.channel, matched: false });
+      return res.send({ scanned: true, unmatched: true, scannedAt: now, order: { awb: code, courier: d.channel }, message: `${code} recorded · ${d.channel[0].toUpperCase()}${d.channel.slice(1)} (not an order in OrdexaGo)` });
+    }
     // Several boxes: the box whose AWB was scanned.
     const boxesAll = require("../utils/shopify/ship").allShipments(o);
     const wanted = new Set(codes.map((c) => String(c).trim().toUpperCase()));
@@ -1697,6 +1727,7 @@ router.post(
       },
     ];
     await o.save();
+    await AwbScan.create({ organization: req.storeOrg, code: String(sh.awb).toUpperCase(), at: now, by: req.user._id, byName: req.user.name || "", order: o._id, orderName: o.name, channel: o.channel || "shopify", courier: sh.courierName || "", matched: true }).catch(() => {});
     require("../utils/shopify/orderIndex").forget(req.storeOrg);
     const left = boxesAll.filter(
       (x) => !(o.awbScans || []).some((y) => y.awb === x.awb),
@@ -2893,7 +2924,7 @@ router.moduleOf = function (req) {
   if (/^\/new-order/.test(p)) return "store_orders.new_order";
   if (/^\/abandoned-checkouts/.test(p)) return "store_orders.abandoned";
   // Handover scan: shipping, or the scan-only permission (AWB Scan role).
-  if (p === "/orders/awb-scan") return ["store_shipping", "store_shipping.awb_scan"];
+  if (p === "/orders/awb-scan" || p === "/orders/awb-scans") return ["store_shipping", "store_shipping.awb_scan"];
   // Creating invoices from orders: full store orders, or the invoice-only permission (Invoicing Desk).
   if (p === "/orders/invoice") return ["store_orders", "store_orders.invoice"];
   // Payment proof: full store_orders, or the order taker on an order they just created (checked in the route).

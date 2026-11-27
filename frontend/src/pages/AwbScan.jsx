@@ -11,6 +11,20 @@ export function AwbScan() {
   const [busy, setBusy] = useState(false);
   const [camera, setCamera] = useState(false);
   const [log, setLog] = useState([]);
+  // AWBs that aren't orders in OrdexaGo (Amazon / Flipkart / Pepperfry shipped outside it) are recorded under this.
+  const [channel, setChannel] = useState(() => {
+    try {
+      return localStorage.getItem("awbScanChannel") || "";
+    } catch {
+      return "";
+    }
+  });
+  const pickChannel = (v) => {
+    setChannel(v);
+    try {
+      localStorage.setItem("awbScanChannel", v);
+    } catch {}
+  };
   const input = useRef();
   const busyRef = useRef(false);
   const focus = () => setTimeout(() => input.current?.focus(), 50);
@@ -26,7 +40,7 @@ export function AwbScan() {
     setCode("");
     const at = new Date();
     try {
-      const { data } = await api.post("/shopify/orders/awb-scan", { codes });
+      const { data } = await api.post("/shopify/orders/awb-scan", { codes, channel });
       beep(!data.already);
       setLog((l) => [{ code: codes[0], kind: data.already ? "warn" : "ok", ...data, at }, ...l].slice(0, 200));
     } catch (e) {
@@ -61,6 +75,16 @@ export function AwbScan() {
             {camera ? "Stop camera" : "📷 Scan with camera"}
           </button>
         </div>
+        <label className="small" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+          AWBs not in OrdexaGo belong to
+          <select value={channel} onChange={(e) => pickChannel(e.target.value)}>
+            <option value="">— ask me (show an error) —</option>
+            <option value="amazon">Amazon</option>
+            <option value="flipkart">Flipkart</option>
+            <option value="pepperfry">Pepperfry</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
         <p className="muted small">A barcode scanner works here too — it types the number and presses Enter.</p>
       </form>
       {camera && <Camera onCodes={(list) => submit(list)} onClose={() => setCamera(false)} last={log[0]} busy={busy} />}
@@ -78,7 +102,7 @@ export function AwbScan() {
                 {x.order && (
                   <div className="small">
                     {[x.order.customer, x.order.courier ? `${x.order.courier} ${x.order.awb}` : x.order.awb].filter(Boolean).join(" · ")}
-                    <div className="muted">{x.order.items.join(", ")}</div>
+                    {x.order.items?.length > 0 && <div className="muted">{x.order.items.join(", ")}</div>}
                   </div>
                 )}
                 <div className="muted small">
@@ -89,9 +113,100 @@ export function AwbScan() {
           ))}
         </div>
       )}
+      <ScanHistory version={log.length} />
       <p className="muted small" style={{ marginTop: 16 }}>
         Scanned parcels show in <Link to="/shopify-orders?tab=awb_scanned">AWB Scanned</Link> until the courier's pickup scan moves them to Shipped. Orders still in <Link to="/shopify-orders?tab=ready_to_ship">Ready to Ship</Link> were booked but never handed over.
       </p>
+    </div>
+  );
+}
+
+// Every handover scan, for checking later: search an AWB or order number, or look at a date range.
+function ScanHistory({ version }) {
+  const today = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+  const [q, setQ] = useState("");
+  const [from, setFrom] = useState(today);
+  const [to, setTo] = useState(today);
+  const [rows, setRows] = useState(null);
+  const load = () =>
+    api
+      .get("/shopify/orders/awb-scans", { params: q.trim() ? { q: q.trim() } : { from, to } })
+      .then((r) => setRows(r.data))
+      .catch((e) => setRows({ error: errMsg(e) }));
+  useEffect(() => {
+    const t = setTimeout(load, 300);
+    return () => clearTimeout(t);
+  }, [q, from, to, version]); // eslint-disable-line react-hooks/exhaustive-deps
+  const csv = () => {
+    const lines = [["Scanned at", "AWB", "Order", "Marketplace / channel", "Courier", "Scanned by"], ...(rows || []).map((r) => [new Date(r.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }), r.code, r.orderName || "", r.channel || "", r.courier || "", r.byName || ""])];
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([lines.map((l) => l.map((c) => (/[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c)).join(",")).join("\n")], { type: "text/csv" }));
+    a.download = `awb-scans-${from}-${to}.csv`;
+    a.click();
+  };
+  const NAME = { shopify: "Shopify", amazon: "Amazon", flipkart: "Flipkart", pepperfry: "Pepperfry", other: "Other" };
+  return (
+    <div className="card" style={{ marginTop: 18 }}>
+      <div className="label-sm" style={{ marginBottom: 8 }}>
+        Scan history
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "end", marginBottom: 10 }}>
+        <input placeholder="Find an AWB or order no." value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 240 }} />
+        {!q.trim() && (
+          <>
+            <label className="small">
+              From <input type="date" value={from} max={today} onChange={(e) => setFrom(e.target.value)} />
+            </label>
+            <label className="small">
+              To <input type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} />
+            </label>
+          </>
+        )}
+        <button type="button" className="btn btn-sm" onClick={csv} disabled={!Array.isArray(rows) || !rows.length}>
+          Download CSV
+        </button>
+      </div>
+      {!rows ? (
+        <div className="muted small">Loading…</div>
+      ) : rows.error ? (
+        <div className="small">{rows.error}</div>
+      ) : !rows.length ? (
+        <div className="muted small">{q.trim() ? `"${q.trim()}" was never scanned.` : "No parcels scanned in these dates."}</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <div className="muted small" style={{ marginBottom: 6 }}>
+            {rows.length} scan(s)
+            {(() => {
+              const by = rows.reduce((m, r) => ({ ...m, [NAME[r.channel] || r.channel || "—"]: (m[NAME[r.channel] || r.channel || "—"] || 0) + 1 }), {});
+              return ` · ${Object.entries(by).map(([k, n]) => `${k} ${n}`).join(", ")}`;
+            })()}
+          </div>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Scanned at</th>
+                <th>AWB</th>
+                <th>Order</th>
+                <th>Channel</th>
+                <th>Courier</th>
+                <th>By</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r._id}>
+                  <td>{new Date(r.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</td>
+                  <td>{r.code}</td>
+                  <td>{r.orderName || <span className="muted">not in OrdexaGo</span>}</td>
+                  <td>{NAME[r.channel] || r.channel || "—"}</td>
+                  <td>{r.courier || ""}</td>
+                  <td>{r.byName || ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
