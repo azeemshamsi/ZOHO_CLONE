@@ -77,13 +77,7 @@ export function AwbScan() {
         </div>
         <label className="small" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
           AWBs not in OrdexaGo belong to
-          <select value={channel} onChange={(e) => pickChannel(e.target.value)}>
-            <option value="">— ask me (show an error) —</option>
-            <option value="amazon">Amazon</option>
-            <option value="flipkart">Flipkart</option>
-            <option value="pepperfry">Pepperfry</option>
-            <option value="other">Other</option>
-          </select>
+          <MarketplaceSelect value={channel} onChange={pickChannel} empty="— ask me (show an error) —" />
         </label>
         <p className="muted small">A barcode scanner works here too — it types the number and presses Enter.</p>
       </form>
@@ -118,6 +112,54 @@ export function AwbScan() {
         Scanned parcels show in <Link to="/shopify-orders?tab=awb_scanned">AWB Scanned</Link> until the courier's pickup scan moves them to Shipped. Orders still in <Link to="/shopify-orders?tab=ready_to_ship">Ready to Ship</Link> were booked but never handed over.
       </p>
     </div>
+  );
+}
+
+// Marketplace for AWBs that aren't orders in OrdexaGo: Amazon / Flipkart / Pepperfry / Other, names typed in before
+// (from earlier scans and this device), or "+ Add marketplace…" to type a new one (Meesho, JioMart…).
+export function MarketplaceSelect({ value, onChange, empty = "— ask me —" }) {
+  const [names, setNames] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("awbScanMarketplaces") || "[]");
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    api
+      .get("/shopify/orders/awb-scan-channels")
+      .then((r) => setNames((cur) => [...new Set([...cur, ...r.data])]))
+      .catch(() => {});
+  }, []);
+  const BUILT = ["amazon", "flipkart", "pepperfry", "other"];
+  const custom = [...new Set([...names, ...(value && !BUILT.includes(value) ? [value] : [])])].filter((n) => n && !BUILT.includes(n.toLowerCase()));
+  const pick = (v) => {
+    if (v !== "__add") return onChange(v);
+    const name = (window.prompt("Marketplace name (e.g. Meesho, JioMart, Myntra)") || "").trim().replace(/\s+/g, " ").slice(0, 40);
+    if (!name) return;
+    const known = BUILT.find((b) => b === name.toLowerCase());
+    if (known) return onChange(known);
+    const next = [...new Set([name, ...names])];
+    setNames(next);
+    try {
+      localStorage.setItem("awbScanMarketplaces", JSON.stringify(next.slice(0, 50)));
+    } catch {}
+    onChange(name);
+  };
+  return (
+    <select value={value} onChange={(e) => pick(e.target.value)}>
+      <option value="">{empty}</option>
+      <option value="amazon">Amazon</option>
+      <option value="flipkart">Flipkart</option>
+      <option value="pepperfry">Pepperfry</option>
+      {custom.map((n) => (
+        <option key={n} value={n}>
+          {n}
+        </option>
+      ))}
+      <option value="other">Other</option>
+      <option value="__add">+ Add marketplace…</option>
+    </select>
   );
 }
 

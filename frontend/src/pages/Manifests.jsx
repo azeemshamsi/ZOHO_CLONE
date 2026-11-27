@@ -3,6 +3,7 @@ import api, { errMsg } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { can } from "../components/Layout";
 import { PageHeader, toast } from "../components/ui";
+import { MarketplaceSelect } from "./AwbScan";
 
 // Courier handover manifests: pick or scan the parcels going with a pickup, create the manifest (MF-00001…),
 // print it on A5 for the courier executive's signature, and find past manifests by date, AWB or order number.
@@ -132,13 +133,7 @@ function NewManifest({ onCreated }) {
       <div className="small" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
         <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
           AWBs not in OrdexaGo belong to
-          <select value={channel} onChange={(e) => setChannel(e.target.value)}>
-            <option value="">— ask me —</option>
-            <option value="amazon">Amazon</option>
-            <option value="flipkart">Flipkart</option>
-            <option value="pepperfry">Pepperfry</option>
-            <option value="other">Other</option>
-          </select>
+          <MarketplaceSelect value={channel} onChange={setChannel} />
         </label>
         <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
           with courier

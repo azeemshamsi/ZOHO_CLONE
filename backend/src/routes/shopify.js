@@ -1078,6 +1078,21 @@ router.post(
 );
 
 // Handover scans: search by AWB / order, or a date range — was it scanned, when, by whom.
+// Marketplace names typed in at Scan AWB / Manifests before (Meesho, JioMart…), most used first, for the picker.
+router.get(
+  "/orders/awb-scan-channels",
+  ah(async (req, res) => {
+    const AwbScan = require("../models/AwbScan");
+    const list = await AwbScan.find({ organization: req.storeOrg, matched: false }, { channel: 1 }).sort({ at: -1 }).limit(20000).lean();
+    const n = {};
+    for (const x of list) {
+      const c = String(x.channel || "").trim();
+      if (c && !["amazon", "flipkart", "pepperfry", "other", "shopify"].includes(c.toLowerCase())) n[c] = (n[c] || 0) + 1;
+    }
+    res.send(Object.entries(n).sort((a, b) => b[1] - a[1]).map(([c]) => c).slice(0, 50));
+  }),
+);
+
 router.get(
   "/orders/awb-scans",
   ah(async (req, res) => {
@@ -1126,7 +1141,7 @@ router.post(
     const d = validate(
       Joi.object({
         codes: Joi.array().items(Joi.string().trim().max(80)).min(1).max(1000).required(),
-        channel: Joi.string().valid("", "shopify", "amazon", "flipkart", "pepperfry", "other").default(""),
+        channel: Joi.string().trim().allow("").max(40).default(""), // amazon / flipkart / pepperfry / other, or a name typed in (Meesho…)
         courier: Joi.string().allow("").max(60).default(""),
       }),
       req.body,
@@ -1154,7 +1169,7 @@ router.post(
     const groups = {};
     for (const r of d.rows) {
       const ch = String(r.channel || "").toLowerCase();
-      const key = `${["amazon", "flipkart", "pepperfry", "other"].includes(ch) ? ch : ""}|${r.courier || ""}`;
+      const key = `${ch === "shopify" || !ch ? "" : String(r.channel).replace(/\|/g, " ")}|${r.courier || ""}`;
       (groups[key] = groups[key] || []).push(r.awb);
     }
     for (const [key, codes] of Object.entries(groups)) {
@@ -1751,11 +1766,12 @@ router.post(
         code: Joi.string().trim().allow(""),
         codes: Joi.array().items(Joi.string().trim().max(80)).max(10),
         // For an AWB that isn't an order in OrdexaGo: which marketplace / courier it belongs to.
-        channel: Joi.string().valid("", "amazon", "flipkart", "pepperfry", "other").default(""),
+        channel: Joi.string().trim().allow("").max(40).default(""), // amazon / flipkart / pepperfry / other, or a name typed in (Meesho…)
       }).or("code", "codes"),
       req.body,
     );
     const codes = d.codes?.length ? d.codes : [d.code];
+    if (["amazon", "flipkart", "pepperfry", "other"].includes(d.channel.toLowerCase())) d.channel = d.channel.toLowerCase();
     const AwbScan = require("../models/AwbScan");
     const fmtAt = (t) => new Date(t).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
     const o = await R.findByCode(req.storeOrg, codes);
@@ -3049,6 +3065,7 @@ router.moduleOf = function (req) {
   // Handover scan: shipping, or the scan-only permission (AWB Scan role).
   if (/^\/manifests/.test(p)) return ["store_shipping", "store_shipping.manifest"];
   if (p === "/orders/awb-scan" || p === "/orders/awb-scans") return ["store_shipping", "store_shipping.awb_scan"];
+  if (p === "/orders/awb-scan-channels") return ["store_shipping", "store_shipping.awb_scan", "store_shipping.manifest"];
   // Creating invoices from orders: full store orders, or the invoice-only permission (Invoicing Desk).
   if (/^\/orders\/[^/]+\/reship$/.test(p)) return ["store_orders", "store_shipping"];
   if (p === "/orders/invoice") return ["store_orders", "store_orders.invoice"];
