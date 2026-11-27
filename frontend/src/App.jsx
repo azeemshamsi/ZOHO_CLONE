@@ -37,6 +37,7 @@ import { Inventory } from "./pages/Inventory";
 import StockRoom from "./pages/StockRoom";
 import { ReturnScan } from "./pages/ReturnScan";
 import { AwbScan } from "./pages/AwbScan";
+import { Manifests } from "./pages/Manifests";
 import { GstCompliance } from "./pages/GstCompliance";
 import { GstReturns } from "./pages/GstReturns";
 import { GstReconcile } from "./pages/GstReconcile";
@@ -125,6 +126,7 @@ export default function App() {
           <Route path="stock-room" element={<StockRoom />} />
           <Route path="returns-scan" element={<ReturnScan />} />
           <Route path="awb-scan" element={<AwbScan />} />
+          <Route path="manifests" element={<Manifests />} />
           <Route path="no-access" element={<div className="card center no-access"><h3>No pages to show</h3><p className="muted">Your role doesn't include any part of the app yet. Ask an admin.</p></div>} />
           <Route path="gst" element={<GstReturns />} />
           <Route path="gst/reconcile" element={<GstReconcile />} />

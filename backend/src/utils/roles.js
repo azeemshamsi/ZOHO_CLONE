@@ -28,7 +28,7 @@ const FEATURES = {
   sales: [["customers", "Customers"], ["quotes", "Quotes"], ["sales_orders", "Sales Orders"], ["invoices", "Invoices"], ["recurring", "Recurring Invoices"], ["payments", "Payments Received"], ["credit_notes", "Credit Notes"], ["ledgers", "Sales Ledgers"], ["amazon", "Amazon Sales"], ["flipkart", "Flipkart Sales"], ["pepperfry", "Pepperfry Sales"], ["projects", "Time Tracking (projects, timesheet)"]],
   purchases: [["vendors", "Vendors"], ["expenses", "Expenses"], ["purchase_orders", "Purchase Orders"], ["bills", "Bills"], ["recurring", "Recurring Bills & Expenses"], ["payments_made", "Payments Made"], ["vendor_credits", "Vendor Credits"], ["ledgers", "Purchase Ledgers"]],
   items: [["items", "Items"], ["adjustments", "Inventory Adjustments"], ["transfer_orders", "Transfer Orders"]],
-  store_shipping: [["awb_scan", "Scan AWB (record parcels handed to the courier)"]],
+  store_shipping: [["awb_scan", "Scan AWB (record parcels handed to the courier)"], ["manifest", "Manifests (create, see and download courier handover manifests)"]],
   store_orders: [["new_order", "Create new orders (in Shopify)"], ["abandoned", "Abandoned Checkouts"], ["invoice", "Create invoices from orders"]],
   accountant: [["journals", "Manual Journals"], ["accounts", "Chart of Accounts"], ["fixed_assets", "Fixed Assets"], ["budgets", "Budgets"]],
 };
@@ -59,6 +59,7 @@ const ROLES = {
   ticket_desk: { label: "Ticket Desk", desc: "Handles sellers' support tickets: answers, assigns and resolves them. Sees store orders and sellers to look things up.", perms: { ...all("none"), tickets: "full", store_orders: "view", store_sellers: "view" }, home: "/tickets" },
   stock_room: { label: "Stock Room", desc: "Only the Stock Room: product photos with stock on hand and their recent ins and outs.", perms: { ...all("none"), stock_room: "view" }, home: "/stock-room" },
   awb_scan: { label: "AWB Scan", desc: "Only scans parcels' AWBs at handover to the courier (Store → Scan AWB). Sees nothing else.", perms: { ...all("none"), "store_shipping.awb_scan": "full" }, home: "/awb-scan" },
+  manifest: { label: "Manifest Desk", desc: "Only creates, sees and downloads courier manifests (Store → Manifests). Sees nothing else.", perms: { ...all("none"), "store_shipping.manifest": "full" }, home: "/manifests" },
   returns: { label: "Returns Desk", desc: "Only scans and closes returned parcels.", perms: { ...all("none"), store_returns: "full" }, home: "/returns-scan" },
   seller: { label: "Seller", desc: "A marketplace seller: only their own orders, labels, stock and purchase orders (Store → Sellers).", perms: all("none"), home: "/seller", hidden: true },
   viewer: { label: "View Only", desc: "Can see everything except settings, can't change anything.", perms: { ...all("view"), settings: "none", store_settings: "none", marketing: "none" } },

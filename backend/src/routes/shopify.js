@@ -1095,6 +1095,113 @@ router.get(
   }),
 );
 
+/* ---------------- manifests (courier handover) ---------------- */
+const MF = () => require("../utils/shopify/manifest");
+router.get(
+  "/manifests",
+  ah(async (req, res) => {
+    const Manifest = require("../models/Manifest");
+    const q = String(req.query.q || "").trim().toUpperCase().replace(/^#/, "");
+    const filter = { organization: req.storeOrg };
+    if (!q) {
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || "") ? new Date(`${req.query.from}T00:00:00+05:30`) : new Date(Date.now() - 7 * 86400000);
+      const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || "") ? new Date(`${req.query.to}T23:59:59.999+05:30`) : new Date();
+      filter.createdAt = { $gte: from, $lte: to };
+    }
+    let list = await Manifest.find(filter).sort({ createdAt: -1 }).limit(q ? 3000 : 500).lean();
+    if (q)
+      list = list
+        .filter((m) => m.number.toUpperCase().includes(q) || (m.rows || []).some((r) => r.awb.includes(q) || String(r.orderName || "").replace(/^#/, "").toUpperCase() === q))
+        .slice(0, 100);
+    res.send(list);
+  }),
+);
+router.get(
+  "/manifests/pending",
+  ah(async (req, res) => res.send(await MF().pending(req.storeOrg, { days: req.query.days }))),
+);
+router.post(
+  "/manifests/lookup",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        codes: Joi.array().items(Joi.string().trim().max(80)).min(1).max(1000).required(),
+        channel: Joi.string().valid("", "shopify", "amazon", "flipkart", "pepperfry", "other").default(""),
+        courier: Joi.string().allow("").max(60).default(""),
+      }),
+      req.body,
+    );
+    res.send(await MF().resolve(req.storeOrg, d.codes, d));
+  }),
+);
+router.post(
+  "/manifests",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        rows: Joi.array()
+          .items(Joi.object({ awb: Joi.string().trim().max(60).required(), channel: Joi.string().allow("").max(30).default(""), courier: Joi.string().allow("").max(60).default("") }).unknown(true))
+          .min(1)
+          .max(1000)
+          .required(),
+        note: Joi.string().allow("").max(300).default(""),
+      }),
+      req.body,
+    );
+    // Re-read every AWB (the order, courier and marketplace come from OrdexaGo, not from the browser).
+    const out = [];
+    const problems = [];
+    const groups = {};
+    for (const r of d.rows) {
+      const ch = String(r.channel || "").toLowerCase();
+      const key = `${["amazon", "flipkart", "pepperfry", "other"].includes(ch) ? ch : ""}|${r.courier || ""}`;
+      (groups[key] = groups[key] || []).push(r.awb);
+    }
+    for (const [key, codes] of Object.entries(groups)) {
+      const [channel, courier] = key.split("|");
+      const x = await MF().resolve(req.storeOrg, codes, { channel, courier });
+      out.push(...x.rows);
+      problems.push(...x.problems);
+    }
+    if (problems.length) throw new HttpError(400, problems.map((p) => p.message).join("; "));
+    const seen = new Set();
+    const rows = out.filter((r) => !seen.has(r.awb) && seen.add(r.awb));
+    const m = await MF().create(req.storeOrg, req.user, { rows, note: d.note });
+    res.status(201).send(m);
+  }),
+);
+router.get(
+  "/manifests/:id",
+  ah(async (req, res) => {
+    const m = await require("../models/Manifest").findOne({ _id: req.params.id, organization: req.storeOrg }).lean();
+    if (!m) throw new HttpError(404, "Manifest not found");
+    res.send(m);
+  }),
+);
+router.get(
+  "/manifests/:id/pdf",
+  ah(async (req, res) => {
+    const m = await require("../models/Manifest").findOne({ _id: req.params.id, organization: req.storeOrg }).lean();
+    if (!m) throw new HttpError(404, "Manifest not found");
+    // The company the user is working in (a shared store's manifest carries the shipping company's name).
+    const org = await Organization.findById(req.org).lean();
+    const pdf = await MF().manifestPdf(org || {}, m, String(req.query.paper || "A5").toUpperCase());
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `${req.query.download ? "attachment" : "inline"}; filename="manifest-${m.number}.pdf"`);
+    res.send(pdf);
+  }),
+);
+// Only someone with full Shipping (not the Manifest Desk role) can delete a manifest made by mistake.
+router.delete(
+  "/manifests/:id",
+  ah(async (req, res) => {
+    if ((req.perms?.store_shipping || "none") !== "full") throw new HttpError(403, "Only users with full Shipping access can delete a manifest");
+    const m = await require("../models/Manifest").findOneAndDelete({ _id: req.params.id, organization: req.storeOrg });
+    if (!m) throw new HttpError(404, "Manifest not found");
+    res.send({ ok: true });
+  }),
+);
+
 router.get(
   "/orders/:id",
   ah(async (req, res) => {
@@ -2940,6 +3047,7 @@ router.moduleOf = function (req) {
   if (/^\/new-order/.test(p)) return "store_orders.new_order";
   if (/^\/abandoned-checkouts/.test(p)) return "store_orders.abandoned";
   // Handover scan: shipping, or the scan-only permission (AWB Scan role).
+  if (/^\/manifests/.test(p)) return ["store_shipping", "store_shipping.manifest"];
   if (p === "/orders/awb-scan" || p === "/orders/awb-scans") return ["store_shipping", "store_shipping.awb_scan"];
   // Creating invoices from orders: full store orders, or the invoice-only permission (Invoicing Desk).
   if (/^\/orders\/[^/]+\/reship$/.test(p)) return ["store_orders", "store_shipping"];

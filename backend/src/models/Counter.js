@@ -25,6 +25,7 @@ const SOURCES = {
   fixedAsset: ["FixedAsset", "number"],
   inventoryAdjustment: ["InventoryAdjustment", "number"],
   transferOrder: ["TransferOrder", "number"],
+  manifest: ["Manifest", "number"],
 };
 
 // "SH/26-27/392" with prefix "SH/26-27/" → 392. Separators are ignored when comparing the prefix
