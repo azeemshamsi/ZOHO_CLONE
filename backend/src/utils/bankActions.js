@@ -63,6 +63,11 @@ async function partyOf(org, account) {
 async function categorizeLine(org, line, { account, taxRate = 0, notes = "", rule = "" }, ctx) {
   if (line.status !== "unmatched") throw new HttpError(400, "This line is already matched or categorised");
   const party = await partyOf(org, account);
+  // Money in from a customer = a customer payment (receipt); money out to a vendor = a vendor payment — applied to
+  // their oldest unpaid invoices / bills, the rest kept as an advance. (Refunds the other way stay journals.)
+  if (party && ((party.kind === "customer" && line.deposit) || (party.kind === "vendor" && line.withdrawal))) {
+    return partyPayment(org, line, party, { notes, rule, account }, ctx);
+  }
   if (party) {
     const description = notes || line.description;
     const amt = line.deposit || line.withdrawal;
@@ -143,8 +148,90 @@ async function categorizeLine(org, line, { account, taxRate = 0, notes = "", rul
 }
 
 // Undo a match, categorisation or exclusion. A transaction created by categorising is deleted.
+async function partyPayment(org, line, party, { notes, rule, account }, ctx) {
+  const { settleInvoice, settleBill, branchSeries } = require("./salesDoc");
+  const isCustomer = party.kind === "customer";
+  const amt = round2(line.deposit || line.withdrawal);
+  const Doc = require(`../models/${isCustomer ? "Invoice" : "Bill"}`);
+  const open = (await Doc.find({ organization: org, [party.kind]: party.id }).sort({ date: 1, createdAt: 1 }))
+    .filter((d) => !["void", "draft", "paid"].includes(d.status))
+    .map((d) => ({ d, due: round2(d.balance || 0) })) // balance already nets off what the ledger settled
+    .filter((x) => x.due > 0.009);
+  let left = amt;
+  const alloc = [];
+  for (const { d, due } of open) {
+    if (left <= 0.009) break;
+    const take = round2(Math.min(due, left));
+    alloc.push([d, take]);
+    left = round2(left - take);
+  }
+  const description = notes || line.description;
+  const common = {
+    organization: org,
+    date: line.date,
+    amount: amt,
+    mode: line.account === "cash" ? "cash" : "bank_transfer",
+    reference: String(line.reference || "").slice(0, 100),
+    bankAccount: line.account,
+    notes: `Bank: ${description}`.slice(0, 1000),
+    unusedAmount: left,
+  };
+  let doc;
+  if (isCustomer) {
+    doc = await require("../models/Payment").create({
+      ...common,
+      customer: party.id,
+      customerName: party.name,
+      paymentNumber: await nextNumber(org, ...(await branchSeries("payment", ctx.orgDoc.paymentPrefix || "PAY-", alloc[0]?.[0].branch))),
+      allocations: alloc.map(([d, a]) => ({ invoice: d._id, invoiceNumber: d.invoiceNumber, amount: a })),
+      branch: alloc[0]?.[0].branch || null,
+    });
+  } else {
+    doc = await require("../models/VendorPayment").create({
+      ...common,
+      vendor: party.id,
+      vendorName: party.name,
+      paymentNumber: await nextNumber(org, ...(await branchSeries("vendorPayment", ctx.orgDoc.vendorPaymentPrefix || "PM-", alloc[0]?.[0].branch))),
+      allocations: alloc.map(([d, a]) => ({ bill: d._id, billNumber: d.billNumber, amount: a })),
+      branch: alloc[0]?.[0].branch || null,
+    });
+  }
+  for (const [d, a] of alloc) {
+    if (d.status === "draft") d.status = isCustomer ? "sent" : "open";
+    d.amountPaid = round2((d.amountPaid || 0) + a);
+    (isCustomer ? settleInvoice : settleBill)(d);
+    await d.save();
+  }
+  const type = isCustomer ? "Customer Payment" : "Vendor Payment";
+  const dateStr = new Date(line.date).toISOString().slice(0, 10);
+  line.status = "categorized";
+  line.match = { type, id: doc._id, number: doc.paymentNumber, party: party.name, account, key: `${type}|${doc._id}|${dateStr}|${line.deposit || 0}|${line.withdrawal || 0}`, ...(rule ? { rule } : {}) };
+  await line.save();
+  return line;
+}
+
+// Delete a customer / vendor payment made by categorising, taking it off the invoices / bills it paid.
+async function removePartyPayment(org, type, id) {
+  const { settleInvoice, settleBill } = require("./salesDoc");
+  const isCustomer = type === "Customer Payment";
+  const P = require(`../models/${isCustomer ? "Payment" : "VendorPayment"}`);
+  const Doc = require(`../models/${isCustomer ? "Invoice" : "Bill"}`);
+  const p = await P.findOne({ _id: id, organization: org });
+  if (!p) return;
+  for (const a of p.allocations || []) {
+    const d = await Doc.findOne({ _id: isCustomer ? a.invoice : a.bill, organization: org });
+    if (!d) continue;
+    d.amountPaid = round2(Math.max((d.amountPaid || 0) - a.amount, 0));
+    if (d.status === "paid" || d.status === "partially_paid") d.status = isCustomer ? "sent" : "open";
+    (isCustomer ? settleInvoice : settleBill)(d);
+    await d.save();
+  }
+  await p.deleteOne();
+}
+
 async function undoLine(org, line) {
   if (line.status === "categorized" && line.match?.id) {
+    if (["Customer Payment", "Vendor Payment"].includes(line.match.type) && line.match.party) await removePartyPayment(org, line.match.type, line.match.id);
     if (line.match.type === "Expense") await Expense.deleteOne({ _id: line.match.id, organization: org });
     if (line.match.type === "Journal") await Journal.deleteOne({ _id: line.match.id, organization: org });
   }
