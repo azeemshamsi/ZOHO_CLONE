@@ -50,8 +50,13 @@ export function CodPending() {
   const remit = async (undo) => {
     setBusy(true);
     try {
-      const { data } = await api.post("/shopify/cod/remit", { ids: [...sel], undo, ...(undo ? {} : { date: mark.date, ref: mark.ref }) });
-      toast(undo ? `${data.done} order(s) moved back to pending` : `${data.done} order(s) marked received`);
+      const { data } = await api.post("/shopify/cod/remit", { ids: [...sel], undo, ...(undo ? {} : { date: mark.date, ref: mark.ref, shopify: mark.shopify }) });
+      toast(
+        undo
+          ? `${data.done} order(s) moved back to pending in OrdexaGo (Shopify still shows them paid)`
+          : `${data.done} order(s) marked received${data.synced ? ` · ${data.synced} marked paid in Shopify` : ""}`,
+      );
+      if (data.failed?.length) toast(`Couldn't mark paid in Shopify: ${data.failed.slice(0, 3).join(" · ")}`, "error");
       setMark(null);
       load();
     } catch (e) {
@@ -83,7 +88,8 @@ export function CodPending() {
   const rows = d?.rows || [];
   const allOn = rows.length > 0 && rows.every((r) => sel.has(r._id));
   const selAmount = rows.filter((r) => sel.has(r._id)).reduce((s, r) => s + r.amount, 0);
-  const pickedReceived = rows.filter((r) => sel.has(r._id) && r.remit).length;
+  const pickedReceived = rows.filter((r) => sel.has(r._id) && r.remit && r.remit.via !== "shopify").length;
+  const pickedPending = rows.filter((r) => sel.has(r._id) && !r.remit).length;
   const t = d?.summary?.total;
 
   return (
@@ -215,8 +221,8 @@ export function CodPending() {
           </strong>
           {!mark ? (
             <>
-              {pickedReceived < sel.size && (
-                <button className="btn btn-sm btn-primary" onClick={() => setMark({ date: todayIst(), ref: "" })}>
+              {pickedPending > 0 && (
+                <button className="btn btn-sm btn-primary" onClick={() => setMark({ date: todayIst(), ref: "", shopify: true })}>
                   Mark received
                 </button>
               )}
@@ -230,8 +236,11 @@ export function CodPending() {
             <>
               <input type="date" value={mark.date} onChange={(e) => setMark({ ...mark, date: e.target.value })} />
               <input value={mark.ref} onChange={(e) => setMark({ ...mark, ref: e.target.value })} placeholder="UTR / remittance no." style={{ width: 170 }} />
+              <label className="small" style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <input type="checkbox" checked={mark.shopify} onChange={(e) => setMark({ ...mark, shopify: e.target.checked })} /> Also mark paid in Shopify
+              </label>
               <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => remit(false)}>
-                Save
+                {busy ? "Saving…" : "Save"}
               </button>
               <button className="link-btn" onClick={() => setMark(null)}>
                 Cancel
@@ -308,10 +317,14 @@ export function CodPending() {
                   </td>
                   <td className="small">
                     {r.remit ? (
-                      <span className="text-paid" title={r.remit.byName ? `by ${r.remit.byName}` : ""}>
-                        Received {fmt(r.remit.at)}
-                        {r.remit.ref ? ` · ${r.remit.ref}` : ""}
-                      </span>
+                      r.remit.via === "shopify" ? (
+                        <span className="text-paid">Paid in Shopify</span>
+                      ) : (
+                        <span className="text-paid" title={r.remit.byName ? `by ${r.remit.byName}` : ""}>
+                          Received {fmt(r.remit.at)}
+                          {r.remit.ref ? ` · ${r.remit.ref}` : ""}
+                        </span>
+                      )
                     ) : (
                       <span className="text-overdue">Pending</span>
                     )}
@@ -323,7 +336,7 @@ export function CodPending() {
         </div>
       )}
       <p className="muted small" style={{ marginTop: 8 }}>
-        Counts COD and part-paid orders ordered on or after 1 April 2026. Delivered orders (also those returned after delivery) are pending until marked received; RTO, cancelled and unshipped orders aren't
+        Counts COD and part-paid orders ordered on or after 1 April 2026. Delivered orders (also those returned after delivery) are pending until marked received here or marked paid in Shopify; RTO, cancelled and unshipped orders aren't
         counted. Remittance files need an AWB column; an amount column, date and UTR are read too if present.
       </p>
     </div>

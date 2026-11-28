@@ -15,7 +15,7 @@ const START = new Date("2026-04-01T00:00:00+05:30");
 const ymd = (d) => (d ? new Date(new Date(d).getTime() + 5.5 * 3600000).toISOString().slice(0, 10) : "");
 const up = (s) => String(s || "").trim().toUpperCase();
 
-const FIELDS = { name: 1, orderNumber: 1, orderDate: 1, status: 1, paymentMode: 1, codAmount: 1, outstanding: 1, total: 1, prepaidAmount: 1, deliveredAt: 1, statusChangedAt: 1, shipment: 1, extraShipments: 1, codRemit: 1, customerName: 1, "shippingAddress.name": 1, "shippingAddress.city": 1 };
+const FIELDS = { shopifyId: 1, financialStatus: 1, name: 1, orderNumber: 1, orderDate: 1, status: 1, paymentMode: 1, codAmount: 1, outstanding: 1, total: 1, prepaidAmount: 1, deliveredAt: 1, statusChangedAt: 1, shipment: 1, extraShipments: 1, codRemit: 1, customerName: 1, "shippingAddress.name": 1, "shippingAddress.city": 1 };
 
 function stageOf(o) {
   if (o.status === "delivered") return "delivered";
@@ -24,6 +24,8 @@ function stageOf(o) {
   return null;
 }
 const amountOf = (o) => round2(o.codAmount > 0 ? o.codAmount : o.paymentMode === "partial" || o.paymentMode === "cod" ? o.outstanding || 0 : 0);
+// Shopify already shows it paid (the COD was marked paid there, by you or an app): counts as received.
+const paidInShopify = (o) => /^(PAID|PARTIALLY_REFUNDED|REFUNDED)$/i.test(String(o.financialStatus || "").trim());
 const awbsOf = (o) => [o.shipment?.awb, ...(o.extraShipments || []).map((s) => s?.awb)].filter(Boolean).map(up);
 
 let accCache = { at: 0, org: "", map: new Map() };
@@ -58,7 +60,7 @@ async function loadAll(org) {
       account: (o.shipment?.account && names.get(String(o.shipment.account))) || o.shipment?.carrier || "—",
       awb: o.shipment?.awb || "",
       awbs: awbsOf(o),
-      remit: o.codRemit || null,
+      remit: o.codRemit || (paidInShopify(o) ? { via: "shopify", ref: "Paid in Shopify", amount } : null),
     });
   }
   return rows;
@@ -121,22 +123,43 @@ async function report(org, q) {
   };
 }
 
-async function markReceived(org, user, { ids, date, ref, undo }) {
+async function markReceived(org, user, { ids, date, ref, undo, shopify = true }) {
   const at = date ? new Date(`${date}T12:00:00+05:30`) : new Date();
   let n = 0;
+  let synced = 0;
+  const failed = [];
+  let store;
   for (const id of ids) {
     const o = await ShopifyOrder.findOne({ _id: id, organization: org }, FIELDS);
     if (!o) continue;
-    if (undo) o.codRemit = undefined;
+    if (undo) o.codRemit = undefined; // Shopify can't be "un-paid" — only OrdexaGo's mark is removed
     else {
       if (o.codRemit) continue;
+      // Mark it paid in Shopify too (orderMarkAsPaid settles the amount still due on the order).
+      if (shopify && /^gid:\/\/shopify\/Order\//.test(o.shopifyId) && !paidInShopify(o)) {
+        try {
+          store = store || (await require("../../models/ShopifyStore").findOne({ organization: org }));
+          if (!store) throw new Error("Shopify isn't connected");
+          const r = await require("./client").gql(
+            store,
+            `mutation($input: OrderMarkAsPaidInput!) { orderMarkAsPaid(input: $input) { order { id displayFinancialStatus } userErrors { field message } } }`,
+            { input: { id: o.shopifyId } },
+          );
+          const errs = r.orderMarkAsPaid?.userErrors || [];
+          if (errs.length) throw new Error(errs.map((e) => e.message).join("; "));
+          o.financialStatus = r.orderMarkAsPaid?.order?.displayFinancialStatus || "PAID";
+          synced++;
+        } catch (e) {
+          failed.push(`${o.name}: ${e.message}`);
+        }
+      }
       o.codRemit = { at, ref: String(ref || "").slice(0, 100), amount: amountOf(o), by: user?._id, byName: user?.name || "", via: "manual", markedAt: new Date() };
     }
     o.markModified("codRemit");
     await o.save();
     n++;
   }
-  return { done: n };
+  return { done: n, synced, failed: failed.slice(0, 20) };
 }
 
 // A courier's remittance file (CSV / Excel): AWB column + amount column (+ date / UTR if present).

@@ -1134,6 +1134,7 @@ router.post(
         date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).allow(""),
         ref: Joi.string().allow("").max(100).default(""),
         undo: Joi.boolean().default(false),
+        shopify: Joi.boolean().default(true),
       }),
       req.body,
     );
