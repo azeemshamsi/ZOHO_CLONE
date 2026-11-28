@@ -29,7 +29,7 @@ if [ -f backend/.env ] && ! grep -qE '^HOST=' backend/.env; then
 fi
 sudo systemctl daemon-reload || true
 sudo systemctl restart ordexago
-for i in $(seq 1 30); do sleep 2; curl -fsS http://127.0.0.1:8080/api/health >/dev/null && { echo "Updated to $(git log -1 --format='%h %s')"; sudo journalctl -u ordexago --since "-3 hours" --no-pager 2>/dev/null | grep -E "Startup|Migration|failed|Could not|No-discount|\[tracking\]" | tail -200 || true; exit 0; }; done
+for i in $(seq 1 30); do sleep 2; curl -fsS http://127.0.0.1:8080/api/health >/dev/null && { echo "Updated to $(git log -1 --format='%h %s')"; sudo journalctl -u ordexago --since "-3 hours" --no-pager 2>/dev/null | grep -E "Startup|OrdexaGo running|Migration|failed|Could not|No-discount|\[tracking\]|\[security\]" | tail -200 || true; exit 0; }; done
 echo "App didn't come back up. Last log lines:"
 sudo journalctl -u ordexago -n 80 --no-pager 2>/dev/null | sed -E 's/(mongodb(\+srv)?:\/\/)[^@ ]*@/\1***@/g; s/(password|secret|token|key)=[^ &]*/\1=***/Ig' || true
 exit 1
