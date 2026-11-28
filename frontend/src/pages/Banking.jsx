@@ -230,6 +230,8 @@ function ImportModal({ open, account, onClose, onDone }) {
       toast(
         `Imported ${data.imported} lines${data.skipped ? `, skipped ${data.skipped} already imported` : ""}${
           data.rules?.categorized ? ` · rules categorised ${data.rules.categorized}` : ""
+        }${data.confirmed ? ` · ${data.confirmed} alert line(s) confirmed by the statement` : ""}${
+          data.notInStatement ? ` · ⚠ ${data.notInStatement} alert line(s) not in the statement — marked "Not in statement"` : ""
         }`
       );
       onDone();
@@ -1050,7 +1052,19 @@ export function BankAccountPage() {
                     <input type="checkbox" aria-label="Select line" checked={selected.has(l._id)} onChange={() => toggleOne(l._id)} />
                   </td>
                   <td className="nowrap">{date(l.date)}</td>
-                  <td className="clamp">{l.description}</td>
+                  <td className="clamp">
+                    {l.source === "alert" && (
+                      <span className="badge" title="Added from the bank's alert email — the monthly statement will confirm it" style={{ marginRight: 6, background: "#eef2ff", color: "#3730a3", fontSize: 11, padding: "1px 6px", borderRadius: 4 }}>
+                        Alert
+                      </span>
+                    )}
+                    {l.notInStatement && (
+                      <span className="badge" title="This alert line isn't in the bank statement for these dates — check it (a reversed / failed transaction?) and exclude it if so" style={{ marginRight: 6, background: "#fef2f2", color: "#b91c1c", fontSize: 11, padding: "1px 6px", borderRadius: 4 }}>
+                        Not in statement
+                      </span>
+                    )}
+                    {l.description}
+                  </td>
                   <td className="mono small">{l.reference}</td>
                   <td className="num text-paid">{l.deposit ? money(l.deposit) : ""}</td>
                   <td className="num">{l.withdrawal ? money(l.withdrawal) : ""}</td>

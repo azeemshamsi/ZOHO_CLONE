@@ -7,7 +7,8 @@
  */
 const BankFeed = require("../models/BankFeed");
 const { parseStatement } = require("./statementParse");
-const { importRows } = require("./bankImport");
+const { importRows, importAlert } = require("./bankImport");
+const { parseAlert } = require("./bankAlerts");
 
 const digits = (s) => String(s || "").replace(/[^0-9]/g, "");
 const running = new Set();
@@ -72,12 +73,35 @@ async function runFeed(feedOrId, { days } = {}) {
         const from = env.from?.[0]?.address || "";
         if (!senderOk(feed, from)) continue;
         const hasFile = JSON.stringify(head.bodyStructure || {}).match(/"disposition":"attachment"|\.(csv|xlsx?|pdf)"/i);
-        if (!hasFile) {
+        const alertOk = feed.alerts !== false && (String(feed.senders || "").trim() || /bank|alert/i.test(from));
+        if (!hasFile && !alertOk) {
           done.add(id);
           continue;
         }
         const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
         const mail = await simpleParser(msg.source);
+        if (!hasFile) {
+          // A transaction alert: one line, into the account (or debit card) it names.
+          const subject = String(env.subject || "").slice(0, 150);
+          const a = parseAlert(mail.text || String(mail.html || "").replace(/<br\s*\/?>|<\/p>|<\/div>|<\/tr>/gi, "\n").replace(/<[^>]+>/g, " "), { subject, date: env.date });
+          let retryAlert = false;
+          if (a) {
+            const base = { at: new Date(), mailAt: env.date, from, subject, file: "", alert: true };
+            const acc = a.last4 ? accountFor(feed, `XX${a.last4}`) : (feed.accounts || []).find((x) => x.enabled !== false && String(x.cards || "").split(/[^0-9]+/).includes(a.card));
+            if (!acc) {
+              retryAlert = true;
+              const msgTxt = a.last4 ? `Account ending ${a.last4} isn't set up for auto-import` : `Debit card ending ${a.card} isn't linked to a bank account — add it under "Debit cards"`;
+              if (!(feed.log || []).some((l) => l.error === msgTxt)) results.push({ ...base, error: msgTxt });
+            } else if (!codes.has(acc.code)) results.push({ ...base, error: `Bank account ${acc.code} no longer exists` });
+            else {
+              const r = await importAlert(feed.organization, acc.code, { ...a, alertId: id });
+              if (r.imported)
+                results.push({ ...base, account: acc.code, lines: 1, imported: 1, skipped: 0, rules: r.rules?.categorized || 0, amount: a.deposit || -a.withdrawal });
+            }
+          }
+          if (!retryAlert) done.add(id);
+          continue;
+        }
         const files = (mail.attachments || []).filter((a) => /\.(csv|txt|xls|xlsx|xlsm|pdf)$/i.test(a.filename || "") || /csv|excel|spreadsheet|pdf/i.test(a.contentType || ""));
         let retry = false; // not set up yet / wrong password: try this email again on the next check
         for (const f of files) {
@@ -89,7 +113,7 @@ async function runFeed(feedOrId, { days } = {}) {
             if (!acc) throw new Error(`Account ${st.accountNumber || "(no number in the file)"} isn't set up for auto-import`);
             if (!codes.has(acc.code)) throw new Error(`Bank account ${acc.code} no longer exists`);
             const r = st.rows.length ? await importRows(feed.organization, acc.code, st.rows) : { imported: 0, skipped: 0, ignored: 0, rules: 0 };
-            results.push({ ...base, account: acc.code, accountNumber: st.accountNumber, lines: st.rows.length, imported: r.imported, skipped: r.skipped, rules: r.rules?.categorized || 0 });
+            results.push({ ...base, account: acc.code, accountNumber: st.accountNumber, lines: st.rows.length, imported: r.imported, skipped: r.skipped, rules: r.rules?.categorized || 0, confirmed: r.confirmed || 0, notInStatement: r.notInStatement || 0 });
           } catch (e) {
             if (/isn't set up|password/i.test(e.message)) retry = true;
             if (!(feed.log || []).some((l) => l.error === e.message && l.file === base.file && String(l.subject) === base.subject)) results.push({ ...base, error: e.message });

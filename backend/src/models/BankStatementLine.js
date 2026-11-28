@@ -23,6 +23,12 @@ const bankStatementLineSchema = new mongoose.Schema(
       party: { type: String }, // customer / vendor it was recorded against
     },
     batch: { type: String, default: "" },
+    // Added from a bank's transaction alert email (before the statement): replaced by the statement's own line
+    // details when the statement comes in (source becomes "statement"); flagged if the statement doesn't have it.
+    source: { type: String, default: "statement" }, // statement | alert
+    alertId: { type: String }, // the alert email's Message-ID (no line twice from one email)
+    alertText: { type: String }, // the alert's wording, kept after the statement replaces the description
+    notInStatement: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

@@ -34,7 +34,8 @@ const feedView = (f) => ({
   user: f?.user || "",
   hasPass: !!f?.imapPass,
   senders: f?.senders ?? "",
-  accounts: (f?.accounts || []).map((a) => ({ code: a.code, accountNumber: a.accountNumber, enabled: a.enabled !== false, hasFilePassword: !!(f.filePasswords || {})[a.code] })),
+  alerts: f?.alerts !== false,
+  accounts: (f?.accounts || []).map((a) => ({ code: a.code, accountNumber: a.accountNumber, cards: a.cards || "", enabled: a.enabled !== false, hasFilePassword: !!(f.filePasswords || {})[a.code] })),
   lastRunAt: f?.lastRunAt,
   lastOkAt: f?.lastOkAt,
   lastError: f?.lastError || "",
@@ -55,11 +56,13 @@ router.put(
         user: Joi.string().trim().allow("").max(200).default(""),
         password: Joi.string().allow("").max(200), // blank / absent = keep the saved one
         senders: Joi.string().allow("").max(500).default(""),
+        alerts: Joi.boolean().default(true),
         accounts: Joi.array()
           .items(
             Joi.object({
               code: Joi.string().required(),
               accountNumber: Joi.string().trim().allow("").max(40).default(""),
+              cards: Joi.string().trim().allow("").max(100).default(""), // debit card last 4 digits (alerts name the card, not the account)
               enabled: Joi.boolean().default(true),
               filePassword: Joi.string().allow("").max(100), // absent = keep; "" with clearFilePassword = remove
               clearFilePassword: Joi.boolean().default(false),
@@ -75,7 +78,7 @@ router.put(
     const bankCodes = new Set((await bankAccounts(req.org)).map((a) => a.code));
     const noNumber = d.accounts.filter((a) => a.enabled && !a.accountNumber);
     if (noNumber.length) throw new HttpError(400, "Enter the account number for each ticked bank account");
-    Object.assign(f, { enabled: d.enabled, host: d.host, port: d.port, user: d.user, senders: d.senders });
+    Object.assign(f, { enabled: d.enabled, host: d.host, port: d.port, user: d.user, senders: d.senders, alerts: d.alerts });
     if (d.password) f.imapPass = d.password.replace(/\s+/g, ""); // Gmail shows app passwords in groups of 4
     const pw = { ...(f.filePasswords || {}) };
     f.accounts = d.accounts
@@ -83,7 +86,7 @@ router.put(
       .map((a) => {
         if (a.clearFilePassword) delete pw[a.code];
         else if (a.filePassword) pw[a.code] = a.filePassword;
-        return { code: a.code, accountNumber: a.accountNumber, enabled: a.enabled };
+        return { code: a.code, accountNumber: a.accountNumber, cards: a.cards, enabled: a.enabled };
       });
     for (const k of Object.keys(pw)) if (!f.accounts.some((a) => a.code === k)) delete pw[k];
     f.filePasswords = pw;

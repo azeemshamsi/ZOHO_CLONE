@@ -15,7 +15,8 @@ const bankFeedSchema = new mongoose.Schema(
     imapPass: { type: String, default: "" },
     senders: { type: String, default: "" }, // only mail from these addresses / domains (comma separated); blank = any
     // Bank accounts fed this way: account code ↔ the bank's account number (as printed in the statement).
-    accounts: [{ _id: false, code: String, accountNumber: String, enabled: { type: Boolean, default: true } }],
+    accounts: [{ _id: false, code: String, accountNumber: String, cards: { type: String, default: "" }, enabled: { type: Boolean, default: true } }],
+    alerts: { type: Boolean, default: true }, // also read transaction alert emails (one line per alert)
     filePasswords: { type: mongoose.Schema.Types.Mixed, default: {} }, // account code → password for its statement files
     lastRunAt: Date,
     lastOkAt: Date,

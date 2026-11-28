@@ -21,6 +21,7 @@ export function BankEmailImport() {
         code: b.code,
         name: b.name,
         accountNumber: by[b.code]?.accountNumber ?? "",
+        cards: by[b.code]?.cards ?? "",
         suggested: b.accountCode || "",
         enabled: by[b.code] ? by[b.code].enabled : false,
         hasFilePassword: !!by[b.code]?.hasFilePassword,
@@ -57,11 +58,13 @@ export function BankEmailImport() {
         user: f.user,
         ...(pass ? { password: pass } : {}),
         senders: f.senders,
+        alerts: f.alerts,
         accounts: f.rows
           .filter((r) => r.enabled && r.accountNumber.trim())
           .map((r) => ({
             code: r.code,
             accountNumber: r.accountNumber.trim(),
+            cards: r.cards.trim(),
             enabled: true,
             ...(r.filePassword ? { filePassword: r.filePassword } : {}),
             clearFilePassword: r.clearFilePassword,
@@ -154,6 +157,7 @@ export function BankEmailImport() {
                 <th />
                 <th>Bank account</th>
                 <th>Account number</th>
+                <th title="Card alerts (ATM, POS) name the debit card, not the account">Debit cards (last 4)</th>
                 <th>Statement file password</th>
               </tr>
             </thead>
@@ -173,6 +177,9 @@ export function BankEmailImport() {
                   <td>{r.name}</td>
                   <td>
                     <input value={r.accountNumber} disabled={!r.enabled} onChange={(e) => setRow(r.code, "accountNumber", e.target.value)} placeholder="e.g. 019105007866" style={{ width: 180 }} />
+                  </td>
+                  <td>
+                    <input value={r.cards} disabled={!r.enabled} onChange={(e) => setRow(r.code, "cards", e.target.value)} placeholder="e.g. 4479" style={{ width: 110 }} />
                   </td>
                   <td>
                     <input
@@ -202,6 +209,10 @@ export function BankEmailImport() {
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="checkbox" checked={f.enabled} onChange={(e) => set("enabled", e.target.checked)} />
             <strong>Import automatically every 15 minutes</strong>
+          </label>
+          <label style={{ display: "flex", gap: 6, alignItems: "center" }} title="One line per debit / credit alert email (e.g. HDFC InstaAlerts), confirmed later by the statement">
+            <input type="checkbox" checked={f.alerts} onChange={(e) => set("alerts", e.target.checked)} />
+            Also read transaction alert emails
           </label>
           <span style={{ flex: 1 }} />
           <button className="btn" disabled={busy} onClick={() => save()}>
@@ -256,14 +267,16 @@ export function BankEmailImport() {
                         {l.from} · {fmt(l.mailAt)}
                       </div>
                     </td>
-                    <td className="small">{l.file || "—"}</td>
+                    <td className="small">{l.file || (l.alert ? "Alert" : "—")}</td>
                     <td className="small">
                       {l.error ? (
                         <span style={{ color: "#b91c1c" }}>{l.error}</span>
                       ) : (
                         <>
-                          <strong>{l.imported} new</strong> into {f.rows.find((r) => r.code === l.account)?.name || l.account}
+                          <strong>{l.alert ? `₹${Math.abs(l.amount || 0).toLocaleString("en-IN")} ${l.amount < 0 ? "debit" : "credit"}` : `${l.imported} new`}</strong> into {f.rows.find((r) => r.code === l.account)?.name || l.account}
                           {l.skipped ? ` · ${l.skipped} already in` : ""}
+                          {l.confirmed ? ` · ${l.confirmed} alert line(s) confirmed` : ""}
+                          {l.notInStatement ? ` · ⚠ ${l.notInStatement} alert line(s) not in the statement` : ""}
                           {l.rules ? ` · ${l.rules} categorised by rules` : ""}
                         </>
                       )}

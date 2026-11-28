@@ -55,6 +55,51 @@ async function importRows(org, code, rows) {
       pool.splice(at, 1);
       skip.add(c.i);
     }
+    // Pass 3: lines added earlier from alert emails become the statement's line (same amount and direction,
+    // within 3 days; the alert's reference number found in the statement line decides between two).
+    const alerts = await BankStatementLine.find({ organization: org, account: code, source: "alert" }).lean();
+    const ref = (s) => String(s || "").replace(/[^0-9A-Z]/gi, "").toUpperCase();
+    const confirmed = [];
+    for (const c of candidates) {
+      if (skip.has(c.i) || !alerts.length) continue;
+      const t = new Date(c.r.date).getTime();
+      const text = ref(`${c.r.description} ${c.r.reference}`);
+      const pool = alerts
+        .filter((a) => !a._used && round2(a.deposit) === c.deposit && round2(a.withdrawal) === c.withdrawal && Math.abs(new Date(a.date) - t) <= 3 * 86400000)
+        .map((a) => ({ a, refHit: a.reference && ref(a.reference).length >= 6 && text.includes(ref(a.reference)), days: Math.abs(new Date(a.date) - t) }))
+        .sort((x, y) => (y.refHit ? 1 : 0) - (x.refHit ? 1 : 0) || x.days - y.days);
+      if (!pool.length) continue;
+      const hit = pool[0].a;
+      hit._used = true;
+      skip.add(c.i);
+      confirmed.push({ id: hit._id, c, hit });
+    }
+    for (const { id, c, hit } of confirmed)
+      await BankStatementLine.updateOne(
+        { _id: id },
+        {
+          $set: {
+            date: c.r.date,
+            description: c.r.description || hit.description,
+            reference: c.r.reference || hit.reference || "",
+            balance: c.balance,
+            seq: c.i,
+            source: "statement",
+            alertText: hit.alertText || hit.description,
+            notInStatement: false,
+          },
+        },
+      );
+    // Alert lines inside the statement's dates that the statement doesn't have: flag them to check.
+    let notInStatement = 0;
+    const dates = rows.map((r) => new Date(r.date).getTime()).filter((x) => !isNaN(x));
+    if (dates.length && alerts.length) {
+      const from = Math.min(...dates);
+      const to = Math.max(...dates);
+      const odd = alerts.filter((a) => !a._used && new Date(a.date) >= from && new Date(a.date) <= to - 86400000).map((a) => a._id);
+      notInStatement = odd.length;
+      if (odd.length) await BankStatementLine.updateMany({ _id: { $in: odd } }, { $set: { notInStatement: true } });
+    }
     const docs = [];
     for (const c of candidates) {
       if (skip.has(c.i)) continue;
@@ -71,11 +116,36 @@ async function importRows(org, code, rows) {
         batch,
       });
     }
-    const skipped = skip.size;
+    const skipped = skip.size - confirmed.length;
     const inserted = docs.length ? await BankStatementLine.insertMany(docs) : [];
     // Transaction rules categorise matching lines straight away.
     const rules = await applyRules(org, inserted);
-  return { imported: docs.length, skipped, ignored, rules };
+  return { imported: docs.length, skipped, ignored, rules, confirmed: confirmed.length, notInStatement };
 }
 
-module.exports = { importRows };
+/**
+ * One line from a transaction alert email (bankFeed.js). Skipped if this email already made a line; rules apply.
+ * `a` = { date, description, reference, deposit, withdrawal, balance, alertId }.
+ */
+async function importAlert(org, code, a) {
+  if (await BankStatementLine.exists({ organization: org, account: code, alertId: a.alertId })) return { imported: 0, skipped: 1 };
+  const doc = await BankStatementLine.create({
+    organization: org,
+    account: code,
+    date: a.date,
+    description: a.description,
+    reference: a.reference || "",
+    deposit: round2(a.deposit),
+    withdrawal: round2(a.withdrawal),
+    balance: a.balance === null || a.balance === undefined ? null : round2(a.balance),
+    seq: 0,
+    batch: "alert",
+    source: "alert",
+    alertId: a.alertId,
+    alertText: a.description,
+  });
+  const rules = await applyRules(org, [doc]);
+  return { imported: 1, skipped: 0, rules };
+}
+
+module.exports = { importRows, importAlert };
