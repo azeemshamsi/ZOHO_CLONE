@@ -24,6 +24,7 @@ const FIELDS = {
   GspAccount: ["token", "clientSecret", "password", "authToken", "sek"],
   Organization: ["smtp.pass", "smtp.apiKey", "ai.geminiKey"],
   User: ["totp.secret", "totp.pendingSecret"], // two-step login secrets
+  BankFeed: ["imapPass", "filePasswords"], // bank statement email import
   Integration: ["meta.appSecret", "meta.token", "meta.pageToken", "meta.verifyToken", "google.clientSecret", "google.refreshToken", "google.accessToken"], // Inbox & marketing connections
 };
 

@@ -11,6 +11,7 @@ const { ah, validate, HttpError, round2 } = require("../utils/http");
 const { chartOfAccounts, buildEntries, movements, naturalBalance } = require("../utils/ledger");
 const { entryKey, usedKeys, candidatesFor, matchLine, context, categorizeLine, undoLine, applyRules } = require("../utils/bankActions");
 
+const { importRows } = require("../utils/bankImport");
 const DAY = 24 * 60 * 60 * 1000;
 
 async function bankAccounts(org) {
@@ -23,6 +24,85 @@ async function findBankAccount(req, code) {
   return acc;
 }
 
+
+/* ---------- Auto-import statements from email ---------- */
+const BankFeed = require("../models/BankFeed");
+const feedView = (f) => ({
+  enabled: !!f?.enabled,
+  host: f?.host || "imap.gmail.com",
+  port: f?.port || 993,
+  user: f?.user || "",
+  hasPass: !!f?.imapPass,
+  senders: f?.senders ?? "",
+  accounts: (f?.accounts || []).map((a) => ({ code: a.code, accountNumber: a.accountNumber, enabled: a.enabled !== false, hasFilePassword: !!(f.filePasswords || {})[a.code] })),
+  lastRunAt: f?.lastRunAt,
+  lastOkAt: f?.lastOkAt,
+  lastError: f?.lastError || "",
+  log: (f?.log || []).slice(0, 50),
+});
+router.get(
+  "/email-feed",
+  ah(async (req, res) => res.send(feedView(await BankFeed.findOne({ organization: req.org })))),
+);
+router.put(
+  "/email-feed",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        enabled: Joi.boolean().default(false),
+        host: Joi.string().trim().hostname().default("imap.gmail.com"),
+        port: Joi.number().integer().min(1).max(65535).default(993),
+        user: Joi.string().trim().allow("").max(200).default(""),
+        password: Joi.string().allow("").max(200), // blank / absent = keep the saved one
+        senders: Joi.string().allow("").max(500).default(""),
+        accounts: Joi.array()
+          .items(
+            Joi.object({
+              code: Joi.string().required(),
+              accountNumber: Joi.string().trim().allow("").max(40).default(""),
+              enabled: Joi.boolean().default(true),
+              filePassword: Joi.string().allow("").max(100), // absent = keep; "" with clearFilePassword = remove
+              clearFilePassword: Joi.boolean().default(false),
+            }),
+          )
+          .max(50)
+          .default([]),
+      }),
+      req.body,
+    );
+    let f = await BankFeed.findOne({ organization: req.org });
+    if (!f) f = new BankFeed({ organization: req.org });
+    const bankCodes = new Set((await Account.find({ organization: req.org }, { code: 1 }).lean()).map((a) => a.code));
+    Object.assign(f, { enabled: d.enabled, host: d.host, port: d.port, user: d.user, senders: d.senders });
+    if (d.password) f.imapPass = d.password.replace(/\s+/g, ""); // Gmail shows app passwords in groups of 4
+    const pw = { ...(f.filePasswords || {}) };
+    f.accounts = d.accounts
+      .filter((a) => bankCodes.has(a.code) && a.accountNumber)
+      .map((a) => {
+        if (a.clearFilePassword) delete pw[a.code];
+        else if (a.filePassword) pw[a.code] = a.filePassword;
+        return { code: a.code, accountNumber: a.accountNumber, enabled: a.enabled };
+      });
+    for (const k of Object.keys(pw)) if (!f.accounts.some((a) => a.code === k)) delete pw[k];
+    f.filePasswords = pw;
+    f.markModified("filePasswords");
+    if (d.enabled && (!f.user || !f.imapPass)) throw new HttpError(400, "Enter the mailbox address and its app password to turn auto-import on");
+    await f.save();
+    res.send(feedView(f));
+  }),
+);
+router.post(
+  "/email-feed/run",
+  ah(async (req, res) => {
+    const f = await BankFeed.findOne({ organization: req.org });
+    if (!f || !f.user || !f.imapPass) throw new HttpError(400, "Set up the mailbox first");
+    const days = Math.min(Math.max(Number(req.body?.days) || 0, 0), 60) || undefined;
+    if (days) f.processed = []; // looking further back re-reads those emails (duplicates are still skipped)
+    const r = await require("../utils/bankFeed").runFeed(f, { days });
+    if (r.busy) throw new HttpError(409, "Already checking the mailbox — try again in a minute");
+    res.send({ ...feedView(await BankFeed.findOne({ organization: req.org })), results: r.results });
+  }),
+);
 
 router.get(
   "/accounts",
@@ -178,74 +258,7 @@ router.post(
       }),
       req.body
     );
-    // Skip only lines that are already in OrdexaGo. Statements often contain genuinely identical lines
-    // (two ₹59 SMS charges on the same day), so duplicates are counted, not just looked up:
-    // if OrdexaGo has 1 such line and the file has 2, the second one is imported.
-    const keyOf = (date, deposit, withdrawal, description) =>
-      `${new Date(date).toISOString().slice(0, 10)}|${deposit}|${withdrawal}|${String(description || "").trim().toLowerCase()}`;
-    const existing = await BankStatementLine.find(
-      { organization: req.org, account: req.params.code },
-      { date: 1, deposit: 1, withdrawal: 1, description: 1, balance: 1 }
-    ).lean();
-    const have = {}; // key -> balances of lines already in OrdexaGo (null when unknown)
-    for (const l of existing) (have[keyOf(l.date, l.deposit, l.withdrawal, l.description)] ||= []).push(l.balance ?? null);
-
-    const batch = `b${Date.now()}`;
-    const candidates = [];
-    let ignored = 0;
-    for (const [i, r] of rows.entries()) {
-      const deposit = round2(r.deposit);
-      const withdrawal = round2(r.withdrawal);
-      if (!deposit && !withdrawal) {
-        ignored++;
-        continue;
-      }
-      const balance = r.balance === null || r.balance === undefined ? null : round2(r.balance);
-      candidates.push({ i, r, deposit, withdrawal, balance, key: keyOf(r.date, deposit, withdrawal, r.description) });
-    }
-    // Pass 1: a line whose bank balance matches a line already in OrdexaGo is that same line.
-    const skip = new Set();
-    for (const c of candidates) {
-      const pool = have[c.key];
-      if (!pool || c.balance === null) continue;
-      const at = pool.indexOf(c.balance);
-      if (at !== -1) {
-        pool.splice(at, 1);
-        skip.add(c.i);
-      }
-    }
-    // Pass 2: for lines without a matching balance, skip only as many as OrdexaGo still has.
-    for (const c of candidates) {
-      if (skip.has(c.i)) continue;
-      const pool = have[c.key];
-      if (!pool || !pool.length) continue;
-      // An existing line with a known, different balance is a different transaction.
-      const at = pool.findIndex((b) => b === null || c.balance === null);
-      if (at === -1) continue;
-      pool.splice(at, 1);
-      skip.add(c.i);
-    }
-    const docs = [];
-    for (const c of candidates) {
-      if (skip.has(c.i)) continue;
-      docs.push({
-        organization: req.org,
-        account: req.params.code,
-        date: c.r.date,
-        description: c.r.description || "",
-        reference: c.r.reference || "",
-        deposit: c.deposit,
-        withdrawal: c.withdrawal,
-        balance: c.balance,
-        seq: c.i,
-        batch,
-      });
-    }
-    const skipped = skip.size;
-    const inserted = docs.length ? await BankStatementLine.insertMany(docs) : [];
-    // Transaction rules categorise matching lines straight away.
-    const rules = await applyRules(req.org, inserted);
-    res.status(201).send({ imported: docs.length, skipped, ignored, rules });
+    res.status(201).send(await importRows(req.org, req.params.code, rows));
   })
 );
 

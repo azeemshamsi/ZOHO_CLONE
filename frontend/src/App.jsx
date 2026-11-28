@@ -38,6 +38,7 @@ import StockRoom from "./pages/StockRoom";
 import { ReturnScan } from "./pages/ReturnScan";
 import { AwbScan } from "./pages/AwbScan";
 import { Manifests } from "./pages/Manifests";
+import { BankEmailImport } from "./pages/BankEmailImport";
 import { GstCompliance } from "./pages/GstCompliance";
 import { GstReturns } from "./pages/GstReturns";
 import { GstReconcile } from "./pages/GstReconcile";
@@ -211,6 +212,7 @@ export default function App() {
           <Route path="vendor-credits/:id/edit" element={<VendorCreditForm />} />
           <Route path="banking" element={<BankingHome />} />
           <Route path="banking/rules" element={<BankRules />} />
+          <Route path="banking/email-import" element={<BankEmailImport />} />
           <Route path="banking/:code" element={<BankAccountPage />} />
           <Route path="payments" element={<PaymentList />} />
           <Route path="payments/new" element={<PaymentForm />} />

@@ -76,6 +76,9 @@ export function BankingHome() {
         <Link to="/banking/rules" className="btn">
           Transaction Rules
         </Link>
+        <Link to="/banking/email-import" className="btn" title="Import the statements your bank emails, automatically">
+          Auto-import from Email
+        </Link>
         <button className="btn btn-primary" onClick={() => setModal(true)}>
           <Icon name="plus" size={16} /> Add Bank Account
         </button>

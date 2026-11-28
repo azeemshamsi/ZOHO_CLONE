@@ -112,6 +112,10 @@ function startScheduler() {
   setTimeout(() => require("./shopify/ship").trackAll().catch(() => {}), 5 * 60 * 1000).unref();
   setInterval(() => require("./shopify/ship").trackAll().catch((e) => console.error("Courier tracking failed:", e.message)), 60 * 60 * 1000).unref();
   setInterval(() => require("./shopify/sync").refreshAllDeliveries().catch((e) => console.error("Shopify delivery check failed:", e.message)), 2 * 60 * 60 * 1000).unref();
+  // Bank statements emailed by the bank: every 15 minutes.
+  const bankFeed = () => require("./bankFeed").runAll().catch((e) => console.error("Bank email import failed:", e.message));
+  setTimeout(bankFeed, 90000).unref();
+  setInterval(bankFeed, 15 * 60 * 1000).unref();
   // Inbox & marketing: WhatsApp order updates, Gmail polling, campaigns, consent sync, retention.
   require("./marketing/scheduler").start();
   // Encrypted off-site backup, nightly at 02:00 IST (only when the OCI_BACKUP_* / BACKUP_KEY settings exist).
