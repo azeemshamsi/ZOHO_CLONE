@@ -304,6 +304,7 @@ export function ItemForm() {
               </datalist>
             </Field>
           </div>
+          <AiItemHelp form={form} setForm={setForm} />
           <div className="row-2">
             <Field label={form.type === "goods" ? "HSN Code" : "SAC Code"}>
               <input value={form.hsnSac} onChange={set("hsnSac")} className="mono" />
@@ -565,6 +566,70 @@ function ShopifyLinks({ itemId }) {
             load();
           }}
         />
+      )}
+    </div>
+  );
+}
+
+// ✨ AI: description, HSN code and GST rate suggested from the item's name (the user reviews before saving).
+function AiItemHelp({ form, setForm }) {
+  const [busy, setBusy] = useState(false);
+  const [s, setS] = useState(null);
+  const run = async () => {
+    if (!String(form.name || "").trim()) return toast("Enter the item name first", "error");
+    setBusy(true);
+    try {
+      const { data } = await api.post("/ai/item-suggest", { name: form.name, sku: form.sku || "", description: form.description || "", unit: form.unit || "", type: form.type || "" });
+      setS(data);
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setBusy(false);
+  };
+  const apply = (what) => {
+    setForm((f) => ({
+      ...f,
+      ...(what.includes("description") && s.description ? { description: s.description } : {}),
+      ...(what.includes("hsn") && s.hsn ? { hsnSac: s.hsn } : {}),
+      ...(what.includes("gst") && s.gstRate !== null && GST_RATES.includes(s.gstRate) ? { taxRate: s.gstRate } : {}),
+    }));
+    toast("Filled in — check it before saving");
+  };
+  return (
+    <div style={{ border: "1px dashed var(--border, #d1d5db)", borderRadius: 8, padding: "8px 12px", fontSize: 13.5 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={run}>
+          {busy ? "Thinking…" : "✨ Suggest description, HSN & GST"}
+        </button>
+        {!s && <span className="muted small">AI suggests from the item name — you check before saving.</span>}
+      </div>
+      {s && (
+        <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+          {s.description && (
+            <div>
+              <span className="muted small">Description:</span> {s.description}{" "}
+              <button type="button" className="link-btn small" onClick={() => apply(["description"])}>
+                Use
+              </button>
+            </div>
+          )}
+          {s.hsn && (
+            <div>
+              <span className="muted small">HSN:</span> <span className="mono">{s.hsn}</span> {s.hsnTitle && <span className="muted">— {s.hsnTitle}</span>} ·{" "}
+              <span className="muted small">GST:</span> {s.gstRate}%{" "}
+              <button type="button" className="link-btn small" onClick={() => apply(["hsn", "gst"])}>
+                Use
+              </button>
+              <span className="muted small"> ({Math.round(s.confidence * 100)}% sure)</span>
+            </div>
+          )}
+          {s.note && <div className="muted small">{s.note} Confirm HSN and GST rate with your CA if unsure.</div>}
+          <div>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => apply(["description", "hsn", "gst"])}>
+              Use all
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

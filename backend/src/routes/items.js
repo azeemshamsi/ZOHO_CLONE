@@ -5,7 +5,7 @@ const Invoice = require("../models/Invoice");
 const { ah, validate, HttpError } = require("../utils/http");
 const { textMatch } = require("../utils/textMatch");
 
-const GST_RATES = [0, 0.25, 3, 5, 12, 18, 28];
+const GST_RATES = [0, 0.25, 3, 5, 12, 18, 28, 40];
 
 const schema = Joi.object({
   type: Joi.string().valid("goods", "service"),

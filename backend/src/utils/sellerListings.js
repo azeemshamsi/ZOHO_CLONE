@@ -323,7 +323,7 @@ function readRows(base64) {
   return rows;
 }
 
-const GST = [0, 3, 5, 12, 18, 28];
+const GST = [0, 3, 5, 12, 18, 28, 40];
 const IMG = /^https:\/\/[^\s]+$/i;
 
 // Rows → products, with every problem found. → { products, problems: [{ row, handle, message }] }

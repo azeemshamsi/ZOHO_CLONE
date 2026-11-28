@@ -40,7 +40,7 @@ export const STATES = [
 ];
 export const stateName = (code) => (STATES.find((s) => s[0] === code) || [null, ""])[1];
 
-export const GST_RATES = [0, 0.25, 3, 5, 12, 18, 28];
+export const GST_RATES = [0, 0.25, 3, 5, 12, 18, 28, 40]; // 40%: GST 2.0 (Sept 2025)
 
 export const GST_TREATMENTS = [
   ["registered", "Registered Business – Regular"],

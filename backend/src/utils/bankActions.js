@@ -82,7 +82,7 @@ async function categorizeLine(org, line, { account, taxRate = 0, notes = "", rul
     });
     const dateStr = new Date(line.date).toISOString().slice(0, 10);
     line.status = "categorized";
-    line.match = { type: "Journal", id: j._id, number: j.number, party: party.name, key: `Journal|${j._id}|${dateStr}|${line.deposit || 0}|${line.withdrawal || 0}`, ...(rule ? { rule } : {}) };
+    line.match = { type: "Journal", id: j._id, number: j.number, party: party.name, account, key: `Journal|${j._id}|${dateStr}|${line.deposit || 0}|${line.withdrawal || 0}`, ...(rule ? { rule } : {}) };
     await line.save();
     return line;
   }
@@ -135,6 +135,7 @@ async function categorizeLine(org, line, { account, taxRate = 0, notes = "", rul
   const dateStr = new Date(line.date).toISOString().slice(0, 10);
   match.key = `${match.type}|${match.id}|${dateStr}|${line.deposit ? line.deposit : 0}|${line.withdrawal ? line.withdrawal : 0}`;
   if (rule) match.rule = rule;
+  match.account = account; // the ledger picked (AI suggestions learn from these)
   line.status = "categorized";
   line.match = match;
   await line.save();

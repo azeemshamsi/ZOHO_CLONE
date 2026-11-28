@@ -443,6 +443,7 @@ app.use(
   require("./routes/amazon"),
 );
 app.use("/api/attachments", auth, require("./routes/attachments"));
+app.use("/api/ai", auth, require("./routes/ai"));
 app.use(
   "/api/bill-scan",
   auth,

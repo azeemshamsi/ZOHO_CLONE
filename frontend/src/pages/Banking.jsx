@@ -480,7 +480,7 @@ function MatchModal({ line, accounts, bankCode, onClose, onDone }) {
           {isOut && chosen?.type === "expense" && (
             <Field label="GST included" hint="Splits out input tax credit">
               <select value={cat.taxRate} onChange={(e) => setCat({ ...cat, taxRate: Number(e.target.value) })}>
-                {[0, 5, 12, 18, 28].map((r) => (
+                {[0, 5, 12, 18, 28, 40].map((r) => (
                   <option key={r} value={r}>
                     {r ? `${r}%` : "None"}
                   </option>
@@ -761,7 +761,7 @@ function BulkCategorise({ open, lines, accounts, bankCode, busy, onClose, onSave
         {hasOut && target?.type === "expense" && (
           <Field label="GST included in withdrawals">
             <select value={f.taxRate} onChange={(e) => setF({ ...f, taxRate: Number(e.target.value) })}>
-              {[0, 5, 12, 18, 28].map((r) => (
+              {[0, 5, 12, 18, 28, 40].map((r) => (
                 <option key={r} value={r}>
                   {r ? `${r}%` : "None"}
                 </option>
@@ -835,6 +835,8 @@ export function BankAccountPage() {
   const [selected, setSelected] = useState(new Set());
   const [bulkCat, setBulkCat] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [aiSug, setAiSug] = useState({});
+  const [aiBusy, setAiBusy] = useState(false);
   const reload = () => {
     loadAcc();
     loadLines();
@@ -895,6 +897,44 @@ export function BankAccountPage() {
       setBulkBusy(false);
     }
   };
+  // ✨ AI: ledger / party suggestions for unmatched lines (learns from what was picked before).
+  const aiSuggest = async (ids = []) => {
+    setAiBusy(true);
+    try {
+      const { data } = await api.post("/ai/bank-suggest", { account: code, ids });
+      const m = {};
+      for (const x of data.suggestions) m[x.id] = x;
+      setAiSug((cur) => ({ ...cur, ...m }));
+      toast(data.suggestions.length ? `AI suggested ${data.suggestions.length} line${data.suggestions.length === 1 ? "" : "s"} — check and accept` : "AI had no confident suggestion for these lines", data.suggestions.length ? "success" : "error");
+      if (tab !== "unmatched") setTab("unmatched");
+    } catch (e) {
+      toast(errMsg(e), "error");
+    }
+    setAiBusy(false);
+  };
+  const acceptAi = async (list) => {
+    setAiBusy(true);
+    let done = 0;
+    const errs = [];
+    for (const x of list) {
+      const l = (lines || []).find((y) => y._id === x.id);
+      if (!l || l.status !== "unmatched") continue;
+      try {
+        await api.post(`/banking/lines/${x.id}/categorize`, { account: x.account, taxRate: x.taxRate || 0, notes: l.description });
+        done++;
+        setAiSug((cur) => {
+          const n = { ...cur };
+          delete n[x.id];
+          return n;
+        });
+      } catch (e) {
+        errs.push(errMsg(e));
+      }
+    }
+    toast(`${done} line${done === 1 ? "" : "s"} categorised${errs.length ? ` · ${errs.length} failed: ${errs[0]}` : ""}`, errs.length && !done ? "error" : "success");
+    setAiBusy(false);
+    reload();
+  };
   const runRules = async (ids = []) => {
     try {
       const { data } = await api.post(`/banking/${encodeURIComponent(code)}/apply-rules`, { ids });
@@ -919,6 +959,11 @@ export function BankAccountPage() {
         {acc.statement.unmatched > 0 && (
           <button className="btn" onClick={() => runRules()}>
             Apply Rules
+          </button>
+        )}
+        {acc.statement.unmatched > 0 && (
+          <button className="btn" disabled={aiBusy} onClick={() => aiSuggest()} title="AI suggests a ledger or party for unmatched lines (up to 40 at a time), learning from what you picked before">
+            {aiBusy ? "AI is thinking…" : "✨ AI Suggest"}
           </button>
         )}
         <Link to={`/chart-of-accounts/${encodeURIComponent(code)}`} className="btn">
@@ -1014,6 +1059,9 @@ export function BankAccountPage() {
                   <button className="btn btn-sm" disabled={bulkBusy} onClick={() => runRules(pickedUnmatched.map((l) => l._id))}>
                     Apply Rules
                   </button>
+                  <button className="btn btn-sm" disabled={aiBusy} onClick={() => aiSuggest(pickedUnmatched.map((l) => l._id).slice(0, 60))}>
+                    ✨ AI Suggest
+                  </button>
                   <button className="btn btn-sm" disabled={bulkBusy} onClick={() => bulk("exclude")}>
                     Exclude
                   </button>
@@ -1029,6 +1077,27 @@ export function BankAccountPage() {
               </button>
             </div>
           )}
+          {(() => {
+            const open = Object.values(aiSug).filter((x) => (lines || []).some((l) => l._id === x.id && l.status === "unmatched"));
+            if (!open.length) return null;
+            const sure = open.filter((x) => x.confidence >= 0.8);
+            return (
+              <div className="alert" style={{ margin: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: "#eef2ff", color: "#3730a3" }}>
+                <span>✨ AI suggested a ledger for {open.length} line{open.length === 1 ? "" : "s"} (shown under each description).</span>
+                {sure.length > 0 && (
+                  <button className="btn btn-sm btn-primary" disabled={aiBusy} onClick={() => acceptAi(sure)}>
+                    Accept {sure.length} confident (80%+)
+                  </button>
+                )}
+                <button className="btn btn-sm" disabled={aiBusy} onClick={() => acceptAi(open)}>
+                  Accept all {open.length}
+                </button>
+                <button className="link-btn" onClick={() => setAiSug({})}>
+                  Dismiss
+                </button>
+              </div>
+            );
+          })()}
           <table className="table">
             <thead>
               <tr>
@@ -1064,6 +1133,27 @@ export function BankAccountPage() {
                       </span>
                     )}
                     {l.description}
+                    {l.status === "unmatched" && aiSug[l._id] && (
+                      <div className="small" style={{ marginTop: 4, color: "#3730a3" }}>
+                        ✨ <strong>{aiSug[l._id].label}</strong>
+                        {aiSug[l._id].taxRate ? ` · GST ${aiSug[l._id].taxRate}%` : ""} <span className="muted">({Math.round(aiSug[l._id].confidence * 100)}% · {aiSug[l._id].reason})</span>{" "}
+                        <button className="link-btn" disabled={aiBusy} onClick={() => acceptAi([aiSug[l._id]])}>
+                          Accept
+                        </button>{" "}
+                        <button
+                          className="link-btn muted"
+                          onClick={() =>
+                            setAiSug((cur) => {
+                              const n = { ...cur };
+                              delete n[l._id];
+                              return n;
+                            })
+                          }
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
                   </td>
                   <td className="mono small">{l.reference}</td>
                   <td className="num text-paid">{l.deposit ? money(l.deposit) : ""}</td>

@@ -121,7 +121,7 @@ function mode(v) {
   return s ? "other" : "bank_transfer";
 }
 
-const GST_RATES = [0, 0.25, 3, 5, 12, 18, 28];
+const GST_RATES = [0, 0.25, 3, 5, 12, 18, 28, 40];
 const snapRate = (r) => GST_RATES.reduce((a, b) => (Math.abs(b - r) < Math.abs(a - r) ? b : a), 0);
 
 module.exports = { clean, key, pick, hasCol, num, date, iso, stateCode, gstin, gstTreatment, terms, mode, snapRate, round2, GST_RATES };

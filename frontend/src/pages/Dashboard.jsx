@@ -5,6 +5,7 @@ import { useAuth } from "../lib/auth";
 import { money, date } from "../lib/format";
 import { Spinner, Status, invoiceStatus } from "../components/ui";
 import Icon from "../components/Icon";
+import { InsightsCard } from "../components/AskAI";
 
 function compact(n) {
   if (n >= 1e7) return `₹${(n / 1e7).toFixed(1)}Cr`;
@@ -78,6 +79,8 @@ export default function Dashboard() {
           <p className="muted">{organization?.name}</p>
         </div>
       </div>
+
+      {!isNew && <InsightsCard />}
 
       {isNew && (
         <div className="card getting-started">

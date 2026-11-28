@@ -21,6 +21,7 @@ const bankStatementLineSchema = new mongoose.Schema(
       key: { type: String },
       rule: { type: String }, // name of the transaction rule that categorised it
       party: { type: String }, // customer / vendor it was recorded against
+      account: { type: String }, // the ledger (or party:customer:<id>) it was categorised to
     },
     batch: { type: String, default: "" },
     // Added from a bank's transaction alert email (before the statement): replaced by the statement's own line

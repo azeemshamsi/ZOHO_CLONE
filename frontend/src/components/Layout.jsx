@@ -8,6 +8,7 @@ import TallyKeys from "./TallyKeys";
 import { useClickAway } from "./ui";
 import { BackMemory, markJump } from "../lib/backNav";
 import DeviceGate from "./DeviceGate";
+import AskAI from "./AskAI";
 
 const NAV = [
   { to: "/", label: "Home", icon: "home", end: true },
@@ -415,6 +416,7 @@ export default function Layout() {
           )}
         </main>
       </div>
+      {["reports", "sales", "purchases", "banking", "store_orders", "items"].some((m) => can(user, m, "view")) && <AskAI />}
     </div>
   );
 }

@@ -199,7 +199,7 @@ function RuleModal({ open, rule, accounts, banks, onClose, onSaved }) {
           {f.applyTo === "withdrawals" && target?.type === "expense" && (
             <Field label="GST included" hint="Splits out input tax credit">
               <select value={f.taxRate} onChange={(e) => setF({ ...f, taxRate: Number(e.target.value) })}>
-                {[0, 5, 12, 18, 28].map((r) => (
+                {[0, 5, 12, 18, 28, 40].map((r) => (
                   <option key={r} value={r}>
                     {r ? `${r}%` : "None"}
                   </option>
