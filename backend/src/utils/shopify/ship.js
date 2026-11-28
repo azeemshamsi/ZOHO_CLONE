@@ -1176,6 +1176,48 @@ async function pushShopifyEvents(order) {
   }
 }
 
+/**
+ * A status set by hand in OrdexaGo → Shopify: RTO adds a "Delivery failed" event ("RTO initiated by courier") on the
+ * order's fulfilment(s) and the tag "RTO"; Delivered adds a "Delivered" event. Returns a short note.
+ */
+async function pushManualStatus(order, status) {
+  const want = { rto: "FAILURE", delivered: "DELIVERED" }[status];
+  if (!want) return "";
+  if (order.channel && order.channel !== "shopify") return "";
+  if (!String(order.shopifyId || "").startsWith("gid://shopify/Order/")) return "";
+  const store = await ShopifyStore.findOne({ organization: order.organization });
+  if (!store?.connected) return "";
+  const d = await gql(store, `query($id: ID!) { order(id: $id) { tags fulfillments(first: 30) { id status trackingInfo { number } } } }`, { id: order.shopifyId });
+  const fls = (d.order?.fulfillments || []).filter((f) => f.status !== "CANCELLED");
+  const ships = [order.shipment, ...(order.extraShipments || [])].filter((x) => x?.awb);
+  let events = 0;
+  for (const f of fls) {
+    const x = ships.find((y) => (f.trackingInfo || []).some((t) => String(t.number) === String(y.awb)));
+    if (ships.length && !x && fls.length > 1) continue; // another seller's / box's fulfilment
+    if (x && x.shopifyEvent === want) continue;
+    const r = await gql(
+      store,
+      `mutation($e: FulfillmentEventInput!) { fulfillmentEventCreate(fulfillmentEvent: $e) { fulfillmentEvent { id } userErrors { field message } } }`,
+      { e: { fulfillmentId: f.id, status: want, happenedAt: new Date().toISOString(), message: status === "rto" ? "RTO initiated by courier — returning to seller" : "Delivered" } },
+    );
+    const errs = r.fulfillmentEventCreate?.userErrors || [];
+    if (errs.length) throw new Error(errs.map((e) => e.message).join("; "));
+    if (x) x.shopifyEvent = want;
+    events++;
+  }
+  if (status === "rto" && !(d.order?.tags || []).some((t) => /^rto$/i.test(t))) {
+    const r = await gql(store, `mutation($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { message } } }`, { id: order.shopifyId, tags: ["RTO"] });
+    const errs = r.tagsAdd?.userErrors || [];
+    if (errs.length) throw new Error(errs.map((e) => e.message).join("; "));
+  }
+  if (events) {
+    const set = { "shipment.shopifyEvent": order.shipment?.shopifyEvent };
+    if ((order.extraShipments || []).length) set.extraShipments = order.extraShipments;
+    await ShopifyOrder.updateOne({ _id: order._id }, { $set: set });
+  }
+  return status === "rto" ? "Shopify: marked delivery failed (RTO) and tagged RTO" : "Shopify: marked delivered";
+}
+
 // Cancel the order's Shopify fulfilment that carries this AWB. Returns a note for the remarks ("" when nothing to do).
 async function cancelInShopify(order, awb, sh = null) {
   // A box that made no Shopify fulfilment of its own: match by AWB only, never guess (it could be a seller's).
@@ -1381,6 +1423,7 @@ async function reshipOrder(order, user) {
 
 module.exports = {
   reshipOrder,
+  pushManualStatus,
   takesPayment,
   isCodOrder,
   accountForPayment,

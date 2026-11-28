@@ -172,6 +172,7 @@ function ResultsModal({ results, title, onClose }) {
                     r.charge != null ? money(r.charge) : "",
                     r.text,
                     r.warning,
+                    r.note,
                   ]
                     .filter(Boolean)
                     .join(" · ") ||

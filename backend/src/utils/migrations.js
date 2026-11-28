@@ -791,6 +791,25 @@ const MIGRATIONS = [
       console.log(`Migration bank journals → payments: ${done} converted, ${skipped} left as journals`);
     },
   },
+  {
+    // Orders marked RTO by hand (last 45 days) never reached Shopify: add the "delivery failed" event and RTO tag.
+    id: "2026-11-push-manual-rto-to-shopify",
+    run: async () => {
+      const ShopifyOrder = require("../models/ShopifyOrder");
+      const { pushManualStatus } = require("./shopify/ship");
+      const since = new Date(Date.now() - 45 * 86400000);
+      const list = (await ShopifyOrder.find({ status: "rto", statusChangedAt: { $gte: since } })).filter((o) => o.shipment?.awb && o.shipment.shopifyEvent !== "FAILURE");
+      let ok = 0;
+      for (const o of list) {
+        try {
+          if (await pushManualStatus(o, "rto")) ok++;
+        } catch (e) {
+          console.error(`Migration RTO push ${o.name} failed: ${e.message}`);
+        }
+      }
+      console.log(`Migration RTO → Shopify: ${ok} of ${list.length} order(s) updated`);
+    },
+  },
 ];
 
 async function runMigrations() {

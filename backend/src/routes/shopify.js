@@ -1405,7 +1405,13 @@ router.post(
       o.status = d.status;
       o.statusChangedAt = new Date();
       await o.save();
-      results.push({ id: o._id, name: o.name, ok: true });
+      // RTO / Delivered set by hand: tell Shopify too (an event on the fulfilment, the RTO tag).
+      let shopify = "";
+      if (["rto", "delivered"].includes(d.status))
+        shopify = await require("../utils/shopify/ship")
+          .pushManualStatus(o, d.status)
+          .catch((e) => `Shopify not updated: ${e.message}`);
+      results.push({ id: o._id, name: o.name, ok: true, ...(shopify ? { note: shopify } : {}) });
     }
     res.send({ results });
   }),
