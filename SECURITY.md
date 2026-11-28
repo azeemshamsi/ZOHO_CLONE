@@ -58,4 +58,15 @@ Medium → medium, Low → low). A finding that exposes buyer personal data or c
 - Stored third-party credentials (Amazon, Shopify, couriers, GSP, email, Gemini) encrypted with AES-256-GCM
   (`CREDENTIALS_KEY`); never sent to the browser.
 - Amazon buyer data erased 30 days after delivery (see /privacy).
+- Rate limits per IP (in memory): sign-in steps 40 per 10 min, password-reset / sign-up emails 10 per hour,
+  invitation / reset / verify links 60 per 10 min, public forms 30 per hour, the whole API 1,500 per minute; refusals
+  are written to the security log. Loopback (the server itself) is exempt.
+- NoSQL injection: keys starting with `$` are removed from every query string and JSON body before routes run.
+- Reset, verification and invitation tokens are stored only as SHA-256 hashes; reset / verify links expire after
+  1 hour, invitations after 7 days (14 for sellers / subscribers). Emailed links always use APP_URL.
+- Uploaded files open in the browser only when they are images or PDFs; anything else downloads. Seller listing
+  HTML keeps simple tags without attributes.
+- AI (admins only, Gemini): tool results sent to the AI never include phone numbers, emails, addresses or store
+  buyers' names.
+- The app listens on 127.0.0.1 only (`HOST`); nginx terminates HTTPS and redirects HTTP.
 - Encrypted nightly off-site backups to OCI Object Storage (AES-256-GCM with `BACKUP_KEY`), 30 days kept.
