@@ -6,7 +6,6 @@
  * Mail is only read: nothing is deleted, moved or marked as read.
  */
 const BankFeed = require("../models/BankFeed");
-const Account = require("../models/Account");
 const { parseStatement } = require("./statementParse");
 const { importRows } = require("./bankImport");
 
@@ -62,7 +61,8 @@ async function runFeed(feedOrId, { days } = {}) {
       const since = new Date(Date.now() - Math.min(Math.max(back, 1), 60) * 86400000);
       const uids = (await client.search({ since }, { uid: true })) || [];
       const done = new Set(feed.processed || []);
-      const codes = new Set((await Account.find({ organization: feed.organization }, { code: 1 }).lean()).map((a) => a.code));
+      const { chartOfAccounts } = require("./ledger");
+      const codes = new Set((await chartOfAccounts(feed.organization)).filter((a) => ["Cash", "Bank"].includes(a.group)).map((a) => a.code));
       for (const uid of uids.slice(-300)) {
         const head = await client.fetchOne(String(uid), { envelope: true, bodyStructure: true }, { uid: true });
         if (!head) continue;

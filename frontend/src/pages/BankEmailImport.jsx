@@ -43,6 +43,11 @@ export function BankEmailImport() {
   const setRow = (code, k, v) => setF((x) => ({ ...x, rows: x.rows.map((r) => (r.code === code ? { ...r, [k]: v } : r)) }));
 
   const save = async (enabledOverride) => {
+    const missing = f.rows.filter((r) => r.enabled && !r.accountNumber.trim());
+    if (missing.length) {
+      toast(`Enter the account number for ${missing.map((r) => r.name).join(", ")}`, "error");
+      return false;
+    }
     setBusy(true);
     try {
       const { data } = await api.put("/banking/email-feed", {

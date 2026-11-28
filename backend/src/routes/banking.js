@@ -72,7 +72,9 @@ router.put(
     );
     let f = await BankFeed.findOne({ organization: req.org });
     if (!f) f = new BankFeed({ organization: req.org });
-    const bankCodes = new Set((await Account.find({ organization: req.org }, { code: 1 }).lean()).map((a) => a.code));
+    const bankCodes = new Set((await bankAccounts(req.org)).map((a) => a.code));
+    const noNumber = d.accounts.filter((a) => a.enabled && !a.accountNumber);
+    if (noNumber.length) throw new HttpError(400, "Enter the account number for each ticked bank account");
     Object.assign(f, { enabled: d.enabled, host: d.host, port: d.port, user: d.user, senders: d.senders });
     if (d.password) f.imapPass = d.password.replace(/\s+/g, ""); // Gmail shows app passwords in groups of 4
     const pw = { ...(f.filePasswords || {}) };
