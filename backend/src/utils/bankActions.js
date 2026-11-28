@@ -308,4 +308,4 @@ async function applyRules(org, lines) {
   return result;
 }
 
-module.exports = { partyOf, entryKey, usedKeys, candidatesFor, matchLine, context, categorizeLine, undoLine, ruleMatches, applyRules };
+module.exports = { partyPayment, partyOf, entryKey, usedKeys, candidatesFor, matchLine, context, categorizeLine, undoLine, ruleMatches, applyRules };

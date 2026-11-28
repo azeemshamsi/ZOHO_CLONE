@@ -739,6 +739,58 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    // Bank lines categorised to a customer (money in) / vendor (money out) were posted as journals: each becomes a
+    // Customer / Vendor Payment (same date, amount, bank), applied to the oldest unpaid invoices / bills, and the
+    // journal is deleted. Ledger balances stay the same.
+    id: "2026-11-bank-party-journals-to-payments",
+    run: async () => {
+      const BankStatementLine = require("../models/BankStatementLine");
+      const Journal = require("../models/Journal");
+      const Organization = require("../models/Organization");
+      const { partyPayment } = require("./bankActions");
+      const lines = (await BankStatementLine.find({ status: "categorized" })).filter((l) => l.match?.type === "Journal" && l.match?.id && l.match?.party);
+      const orgs = {};
+      let done = 0;
+      let skipped = 0;
+      for (const l of lines) {
+        try {
+          const j = await Journal.findOne({ _id: l.match.id, organization: l.organization }).lean();
+          if (!j) {
+            skipped++;
+            continue;
+          }
+          const pl = (j.lines || []).find((x) => (x.account === "ar" && x.customer) || (x.account === "ap" && x.vendor));
+          if (!pl) {
+            skipped++;
+            continue;
+          }
+          const kind = pl.customer ? "customer" : "vendor";
+          if ((kind === "customer" && !l.deposit) || (kind === "vendor" && !l.withdrawal)) {
+            skipped++; // a refund the other way: stays a journal
+            continue;
+          }
+          const M = require(`../models/${kind === "customer" ? "Customer" : "Vendor"}`);
+          const p = await M.findOne({ _id: pl[kind], organization: l.organization }, { displayName: 1 }).lean();
+          if (!p) {
+            skipped++;
+            continue;
+          }
+          const key = String(l.organization);
+          orgs[key] = orgs[key] || { orgDoc: await Organization.findById(l.organization).lean() };
+          const oldId = l.match.id;
+          const notes = String(j.notes || "").replace(/^Bank:\s*/, "") || l.description;
+          await partyPayment(l.organization, l, { kind, id: p._id, name: p.displayName }, { notes, rule: l.match.rule || "", account: `party:${kind}:${p._id}` }, orgs[key]);
+          await Journal.deleteOne({ _id: oldId, organization: l.organization });
+          done++;
+        } catch (e) {
+          skipped++;
+          console.error(`Migration bank line ${l._id} failed: ${e.message}`);
+        }
+      }
+      console.log(`Migration bank journals → payments: ${done} converted, ${skipped} left as journals`);
+    },
+  },
 ];
 
 async function runMigrations() {
