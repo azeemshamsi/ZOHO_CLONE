@@ -127,11 +127,13 @@ const subJoi = {
 
 // Invite link for a user who hasn't set a password yet (14 days), emailed from the server's email account.
 async function inviteAdmin(req, user, sub, orgName) {
-  user.inviteToken = crypto.randomBytes(24).toString("hex");
+  const rawInvite = crypto.randomBytes(24).toString("hex");
+  user.inviteToken = crypto.createHash("sha256").update(rawInvite).digest("hex"); // only the hash is stored
   user.inviteExpires = new Date(Date.now() + 14 * 86400000);
   await user.save();
-  const base = req.get("origin") || env.APP_URL;
-  const link = `${base.replace(/\/+$/, "")}/invite/${user._id}/${user.inviteToken}`;
+  // Links always point at OrdexaGo's own address, never at a header the request sent.
+  const base = env.APP_URL.startsWith("https://") ? env.APP_URL : req.get("origin") || env.APP_URL;
+  const link = `${base.replace(/\/+$/, "")}/invite/${user._id}/${rawInvite}`;
   let emailed = false;
   try {
     await require("../utils/sendEmail")(

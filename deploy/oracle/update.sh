@@ -22,6 +22,11 @@ if ! sudo grep -qE '^\s*server_tokens\s+off;' /etc/nginx/nginx.conf 2>/dev/null 
   sudo sed -i -E 's/^(\s*)#\s*server_tokens\s+off;/\1server_tokens off;/' /etc/nginx/nginx.conf
   if sudo nginx -t 2>/dev/null; then sudo systemctl reload nginx || true; else sudo sed -i -E 's/^(\s*)server_tokens off;/\1# server_tokens off;/' /etc/nginx/nginx.conf; fi
 fi
+# The app listens only on 127.0.0.1 (nginx is the only way in).
+if [ -f backend/.env ] && ! grep -qE '^HOST=' backend/.env; then
+  [ -n "$(tail -c1 backend/.env)" ] && echo >> backend/.env   # the file may not end with a newline
+  echo "HOST=127.0.0.1" >> backend/.env
+fi
 sudo systemctl daemon-reload || true
 sudo systemctl restart ordexago
 for i in $(seq 1 30); do sleep 2; curl -fsS http://127.0.0.1:8080/api/health >/dev/null && { echo "Updated to $(git log -1 --format='%h %s')"; sudo journalctl -u ordexago --since "-3 hours" --no-pager 2>/dev/null | grep -E "Startup|Migration|failed|Could not|No-discount|\[tracking\]" | tail -200 || true; exit 0; }; done

@@ -24,12 +24,14 @@ async function checkRole(org, role) {
 const pub = (u, m) => ({ _id: u._id, name: u.name, email: u.email, twoFactor: !!u.totp?.enabled, role: m.role, roles: [m.role, ...(m.extraRoles || [])], status: m.status === "invited" || u.status === "invited" ? "invited" : m.status, lastLogin: u.lastLogin, createdAt: m.createdAt });
 
 async function invite(req, user, role) {
-  user.inviteToken = crypto.randomBytes(24).toString("hex");
+  const rawInvite = crypto.randomBytes(24).toString("hex");
+  user.inviteToken = crypto.createHash("sha256").update(rawInvite).digest("hex"); // only the hash is stored
   user.inviteExpires = new Date(Date.now() + 7 * 86400000);
   await user.save();
   // Use the address the admin is on, so the link works whatever APP_URL says.
-  const base = req.get("origin") || (req.get("host") ? `${req.get("x-forwarded-proto") || req.protocol}://${req.get("host")}` : env.APP_URL);
-  const link = `${base.replace(/\/+$/, "")}/invite/${user._id}/${user.inviteToken}`;
+  // Links always point at OrdexaGo's own address, never at a header the request sent.
+  const base = env.APP_URL.startsWith("https://") ? env.APP_URL : req.get("origin") || env.APP_URL;
+  const link = `${base.replace(/\/+$/, "")}/invite/${user._id}/${rawInvite}`;
   const org = await Organization.findById(req.org);
   // Send from the organization's email account (or the server's); if that fails, the admin still gets the link to share.
   let sent = false;

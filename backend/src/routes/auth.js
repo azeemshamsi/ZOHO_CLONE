@@ -19,10 +19,22 @@ const twoFactor = require("../utils/twoFactor");
 // The policy itself is checked by utils/password.js (needs the user's name and email).
 const password = Joi.string().min(1).max(200).required().label("Password");
 
+// Emailed links (verify / reset): only a SHA-256 of the token is stored, so a copy of the database can't be used
+// to open them. Returns { token } = the raw value for the link.
+const sha = (t) => crypto.createHash("sha256").update(String(t || "")).digest("hex");
 async function createToken(userId, purpose) {
   await Token.deleteMany({ userId, purpose });
-  return Token.create({ userId, purpose, token: crypto.randomBytes(32).toString("hex") });
+  const raw = crypto.randomBytes(32).toString("hex");
+  await Token.create({ userId, purpose, token: sha(raw) });
+  return { token: raw };
 }
+// Links sent before tokens were hashed (still valid for up to an hour) match on the raw value.
+const tokenIn = (raw) => ({ $in: [sha(raw), String(raw || "")] });
+const sameSecret = (a, b) => {
+  const x = Buffer.from(String(a || ""));
+  const y = Buffer.from(String(b || ""));
+  return x.length === y.length && x.length > 0 && crypto.timingSafeEqual(x, y);
+};
 
 // Companies this user can open.
 async function companiesOf(user) {
@@ -54,7 +66,7 @@ const ticketFor = (user, stage, wanted) => jwt.sign({ _id: user._id, tv: user.to
 async function fromTicket(ticket, stage) {
   let p;
   try {
-    p = jwt.verify(String(ticket || ""), env.JWT_SECRET);
+    p = jwt.verify(String(ticket || ""), env.JWT_SECRET, { algorithms: ["HS256"] });
   } catch {
     throw new HttpError(401, "This sign-in took too long. Please start again.");
   }
@@ -327,7 +339,8 @@ router.post(
 /* ---------------- invitations, verification, reset ---------------- */
 async function findInvite({ id, token }) {
   const user = await User.findById(id).catch(() => null);
-  if (!user || user.status !== "invited" || !user.inviteToken || user.inviteToken !== token) throw new HttpError(400, "This invitation is invalid or has already been used");
+  // Invitations store a SHA-256 of the token (older ones the token itself).
+  if (!user || user.status !== "invited" || !user.inviteToken || !(sameSecret(user.inviteToken, sha(token)) || sameSecret(user.inviteToken, token))) throw new HttpError(400, "This invitation is invalid or has already been used");
   if (user.inviteExpires && user.inviteExpires < new Date()) throw new HttpError(400, "This invitation has expired. Ask your admin to resend it.");
   return user;
 }
@@ -361,7 +374,7 @@ router.post(
 router.get(
   "/verify/:id/:token",
   ah(async (req, res) => {
-    const token = await Token.findOne({ userId: req.params.id, token: req.params.token, purpose: "verify", createdAt: { $gte: new Date(Date.now() - 3600 * 1000) } });
+    const token = await Token.findOne({ userId: req.params.id, token: tokenIn(req.params.token), purpose: "verify", createdAt: { $gte: new Date(Date.now() - 3600 * 1000) } });
     if (!token) throw new HttpError(400, "This link is invalid or has expired");
     await User.updateOne({ _id: req.params.id }, { verified: true });
     await token.deleteOne();
@@ -391,7 +404,7 @@ router.post(
   "/reset-password/:id/:token",
   ah(async (req, res) => {
     const data = validate(Joi.object({ password }), req.body);
-    const token = await Token.findOne({ userId: req.params.id, token: req.params.token, purpose: "reset", createdAt: { $gte: new Date(Date.now() - 3600 * 1000) } });
+    const token = await Token.findOne({ userId: req.params.id, token: tokenIn(req.params.token), purpose: "reset", createdAt: { $gte: new Date(Date.now() - 3600 * 1000) } });
     if (!token) throw new HttpError(400, "This link is invalid or has expired");
     const user = await User.findById(req.params.id);
     if (!user) throw new HttpError(400, "This link is invalid or has expired");

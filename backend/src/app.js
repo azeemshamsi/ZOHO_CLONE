@@ -17,8 +17,10 @@ app.set("trust proxy", "loopback"); // nginx on the same server sets X-Forwarded
 const env = require("./config/env");
 const origins = [env.APP_URL, env.APP_URL.replace("://", "://www.")];
 // Seller registration form on the store's website (another origin): its own CORS answer, before the app's rule.
+const { limits } = require("./utils/rateLimit");
 app.use(
   "/api/public/seller-register",
+  (req, res, next) => (req.method === "POST" ? limits.publicForm(req, res, next) : next()),
   express.json({ limit: "50kb" }),
   express.text({ type: "text/plain", limit: "50kb" }),
   require("./routes/publicSellers"),
@@ -56,6 +58,7 @@ app.use((req, res, next) => {
     "Permissions-Policy":
       "camera=(self), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
     "Cross-Origin-Resource-Policy": "same-origin",
+    "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
   });
   // API answers (orders, buyer data, labels) are never cached by browsers or proxies.
   if (req.path.startsWith("/api/")) res.set("Cache-Control", "no-store");
@@ -93,6 +96,13 @@ app.use(
   express.json({ limit: "60mb" }),
 );
 app.use(express.json({ limit: "1mb" }));
+// No "$" operator keys in queries / bodies (NoSQL injection), then per-IP rate limits.
+app.use("/api", require("./utils/noOperators").noOperators);
+app.use("/api/auth/login", limits.login);
+app.use(["/api/auth/forgot-password", "/api/auth/signup"], (req, res, next) => (req.method === "POST" ? limits.email(req, res, next) : next()));
+app.use(["/api/auth/invite", "/api/auth/reset-password", "/api/auth/verify"], limits.links);
+app.use("/api/unsubscribe", limits.publicForm);
+app.use("/api", limits.api);
 
 app.get("/api/health", (req, res) => res.send({ ok: true }));
 app.use("/api", require("./utils/audit").trail);

@@ -242,6 +242,17 @@ const stripTags = (h) =>
     .replace(/\s+/g, " ")
     .trim();
 // Description: plain text becomes paragraphs; only simple tags are kept.
+// Keeps only simple formatting tags, with no attributes at all (no onclick=, style=, href=javascript:…).
+function safeHtml(s) {
+  return String(s || "")
+    .replace(/<(script|style|iframe|object|embed|noscript|template|svg|math)[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi, (m, slash, tag) =>
+      /^(p|br|ul|ol|li|b|strong|i|em|u|h[2-6]|table|tr|td|th|tbody|thead|span|div)$/i.test(tag) ? `<${slash}${tag.toLowerCase()}>` : "",
+    )
+    .replace(/<[^>]*$/g, "");
+}
+
 function cleanHtml(h) {
   const s = str(h);
   if (!/<[a-z]/i.test(s))
@@ -252,13 +263,7 @@ function cleanHtml(h) {
           `<p>${p.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c]).replace(/\n/g, "<br>")}</p>`,
       )
       .join("");
-  return s
-    .replace(/<(script|style|iframe|object|embed)[\s\S]*?<\/\1>/gi, "")
-    .replace(
-      /<(?!\/?(p|br|ul|ol|li|b|strong|i|em|h[2-6]|table|tr|td|th|tbody|thead|span)\b)[^>]*>/gi,
-      "",
-    )
-    .replace(/\son\w+="[^"]*"/gi, "");
+  return safeHtml(s);
 }
 
 // Read the uploaded file (base64 .xlsx / .csv) → rows keyed by our column names, with their row numbers.
@@ -916,6 +921,7 @@ const sellerView = (l) => ({
 });
 
 module.exports = {
+  safeHtml,
   COLUMNS,
   HEADERS,
   sampleXlsx,

@@ -3,6 +3,7 @@
  * courier booking, labels and tracking. Mounted at /api/shopify.
  */
 const router = require("express").Router();
+const env = require("../config/env");
 const Joi = require("joi");
 const mongoose = require("mongoose");
 const { ah, validate, HttpError } = require("../utils/http");
@@ -250,9 +251,9 @@ router.put(
     await s.save();
     if (s.connected && (d.inventorySync || credsChanged)) {
       // Real-time order webhooks (needs the public https address of this app).
-      const base =
-        req.get("origin") ||
-        `${req.get("x-forwarded-proto") || req.protocol}://${req.get("host")}`;
+      const base = env.APP_URL.startsWith("https://")
+        ? env.APP_URL
+        : req.get("origin") || `${req.get("x-forwarded-proto") || req.protocol}://${req.get("host")}`;
       require("../utils/shopify/sync")
         .registerWebhooks(s, base)
         .catch(() => {});

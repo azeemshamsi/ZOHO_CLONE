@@ -2606,7 +2606,7 @@ function ListingReview({ listing: l, adminBase, onClose, onDone }) {
             borderRadius: 6,
             padding: 8,
           }}
-          dangerouslySetInnerHTML={{ __html: l.descriptionHtml || "" }}
+          dangerouslySetInnerHTML={{ __html: safeHtml(l.descriptionHtml) }}
         />
         <div className="small muted">
           Tags: {(l.tags || []).join(", ") || "—"} · Packed box {l.size?.length}
@@ -2787,4 +2787,15 @@ function ListingReview({ listing: l, adminBase, onClose, onDone }) {
       </div>
     </Modal>
   );
+}
+
+// Seller descriptions are shown as formatted text: only simple tags, no attributes, no scripts.
+function safeHtml(h) {
+  return String(h || "")
+    .replace(/<(script|style|iframe|object|embed|noscript|template|svg|math)[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<(\/?)([a-z][a-z0-9]*)\b[^>]*>/gi, (m, slash, tag) =>
+      /^(p|br|ul|ol|li|b|strong|i|em|u|h[2-6]|table|tr|td|th|tbody|thead|span|div)$/i.test(tag) ? `<${slash}${tag.toLowerCase()}>` : "",
+    )
+    .replace(/<[^>]*$/g, "");
 }

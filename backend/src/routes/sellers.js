@@ -532,11 +532,13 @@ async function addLogin(req, s, name, rawEmail) {
   let link = "";
   let emailed = false;
   if (user.status === "invited" || user.isNew) {
-    user.inviteToken = crypto.randomBytes(24).toString("hex");
+    const rawInvite = crypto.randomBytes(24).toString("hex");
+    user.inviteToken = crypto.createHash("sha256").update(rawInvite).digest("hex"); // only the hash is stored
     user.inviteExpires = new Date(Date.now() + 14 * 86400000);
     await user.save();
-    const base = req.get("origin") || env.APP_URL;
-    link = `${base.replace(/\/+$/, "")}/invite/${user._id}/${user.inviteToken}`;
+    // Links always point at OrdexaGo's own address, never at a header the request sent.
+    const base = env.APP_URL.startsWith("https://") ? env.APP_URL : req.get("origin") || env.APP_URL;
+    link = `${base.replace(/\/+$/, "")}/invite/${user._id}/${rawInvite}`;
     try {
       await require("../utils/sendEmail")(
         email,

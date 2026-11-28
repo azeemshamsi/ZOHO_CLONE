@@ -62,6 +62,7 @@ if [ ! -f "$ENVF" ]; then
   cat > "$ENVF" <<ENV
 NODE_ENV=production
 PORT=8080
+HOST=127.0.0.1
 MONGODB_URI=$URI
 JWT_SECRET=$(openssl rand -hex 32)
 APP_URL=https://$DOMAIN

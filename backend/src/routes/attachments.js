@@ -65,8 +65,11 @@ router.get(
     const a = await Attachment.findOne({ _id: req.params.id, organization: req.org });
     if (!a) throw new HttpError(404, "File not found");
     need(req, a.docType, "view");
-    res.setHeader("Content-Type", a.type || "application/octet-stream");
-    res.setHeader("Content-Disposition", `${/^(image|application\/pdf)/.test(a.type) ? "inline" : "attachment"}; filename="${encodeURIComponent(a.name)}"`);
+    // Only plain images and PDFs open in the browser; anything else (HTML, SVG, scripts…) downloads, so an uploaded
+    // file can never run in OrdexaGo's pages.
+    const inline = /^(image\/(png|jpe?g|gif|webp|bmp|heic|heif)|application\/pdf)$/i.test(a.type || "");
+    res.setHeader("Content-Type", inline ? a.type : "application/octet-stream");
+    res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(a.name)}"`);
     bucket().openDownloadStream(a.fileId).on("error", () => res.status(404).end()).pipe(res);
   })
 );

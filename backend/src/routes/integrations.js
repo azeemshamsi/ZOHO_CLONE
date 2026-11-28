@@ -250,7 +250,7 @@ publicRouter.get("/google/callback", async (req, res) => {
     if (req.query.error) return back(`google=error&reason=${encodeURIComponent(String(req.query.error).slice(0, 100))}`);
     let st;
     try {
-      st = jwt.verify(String(req.query.state || ""), stateKey());
+      st = jwt.verify(String(req.query.state || ""), stateKey(), { algorithms: ["HS256"] });
     } catch {
       return back("google=error&reason=expired");
     }

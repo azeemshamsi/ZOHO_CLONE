@@ -150,7 +150,19 @@ function secretFields(body, prefix = "", out = []) {
   return out;
 }
 
+const denied = new Map(); // user|path → last logged (one entry per 10 minutes)
 function auto(req, res) {
+  // A signed-in user refused by permissions: worth seeing when someone probes pages they shouldn't.
+  if (res.statusCode === 403 && req.user && !res.locals.audited) {
+    const path = (req.originalUrl || "").split("?")[0];
+    const k = `${req.user._id}|${req.method}|${path.replace(/[0-9a-f]{24}/g, ":id")}`;
+    if (Date.now() - (denied.get(k) || 0) > 10 * 60 * 1000) {
+      denied.set(k, Date.now());
+      if (denied.size > 5000) denied.delete(denied.keys().next().value);
+      log(req, "permission_denied", { target: path, meta: { method: req.method } });
+    }
+    return;
+  }
   if (res.locals.audited || res.statusCode >= 400 || !req.user) return;
   const path = (req.originalUrl || "").split("?")[0];
   if (req.method === "DELETE") return log(req, "delete", { target: path });

@@ -45,6 +45,9 @@ function qs(a, keys) {
 }
 
 // Keep tool results small enough for the model: long lists cut, long text cut, heavy fields dropped.
+// Personal data never goes to the AI provider: phone numbers, emails, addresses, buyer details (Amazon / store
+// buyers especially). Business names and amounts stay.
+const PII = /^(phone|mobile|whatsapp|email|emails|contactPersons?|contacts?|address|addresses|shippingAddress|billingAddress|addressLine\d?|street|pincode|zip|buyer.*|customerEmail|customerPhone|ip|userAgent|note_attributes|noteAttributes|gstinOfBuyer)$/i;
 const DROP = new Set(["__v", "organization", "createdBy", "updatedBy", "attachments", "history", "lines_raw", "raw", "logo", "signature", "image", "images", "html", "pdf", "activity", "comments"]);
 function compact(v, depth = 0) {
   if (Array.isArray(v)) {
@@ -57,7 +60,7 @@ function compact(v, depth = 0) {
     if (depth > 5) return "[…]";
     const o = {};
     for (const [k, x] of Object.entries(v)) {
-      if (DROP.has(k) || x === null || x === "" || (Array.isArray(x) && !x.length)) continue;
+      if (DROP.has(k) || PII.test(k) || x === null || x === "" || (Array.isArray(x) && !x.length)) continue;
       o[k] = compact(x, depth + 1);
     }
     return o;
@@ -77,7 +80,10 @@ function toolsFor(req) {
       const body = await res.json().catch(() => ({}));
       if (res.status === 403) return { error: "This user's role doesn't allow seeing this — say so instead of guessing." };
       if (!res.ok) return { error: body.message || `HTTP ${res.status}` };
-      let out = JSON.stringify(compact(body));
+      let data = body;
+      if (name === "store_orders" && Array.isArray(body?.rows))
+        data = { ...body, rows: body.rows.map(({ customer, customerName, name: _n, shippingAddress, billingAddress, ...r }) => ({ ...r, order: r.name || _n })) };
+      let out = JSON.stringify(compact(data));
       if (out.length > 30000) out = `${out.slice(0, 30000)}… (cut)`;
       return out;
     },

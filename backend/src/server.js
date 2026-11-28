@@ -6,7 +6,9 @@ connectDatabase()
   .then(async () => {
     // Serve straight away; one-time migrations and credential re-encryption run alongside (logged), so a slow
     // database call can't keep the site down.
-    app.listen(env.PORT, () => console.log(`OrdexaGo running on port ${env.PORT}`));
+    // HOST=127.0.0.1 on the server: only nginx (same machine) can reach the app; the internet goes through HTTPS.
+    const host = process.env.HOST || undefined;
+    app.listen(env.PORT, host, () => console.log(`OrdexaGo running on ${host || "all interfaces"}, port ${env.PORT}`));
     const t0 = Date.now();
     console.log("Startup: checking migrations…");
     await require("./utils/migrations")
