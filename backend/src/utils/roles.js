@@ -47,7 +47,7 @@ function expand(perms = {}) {
 
 const ROLES = {
   admin: { label: "Admin", desc: "Full access, including settings and users.", perms: all("full") },
-  accountant: { label: "Accountant", desc: "Everything except company settings, users and store orders.", perms: { ...all("full"), settings: "none", store_orders: "none", store_settings: "view", store_sellers: "view", inbox: "none", marketing: "none" } },
+  accountant: { label: "Accountant", desc: "Everything except company settings, users and the Store (orders, shipping, returns, sellers).", perms: { ...all("full"), settings: "none", store_orders: "none", store_shipping: "none", store_returns: "none", store_settings: "none", store_sellers: "none", tickets: "none", inbox: "none", marketing: "none" } },
   staff: { label: "Staff", desc: "Sales, purchases, items, inventory, GST documents, the store and the Inbox. Can view reports.", perms: { ...all("full"), banking: "none", accountant: "none", reports: "view", settings: "none", store_settings: "none", store_sellers: "none", marketing: "none" } },
   sales: { label: "Sales Staff", desc: "Customers, quotes, sales orders, invoices, payments, store orders and the Inbox.", perms: { ...all("none"), sales: "full", items: "view", store_orders: "full", inbox: "full" } },
   order_taker: { label: "Order Taker", desc: "Creates new orders in Shopify and follows up abandoned checkouts; sees store orders but can't change, ship or cancel them.", perms: { ...all("none"), store_orders: "view", "store_orders.new_order": "full", "store_orders.abandoned": "full", items: "view" }, home: "/shopify-orders" },
