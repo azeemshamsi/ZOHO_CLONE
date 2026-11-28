@@ -102,4 +102,4 @@ async function answer(req, org, history) {
   return chat(org, { system: systemPrompt(req, org.name || "the company"), history, tools: toolsFor(req) });
 }
 
-module.exports = { answer, compact };
+module.exports = { answer, compact, toolsFor };

@@ -61,10 +61,47 @@ router.get(
     const key = `${req.org}|${req.user._id}|${day}`;
     const hit = insightCache.get(key);
     if (hit && !req.query.refresh) return res.send(hit);
-    const prompt = `Give me today's business briefing: the 4–7 things that most need my attention right now, most important first.
-Look at: overdue receivables (biggest customers / marketplaces owing), payables falling due, cash and bank position, this month's sales and expenses compared with last month (call out unusual jumps), store orders pending dispatch and RTO / returns in the last 30 days (by courier if one stands out), and items running out of stock if you can see stock.
-Format: a one-line headline, then short bullet points, each with the number and what to do. No preamble. Skip anything you couldn't see.`;
-    const r = await assistant.answer(req, await orgOf(req), [{ role: "user", text: prompt }]);
+    // The data is gathered here in one go (fast, no back-and-forth), then Gemini writes the briefing once.
+    const now = new Date(Date.now() + 5.5 * 3600000);
+    const d0 = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
+    const Y = now.getUTCFullYear();
+    const M = now.getUTCMonth();
+    const today = now.toISOString().slice(0, 10);
+    const ago30 = new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10);
+    const tools = Object.fromEntries(assistant.toolsFor(req).map((t) => [t.name, t]));
+    const want = [
+      ["Dashboard", "dashboard", {}],
+      ["Receivables by customer", "receivables_by_customer", {}],
+      ["Payables by vendor", "payables_by_vendor", {}],
+      ["Expenses this month", "expenses_by_category", { from: d0(Y, M, 1), to: today }],
+      ["Expenses last month", "expenses_by_category", { from: d0(Y, M - 1, 1), to: d0(Y, M, 0) }],
+      ["Top items this month", "sales_by_item", { from: d0(Y, M, 1), to: today }],
+      ["Store orders, last 30 days (counts per status)", "store_orders", { from: ago30, to: today }],
+      ["Bank accounts", "bank_accounts", {}],
+    ];
+    const parts = await Promise.all(
+      want.map(async ([title, name, args]) => {
+        const r = await tools[name].run(args).catch((e) => ({ error: e.message }));
+        if (r && r.error) return "";
+        let t = typeof r === "string" ? r : JSON.stringify(r);
+        if (name === "store_orders") t = t.replace(/"rows":\[.*?\],"total"/s, '"total"'); // counts are enough here
+        return `### ${title}\n${t.slice(0, 12000)}`;
+      }),
+    );
+    const data = parts.filter(Boolean).join("\n\n");
+    if (!data) throw new HttpError(403, "Your role can't see the data a briefing needs");
+    const org = await orgOf(req);
+    const text = await ask(
+      org,
+      `Today is ${today} (IST). Below is ${org.name || "the company"}'s data from OrdexaGo (Indian business; amounts in INR).
+Write today's business briefing: a one-line headline, then 4–7 short bullet points, most important first, each with the number and what to do.
+Cover what matters among: overdue receivables (biggest customers / marketplaces), payables to pay, cash & bank position, this month's expenses vs last month (only unusual jumps), store orders pending dispatch and RTO / returns (by courier if one stands out), best sellers.
+Use only these numbers; write amounts like ₹1,23,456. No preamble, no closing line.
+
+${data}`,
+      { temperature: 0.3, maxTokens: 1500 },
+    );
+    const r = { text };
     const out = { at: new Date(), text: r.text };
     insightCache.set(key, out);
     if (insightCache.size > 500) insightCache.delete(insightCache.keys().next().value);

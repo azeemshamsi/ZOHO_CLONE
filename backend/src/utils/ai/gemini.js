@@ -4,7 +4,9 @@
  * (function calling): Gemini asks for data, we run the tool and hand the result back, until it answers.
  */
 const BASE = () => (process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com").replace(/\/$/, "");
-const MODELS = ["gemini-flash-latest", "gemini-2.5-flash"];
+// Tried in order: the company's chosen model first, then these. A busy / overloaded model (503, 500, 429 "high
+// demand") is retried once after a short wait and then the next model is used.
+const MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite"];
 
 const keyOf = (org) => org?.ai?.geminiKey || process.env.GEMINI_API_KEY || "";
 
@@ -15,31 +17,46 @@ class AiError extends Error {
   }
 }
 
-async function call(org, body, { timeout = 60000 } = {}) {
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function call(org, body, { timeout = 75000, deadline = Date.now() + 150000 } = {}) {
   const key = keyOf(org);
   if (!key) throw new AiError("Add your Google Gemini API key in Settings → Integrations to use AI");
-  const pref = org.ai?.model || org.ai?.resolvedModel || process.env.GEMINI_MODEL || "";
+  const pref = org.ai?.model || process.env.GEMINI_MODEL || "";
+  const models = [...new Set([pref, org.ai?.resolvedModel, ...MODELS].filter(Boolean))];
   let last = "";
-  for (const m of pref ? [pref, ...MODELS.filter((x) => x !== pref)] : MODELS) {
-    let res;
-    try {
-      res = await fetch(`${BASE()}/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeout),
-      });
-    } catch (e) {
-      throw new AiError(e.name === "TimeoutError" ? "Gemini took too long to answer — try again" : `Couldn't reach Gemini: ${e.message}`, 504);
+  let busy = false;
+  for (const m of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const left = deadline - Date.now();
+      if (left < 5000) throw new AiError(busy ? "Gemini is very busy right now — please try again in a minute" : "Gemini took too long to answer — try again", 503);
+      let res;
+      try {
+        res = await fetch(`${BASE()}/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-goog-api-key": key },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(Math.min(timeout, left)),
+        });
+      } catch (e) {
+        last = e.name === "TimeoutError" ? "no answer in time" : e.message;
+        busy = true;
+        break; // next model
+      }
+      const j = await res.json().catch(() => ({}));
+      if (res.ok) return j;
+      last = j.error?.message || `HTTP ${res.status}`;
+      if (res.status === 400 && /api key/i.test(last)) throw new AiError("Gemini rejected the API key — check it in Settings → Integrations");
+      if (res.status === 403) throw new AiError(`Gemini refused the request: ${last}`, 403);
+      if (res.status === 404) break; // model not available on this key: next one
+      const overloaded = res.status === 503 || res.status === 500 || res.status === 502 || res.status === 504 || (res.status === 429 && /demand|overload|unavailable/i.test(last));
+      if (res.status === 429 && !overloaded) throw new AiError("Your Gemini key's usage limit was reached for now — try again in a minute, or raise the limit in Google AI Studio", 429);
+      if (!overloaded) throw new AiError(`Gemini error: ${last}`, 502);
+      busy = true;
+      if (attempt === 0) await wait(2000);
     }
-    const j = await res.json().catch(() => ({}));
-    if (res.ok) return j;
-    last = j.error?.message || `HTTP ${res.status}`;
-    if (res.status === 400 && /api key/i.test(last)) throw new AiError("Gemini rejected the API key — check it in Settings → Integrations");
-    if (res.status === 429) throw new AiError("Gemini's usage limit was reached for now — try again in a minute (or raise the limit on your Google AI Studio key)", 429);
-    if (res.status !== 404) break;
   }
-  throw new AiError(`Gemini error: ${last}`, 502);
+  throw new AiError(busy ? "Gemini is very busy right now — please try again in a minute" : `Gemini error: ${last}`, 503);
 }
 
 const textOf = (j) => (j.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || "").join("").trim();
@@ -68,13 +85,14 @@ async function chat(org, { system, history, tools, maxSteps = 8 }) {
   const contents = history.map((m) => ({ role: m.role === "model" ? "model" : "user", parts: [{ text: String(m.text || "").slice(0, 4000) }] }));
   const decl = tools.map(({ name, description, parameters }) => ({ name, description, ...(parameters ? { parameters } : {}) }));
   const used = [];
+  const deadline = Date.now() + 160000; // the whole conversation turn (the web server waits 180 s)
   for (let step = 0; step < maxSteps; step++) {
     const j = await call(org, {
       systemInstruction: { parts: [{ text: system }] },
       contents,
       tools: [{ functionDeclarations: decl }],
       generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
-    });
+    }, { deadline });
     const content = j.candidates?.[0]?.content;
     const parts = content?.parts || [];
     const calls = parts.filter((p) => p.functionCall);
