@@ -1110,6 +1110,48 @@ router.get(
   }),
 );
 
+/* ---------------- COD pending with couriers ---------------- */
+const COD = () => require("../utils/shopify/codPending");
+router.get(
+  "/cod",
+  ah(async (req, res) => res.send(await COD().report(req.storeOrg, req.query))),
+);
+router.get(
+  "/cod/export",
+  ah(async (req, res) => {
+    const rep = await COD().report(req.storeOrg, req.query);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="cod-pending-${new Date(Date.now() + 19800000).toISOString().slice(0, 10)}.xlsx"`);
+    res.send(COD().toExcel(rep, req.query));
+  }),
+);
+router.post(
+  "/cod/remit",
+  ah(async (req, res) => {
+    const d = validate(
+      Joi.object({
+        ids: Joi.array().items(Joi.string().hex().length(24)).min(1).max(5000).required(),
+        date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).allow(""),
+        ref: Joi.string().allow("").max(100).default(""),
+        undo: Joi.boolean().default(false),
+      }),
+      req.body,
+    );
+    res.send(await COD().markReceived(req.storeOrg, req.user, d));
+  }),
+);
+router.post(
+  "/cod/import",
+  ah(async (req, res) => {
+    const d = validate(Joi.object({ name: Joi.string().max(200).required(), data: Joi.string().max(25000000).required() }), req.body);
+    try {
+      res.send(await COD().importRemittance(req.storeOrg, req.user, Buffer.from(d.data, "base64"), d.name));
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+  }),
+);
+
 /* ---------------- manifests (courier handover) ---------------- */
 const MF = () => require("../utils/shopify/manifest");
 router.get(
@@ -3063,6 +3105,7 @@ router.moduleOf = function (req) {
   if (/^\/new-order/.test(p)) return "store_orders.new_order";
   if (/^\/abandoned-checkouts/.test(p)) return "store_orders.abandoned";
   // Handover scan: shipping, or the scan-only permission (AWB Scan role).
+  if (/^\/cod(\/|$)/.test(p)) return "store_cod";
   if (/^\/manifests/.test(p)) return ["store_shipping", "store_shipping.manifest"];
   if (p === "/orders/awb-scan" || p === "/orders/awb-scans") return ["store_shipping", "store_shipping.awb_scan"];
   if (p === "/orders/awb-scan-channels") return ["store_shipping", "store_shipping.awb_scan", "store_shipping.manifest"];

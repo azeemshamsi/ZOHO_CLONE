@@ -80,7 +80,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {!isNew && <InsightsCard />}
+      {!isNew && (user?.role === "admin" || user?.superadmin) && <InsightsCard />}
 
       {isNew && (
         <div className="card getting-started">

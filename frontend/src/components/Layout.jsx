@@ -62,13 +62,14 @@ const NAV = [
   {
     label: "Store",
     icon: "bag",
-    mod: ["store_orders", "store_shipping", "store_shipping.awb_scan", "store_shipping.manifest", "store_returns", "store_settings", "store_sellers", "tickets"],
+    mod: ["store_orders", "store_shipping", "store_shipping.awb_scan", "store_shipping.manifest", "store_cod", "store_returns", "store_settings", "store_sellers", "tickets"],
     children: [
       { to: "/shopify-orders", label: "Orders", mod: ["store_orders", "store_shipping"] },
       { to: "/awb-scan", label: "Scan AWB", mod: ["store_shipping", "store_shipping.awb_scan"] },
       { to: "/manifests", label: "Manifests", mod: ["store_shipping", "store_shipping.manifest"] },
       { to: "/abandoned-checkouts", label: "Abandoned Checkouts", mod: "store_orders.abandoned" },
       { to: "/returns-scan", label: "Scan Returns", mod: "store_returns" },
+      { to: "/cod-pending", label: "COD Pending", mod: "store_cod" },
       { to: "/package-types", label: "Package Types", mod: ["store_shipping", "store_settings", "store_orders"] },
       { to: "/shipping-calculator", label: "Shipping Calculator", mod: ["store_shipping", "store_settings", "store_orders"] },
       { to: "/sellers", label: "Sellers", mod: "store_sellers" },
@@ -149,6 +150,7 @@ const PATH_MODULES = [
   ["/returns-scan", "store_returns"],
   ["/awb-scan", ["store_shipping", "store_shipping.awb_scan"]],
   ["/manifests", ["store_shipping", "store_shipping.manifest"]],
+  ["/cod-pending", "store_cod"],
   ["/package-types", ["store_shipping", "store_settings", "store_orders"]],
   ["/shipping-calculator", ["store_shipping", "store_settings", "store_orders"]],
   ["/sellers", "store_sellers"],
@@ -416,7 +418,7 @@ export default function Layout() {
           )}
         </main>
       </div>
-      {["reports", "sales", "purchases", "banking", "store_orders", "items"].some((m) => can(user, m, "view")) && <AskAI />}
+      {(user?.role === "admin" || user?.superadmin) && <AskAI />}
     </div>
   );
 }

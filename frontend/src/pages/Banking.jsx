@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "../lib/auth";
 import api, { errMsg } from "../lib/api";
 import { money, date, isoDate } from "../lib/format";
 import { parseBankDate, parseAmount, guessColumns, findHeaderRow } from "../lib/csv";
@@ -796,6 +797,8 @@ const STATUS_TABS = [
 ];
 
 export function BankAccountPage() {
+  const { user: me } = useAuth();
+  const aiOk = me?.role === "admin" || me?.superadmin;
   const { code } = useParams();
   const [acc, setAcc] = useState(null);
   const [accounts, setAccounts] = useState([]);
@@ -961,7 +964,7 @@ export function BankAccountPage() {
             Apply Rules
           </button>
         )}
-        {acc.statement.unmatched > 0 && (
+        {aiOk && acc.statement.unmatched > 0 && (
           <button className="btn" disabled={aiBusy} onClick={() => aiSuggest()} title="AI suggests a ledger or party for unmatched lines (up to 40 at a time), learning from what you picked before">
             {aiBusy ? "AI is thinking…" : "✨ AI Suggest"}
           </button>
@@ -1059,9 +1062,11 @@ export function BankAccountPage() {
                   <button className="btn btn-sm" disabled={bulkBusy} onClick={() => runRules(pickedUnmatched.map((l) => l._id))}>
                     Apply Rules
                   </button>
-                  <button className="btn btn-sm" disabled={aiBusy} onClick={() => aiSuggest(pickedUnmatched.map((l) => l._id).slice(0, 60))}>
-                    ✨ AI Suggest
-                  </button>
+                  {aiOk && (
+                    <button className="btn btn-sm" disabled={aiBusy} onClick={() => aiSuggest(pickedUnmatched.map((l) => l._id).slice(0, 60))}>
+                      ✨ AI Suggest
+                    </button>
+                  )}
                   <button className="btn btn-sm" disabled={bulkBusy} onClick={() => bulk("exclude")}>
                     Exclude
                   </button>

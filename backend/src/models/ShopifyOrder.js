@@ -91,6 +91,8 @@ const shopifyOrderSchema = new mongoose.Schema(
     tax: Number,
     total: Number, // current total (after edits/refunds)
     outstanding: Number,
+    // COD / part-paid amount the courier paid us (Store → COD Pending): when, reference (UTR / remittance no.), amount.
+    codRemit: { type: mongoose.Schema.Types.Mixed },
     lines: [lineSchema],
     shopifyFulfillments: [
       { _id: false, company: String, number: String, url: String },

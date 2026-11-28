@@ -15,6 +15,7 @@ const MODULES = [
   ["store_orders", "Store: Orders", "Shopify orders, statuses, invoices from orders"],
   ["store_shipping", "Store: Shipping", "Book couriers, labels, tracking"],
   ["store_returns", "Store: Returns", "Mark returns and scan returned parcels"],
+  ["store_cod", "Store: COD Pending", "COD and part-paid orders: amount pending with couriers, remittances received, Excel report"],
   ["store_settings", "Store: Settings", "Shopify connection, couriers, GST rules"],
   ["store_sellers", "Store: Sellers", "Marketplace sellers, their logins and pickups, deductions, monthly purchase orders"],
   ["tickets", "Store: Seller Tickets", "Sellers' support tickets: answer, assign, resolve"],
@@ -47,7 +48,7 @@ function expand(perms = {}) {
 
 const ROLES = {
   admin: { label: "Admin", desc: "Full access, including settings and users.", perms: all("full") },
-  accountant: { label: "Accountant", desc: "Everything except company settings, users and the Store (orders, shipping, returns, sellers).", perms: { ...all("full"), settings: "none", store_orders: "none", store_shipping: "none", store_returns: "none", store_settings: "none", store_sellers: "none", tickets: "none", inbox: "none", marketing: "none" } },
+  accountant: { label: "Accountant", desc: "Everything except company settings, users and the Store (orders, shipping, returns, sellers).", perms: { ...all("full"), settings: "none", store_orders: "none", store_shipping: "none", store_returns: "none", store_cod: "none", store_settings: "none", store_sellers: "none", tickets: "none", inbox: "none", marketing: "none" } },
   staff: { label: "Staff", desc: "Sales, purchases, items, inventory, GST documents, the store and the Inbox. Can view reports.", perms: { ...all("full"), banking: "none", accountant: "none", reports: "view", settings: "none", store_settings: "none", store_sellers: "none", marketing: "none" } },
   sales: { label: "Sales Staff", desc: "Customers, quotes, sales orders, invoices, payments, store orders and the Inbox.", perms: { ...all("none"), sales: "full", items: "view", store_orders: "full", inbox: "full" } },
   order_taker: { label: "Order Taker", desc: "Creates new orders in Shopify and follows up abandoned checkouts; sees store orders but can't change, ship or cancel them.", perms: { ...all("none"), store_orders: "view", "store_orders.new_order": "full", "store_orders.abandoned": "full", items: "view" }, home: "/shopify-orders" },
@@ -60,6 +61,7 @@ const ROLES = {
   stock_room: { label: "Stock Room", desc: "Only the Stock Room: product photos with stock on hand and their recent ins and outs.", perms: { ...all("none"), stock_room: "view" }, home: "/stock-room" },
   awb_scan: { label: "AWB Scan", desc: "Only scans parcels' AWBs at handover to the courier (Store → Scan AWB). Sees nothing else.", perms: { ...all("none"), "store_shipping.awb_scan": "full" }, home: "/awb-scan" },
   manifest: { label: "Manifest Desk", desc: "Only creates, sees and downloads courier manifests (Store → Manifests). Sees nothing else.", perms: { ...all("none"), "store_shipping.manifest": "full" }, home: "/manifests" },
+  cod_desk: { label: "COD Desk", desc: "Only Store → COD Pending: COD / part-paid amounts pending with couriers, marking remittances received, Excel report.", perms: { ...all("none"), "store_cod": "full" }, home: "/cod-pending" },
   returns: { label: "Returns Desk", desc: "Only scans and closes returned parcels.", perms: { ...all("none"), store_returns: "full" }, home: "/returns-scan" },
   seller: { label: "Seller", desc: "A marketplace seller: only their own orders, labels, stock and purchase orders (Store → Sellers).", perms: all("none"), home: "/seller", hidden: true },
   viewer: { label: "View Only", desc: "Can see everything except settings, can't change anything.", perms: { ...all("view"), settings: "none", store_settings: "none", marketing: "none" } },

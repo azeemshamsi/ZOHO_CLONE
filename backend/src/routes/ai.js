@@ -31,6 +31,12 @@ const has = (req, mod, need = "view") => {
   return req.user?.superadmin || req.user?.role === "admin" || rank[req.perms?.[mod] || "none"] >= rank[need];
 };
 
+// AI is for admins only.
+router.use((req, res, next) => {
+  if (req.user?.superadmin || req.user?.role === "admin") return next();
+  res.status(403).send({ message: "AI features are for admins only" });
+});
+
 /* ---------- Ask OrdexaGo ---------- */
 router.post(
   "/ask",

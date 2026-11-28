@@ -573,6 +573,7 @@ function ShopifyLinks({ itemId }) {
 
 // ✨ AI: description, HSN code and GST rate suggested from the item's name (the user reviews before saving).
 function AiItemHelp({ form, setForm }) {
+  const { user } = useAuth();
   const [busy, setBusy] = useState(false);
   const [s, setS] = useState(null);
   const run = async () => {
@@ -595,6 +596,7 @@ function AiItemHelp({ form, setForm }) {
     }));
     toast("Filled in — check it before saving");
   };
+  if (!(user?.role === "admin" || user?.superadmin)) return null; // AI is for admins
   return (
     <div style={{ border: "1px dashed var(--border, #d1d5db)", borderRadius: 8, padding: "8px 12px", fontSize: 13.5 }}>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

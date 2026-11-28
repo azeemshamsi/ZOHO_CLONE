@@ -75,6 +75,7 @@ app.use(
 app.use("/api/inbox/conversations", express.json({ limit: "25mb" }));
 app.use("/api/import", express.json({ limit: "80mb" }));
 app.use("/api/shopify/new-order", express.json({ limit: "40mb" }));
+app.use("/api/shopify/cod/import", express.json({ limit: "30mb" }));
 app.use(
   [
     "/api/attachments",
