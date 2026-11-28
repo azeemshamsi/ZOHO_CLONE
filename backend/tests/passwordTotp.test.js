@@ -110,7 +110,8 @@ test("the superadmin / admins need a session that passed two-step login", async 
 
 test("staff without store roles don't need two-step login; warehouse staff do", async () => {
   const u = mkUser({ superadmin: false });
-  assert.equal((await run(u.generateAuthToken(false), u, { organization: u.organization, role: "accountant", status: "active" })).status, 401, "accountant has store orders (full)");
+  assert.equal((await run(u.generateAuthToken(false), u, { organization: u.organization, role: "staff", status: "active" })).status, 401, "staff has store orders (full)");
+  assert.equal((await run(u.generateAuthToken(false), u, { organization: u.organization, role: "accountant", status: "active" })).status, 200, "accountant has no store access");
   assert.equal((await run(u.generateAuthToken(false), u, { organization: u.organization, role: "returns", status: "active" })).status, 200);
   assert.equal((await run(u.generateAuthToken(false), u, { organization: u.organization, role: "warehouse", status: "active" })).status, 401);
 });
