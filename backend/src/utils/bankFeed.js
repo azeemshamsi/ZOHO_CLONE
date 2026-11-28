@@ -79,6 +79,7 @@ async function runFeed(feedOrId, { days } = {}) {
         const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
         const mail = await simpleParser(msg.source);
         const files = (mail.attachments || []).filter((a) => /\.(csv|txt|xls|xlsx|xlsm|pdf)$/i.test(a.filename || "") || /csv|excel|spreadsheet|pdf/i.test(a.contentType || ""));
+        let retry = false; // not set up yet / wrong password: try this email again on the next check
         for (const f of files) {
           const base = { at: new Date(), mailAt: env.date, from, subject: String(env.subject || "").slice(0, 150), file: f.filename || "" };
           try {
@@ -90,11 +91,12 @@ async function runFeed(feedOrId, { days } = {}) {
             const r = st.rows.length ? await importRows(feed.organization, acc.code, st.rows) : { imported: 0, skipped: 0, ignored: 0, rules: 0 };
             results.push({ ...base, account: acc.code, accountNumber: st.accountNumber, lines: st.rows.length, imported: r.imported, skipped: r.skipped, rules: r.rules?.categorized || 0 });
           } catch (e) {
-            results.push({ ...base, error: e.message });
+            if (/isn't set up|password/i.test(e.message)) retry = true;
+            if (!(feed.log || []).some((l) => l.error === e.message && l.file === base.file && String(l.subject) === base.subject)) results.push({ ...base, error: e.message });
           }
         }
         if (!files.length) results.push({ at: new Date(), mailAt: env.date, from, subject: String(env.subject || "").slice(0, 150), error: "No CSV / Excel statement attached" });
-        done.add(id);
+        if (!retry) done.add(id);
       }
       feed.processed = [...done].slice(-2000);
     } finally {
