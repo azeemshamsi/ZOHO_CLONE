@@ -722,6 +722,23 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    // Accountants don't use the Store: companies' edited copies of the Accountant role lose all Store access too.
+    id: "2026-11-accountant-no-store",
+    run: async () => {
+      const Role = require("../models/Role");
+      const { ALL_KEYS, forgetOverrides } = require("./roles");
+      const STORE = ALL_KEYS.filter((k) => /^store_|^tickets/.test(k));
+      const roles = (await Role.find({}).lean()).filter((r) => r.builtin === "accountant" || (!r.builtin && /^accountants?$/i.test(String(r.name || "").trim())));
+      for (const r of roles) {
+        const perms = { ...(r.perms || {}) };
+        for (const k of STORE) perms[k] = "none";
+        await Role.updateOne({ _id: r._id }, { $set: { perms } });
+        forgetOverrides(r.organization);
+        console.log(`Role "${r.name}" (${r.builtin || "custom"}): Store access removed`);
+      }
+    },
+  },
 ];
 
 async function runMigrations() {
